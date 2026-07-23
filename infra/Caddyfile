@@ -1,0 +1,15 @@
+{$YUNO_DOMAIN} {
+  encode gzip zstd
+
+  handle_path /api/* {
+    reverse_proxy api:8000
+  }
+
+  handle_path /auth/* {
+    reverse_proxy api:8000
+  }
+
+  handle {
+    reverse_proxy dashboard:80
+  }
+}

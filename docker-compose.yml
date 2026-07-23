@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: yuno
+      POSTGRES_USER: yuno
+      POSTGRES_PASSWORD: yuno
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yuno -d yuno"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+  api:
+    build:
+      context: ./backend
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "8000:8000"
+
+  bot:
+    build:
+      context: ./bot
+    env_file: .env
+    depends_on:
+      api:
+        condition: service_started
+
+  dashboard:
+    build:
+      context: ./dashboard
+      args:
+        VITE_API_BASE_URL: ${API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "5173:80"
+
+  caddy:
+    image: caddy:2-alpine
+    env_file: .env
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - api
+      - dashboard
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
