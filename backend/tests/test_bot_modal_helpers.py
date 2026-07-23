@@ -14,7 +14,7 @@ from yuno_bot.commands.encomenda.embeds import build_encomenda_payload
 from yuno_bot.commands.meta.embeds import build_meta_payload
 from yuno_bot.commands.parceria.embeds import build_parceria_payload
 from yuno_bot.commands.producao.embeds import build_producao_payload
-from yuno_bot.commands.set.embeds import build_set_panel_config, build_set_payload
+from yuno_bot.commands.set.embeds import build_set_panel_config, build_set_payload, panel_embed
 from yuno_bot.commands.shared import log_channel_id_from_setup, parse_positive_int, send_module_log
 from yuno_bot.server_setup import SETUP_LOG_CHANNELS, build_setup_config
 
@@ -103,6 +103,16 @@ def test_set_panel_config_saves_channels_roles_and_message() -> None:
     assert config["command_permissions"]["set.reprovar"]["role_ids"] == ["99"]
     assert config["settings"]["set"]["approved_role_id"] == "100"
     assert config["settings"]["set"]["panel_message_id"] == "1234"
+
+
+def test_set_panel_embed_copy_matches_requested_layout() -> None:
+    embed = panel_embed("Cidade Setup")
+    data = embed.to_dict()
+    assert "Bem-vindo" not in data["title"]
+    assert "Tempo medio" not in data["description"]
+    assert "Tempo médio" not in data["description"]
+    assert "Importante" in data["description"]
+    assert "Pedir Set" in data["description"]
 
 
 def test_parse_positive_int_rejects_invalid_values() -> None:

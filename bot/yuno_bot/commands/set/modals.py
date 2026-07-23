@@ -8,9 +8,9 @@ from yuno_bot.commands.set.views import SetApprovalView
 from yuno_bot.commands.shared import create_record, parse_positive_int, send_module_log, send_to_setup_channel
 
 
-class SetSolicitarModal(discord.ui.Modal, title="Solicitacao de Set"):
-    id_fivem = discord.ui.TextInput(label="ID no Jogo", placeholder="Ex: 12345", max_length=20)
-    nome = discord.ui.TextInput(label="Nome do Membro", placeholder="Ex: Joao Silva", max_length=32)
+class SetSolicitarModal(discord.ui.Modal, title="📝 Solicitação de Set"):
+    id_fivem = discord.ui.TextInput(label="ID no Jogo", placeholder="🎮 Ex: 12345", max_length=20)
+    nome = discord.ui.TextInput(label="Nome do Membro", placeholder="👤 Ex: Joao Silva", max_length=32)
 
     def __init__(self, api: YunoAPI):
         super().__init__()

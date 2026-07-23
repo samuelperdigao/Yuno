@@ -59,6 +59,10 @@ class SetCog(commands.Cog):
         ):
             await deny(interaction, "voce precisa ter permissao de gerenciar servidor.")
             return
+        bot_member = interaction.guild.me
+        if not bot_member or not bot_member.guild_permissions.manage_channels:
+            await deny(interaction, "eu preciso da permissao Gerenciar Canais para restringir as abas do Yuno.")
+            return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
 
@@ -78,6 +82,12 @@ class SetCog(commands.Cog):
         if not panel_message:
             await interaction.followup.send("Nao consegui publicar o painel no canal informado.", ephemeral=True)
             return
+        permission_warnings = await self._apply_set_visibility(
+            interaction.guild,
+            panel_channel=canal_solicitacao,
+            approval_channel=canal_aprovacao,
+            approval_role=cargo_aprovador,
+        )
 
         updated_config = build_set_panel_config(
             current_config,
@@ -101,6 +111,8 @@ class SetCog(commands.Cog):
                     f"Aprovacao: {canal_aprovacao.mention}",
                     f"Aprovadores: {cargo_aprovador.mention}",
                     f"Cargo aprovado: {cargo_aprovado.mention}",
+                    f"Visibilidade: membros novos veem apenas {canal_solicitacao.mention}.",
+                    *permission_warnings,
                 ]
             ),
             ephemeral=True,
@@ -130,3 +142,68 @@ class SetCog(commands.Cog):
             return await panel_channel.send(embed=embed, view=view, allowed_mentions=discord.AllowedMentions.none())
         except discord.HTTPException:
             return None
+
+    async def _apply_set_visibility(
+        self,
+        guild: discord.Guild,
+        *,
+        panel_channel: discord.TextChannel,
+        approval_channel: discord.TextChannel,
+        approval_role: discord.Role,
+    ) -> list[str]:
+        warnings: list[str] = []
+        default_role = guild.default_role
+
+        for category in guild.categories:
+            try:
+                await category.set_permissions(
+                    default_role,
+                    overwrite=discord.PermissionOverwrite(view_channel=False),
+                    reason="Yuno painel de set: restringir entrada de membros",
+                )
+            except discord.HTTPException:
+                warnings.append(f"Aviso: nao consegui restringir a categoria {category.name}.")
+
+        channels = self._resolve_member_gate_channels(guild, panel_channel, approval_channel)
+        for channel in channels:
+            try:
+                if channel.id == panel_channel.id:
+                    await channel.set_permissions(
+                        default_role,
+                        overwrite=discord.PermissionOverwrite(view_channel=True, send_messages=False, read_message_history=True),
+                        reason="Yuno painel de set: liberar solicitacao para membros",
+                    )
+                    continue
+                await channel.set_permissions(
+                    default_role,
+                    overwrite=discord.PermissionOverwrite(view_channel=False),
+                    reason="Yuno painel de set: restringir entrada de membros",
+                )
+            except discord.HTTPException:
+                warnings.append(f"Aviso: nao consegui ajustar permissoes em {channel.name}.")
+
+        try:
+            await approval_channel.set_permissions(
+                approval_role,
+                overwrite=discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+                reason="Yuno painel de set: liberar aprovadores",
+            )
+        except discord.HTTPException:
+            warnings.append(f"Aviso: nao consegui liberar {approval_role.mention} em {approval_channel.mention}.")
+
+        return warnings
+
+    def _resolve_member_gate_channels(
+        self,
+        guild: discord.Guild,
+        panel_channel: discord.TextChannel,
+        approval_channel: discord.TextChannel,
+    ) -> list[discord.abc.GuildChannel]:
+        channels: dict[int, discord.abc.GuildChannel] = {
+            panel_channel.id: panel_channel,
+            approval_channel.id: approval_channel,
+        }
+        for channel in guild.channels:
+            if not isinstance(channel, discord.CategoryChannel):
+                channels[channel.id] = channel
+        return list(channels.values())

@@ -62,23 +62,24 @@ def build_set_payload(nome: str, id_fivem: str) -> dict[str, str]:
 
 
 def panel_embed(guild_name: str | None = None) -> discord.Embed:
-    server_name = guild_name or "Familia"
     embed = discord.Embed(
-        title=f"PAINEL DE SET - Bem-vindo a {server_name}",
+        title="🛡️ Painel de Set",
         description="\n".join(
             [
-                "**Como fazer seu SET:**",
+                "📋 **Solicite seu registro no servidor**",
                 "",
-                "1. Clique no botao **Pedir Set**.",
-                "2. Preencha seu ID de jogo numerico.",
-                "3. Preencha o nome desejado com ate 32 caracteres.",
-                "4. Aguarde aprovacao da lideranca.",
+                "🎮 **ID no Jogo**",
+                "Informe apenas numeros, exatamente como aparece na cidade.",
                 "",
-                "**Tempo medio:** 30 minutos a 1 hora",
-                "**Importante:** Nao saia do servidor durante o processo.",
+                "👤 **Nome do Membro**",
+                "Use o nome que devera aparecer no seu set.",
                 "",
-                "----------------------------------------",
-                "Clique no botao abaixo para iniciar seu SET.",
+                "✅ **Apos enviar**",
+                "Sua solicitacao sera encaminhada para a lideranca aprovar ou reprovar.",
+                "",
+                "⚠️ **Importante:** Nao saia do servidor durante o processo.",
+                "",
+                "Clique em **Pedir Set** para iniciar.",
             ]
         ),
         color=YUNO_GOLD,

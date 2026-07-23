@@ -11,7 +11,7 @@ class SetPanelView(discord.ui.View):
         super().__init__(timeout=None)
         self.api = api
 
-    @discord.ui.button(label="Pedir Set", style=discord.ButtonStyle.primary, custom_id="yuno:set:panel:request")
+    @discord.ui.button(label="Pedir Set", emoji="📝", style=discord.ButtonStyle.primary, custom_id="yuno:set:panel:request")
     async def pedir_set(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         allowed, reason = await ensure_allowed(interaction, self.api, "set", "solicitar")
         if not allowed:
