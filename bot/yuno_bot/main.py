@@ -6,6 +6,7 @@ from yuno_bot.api_client import YunoAPI
 from yuno_bot.commands.ausencia.cog import AusenciaCog
 from yuno_bot.commands.encomenda.cog import EncomendaCog
 from yuno_bot.commands.meta.cog import MetaCog
+from yuno_bot.commands.meta.views import MetaPanelView
 from yuno_bot.commands.parceria.cog import ParceriaCog
 from yuno_bot.commands.producao.cog import ProducaoCog
 from yuno_bot.commands.radio.cog import RadioCog
@@ -30,6 +31,7 @@ class YunoBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         self.add_view(SetPanelView(self.api))
+        self.add_view(MetaPanelView(self.api))
         await self.add_cog(YunoAdminCog(self))
         await self.add_cog(SetCog(self))
         await self.add_cog(MetaCog(self))

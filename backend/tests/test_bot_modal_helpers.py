@@ -8,10 +8,17 @@ import pytest
 os.environ.setdefault("DISCORD_BOT_TOKEN", "test-token")
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(ROOT / "bot"))
 
 from yuno_bot.commands.encomenda.embeds import build_encomenda_payload
-from yuno_bot.commands.meta.embeds import build_meta_payload
+from app.services import check_permission
+from yuno_bot.commands.meta.embeds import (
+    build_meta_panel_config,
+    build_meta_payload,
+    meta_definition_embed,
+    parse_meta_definition,
+)
 from yuno_bot.commands.parceria.embeds import build_parceria_payload
 from yuno_bot.commands.producao.embeds import build_producao_payload
 from yuno_bot.commands.set.embeds import build_set_panel_config, build_set_payload, panel_embed
@@ -68,6 +75,91 @@ def test_modal_payload_builders() -> None:
     assert build_producao_payload("Municao", 50, "turno noite")["quantidade"] == 50
     assert build_encomenda_payload("Item", 2, "amanha", "Familia", "")["valor_observacao"] == "Nao informado"
     assert build_parceria_payload("Fam", "Produto", "Contato", "", "")["contato_secundario"] == "Nao informado"
+
+
+def test_parse_meta_definition_accepts_multiple_items() -> None:
+    assert parse_meta_definition("item, 10\nitem, 1.250") == [
+        {"name": "item", "quantity": 10},
+        {"name": "item", "quantity": 1250},
+    ]
+
+
+def test_parse_meta_definition_rejects_invalid_values() -> None:
+    with pytest.raises(ValueError, match="formato item, quantidade"):
+        parse_meta_definition("item 10")
+    with pytest.raises(ValueError, match="Quantidade deve conter apenas numeros"):
+        parse_meta_definition("item, abc")
+    with pytest.raises(ValueError, match="maior que zero"):
+        parse_meta_definition("item, 0")
+    with pytest.raises(ValueError, match="no maximo 20"):
+        parse_meta_definition("\n".join(f"item, {index + 1}" for index in range(21)))
+    with pytest.raises(ValueError, match="80 caracteres"):
+        parse_meta_definition(f"{'A' * 81}, 1")
+
+
+def test_meta_panel_config_saves_channels_role_message_and_last_definition() -> None:
+    config = build_meta_panel_config(
+        {
+            "guild_name": "Cidade Setup",
+            "admin_role_ids": ["admin-role"],
+            "log_channel_id": "logs",
+            "modules": {"meta": True},
+            "command_permissions": {
+                "meta.registrar": {"channel_ids": ["old-channel"]},
+                "meta.definir": {"category_ids": ["old-category"]},
+            },
+            "messages": {"hello": "world"},
+            "settings": {"discord_setup": {"channel_ids": {"metas": "metas-channel"}}},
+        },
+        panel_channel_id=11,
+        result_channel_id=12,
+        allowed_role_id=99,
+        panel_message_id=1234,
+        last_definition_text="item, 10",
+    )
+
+    assert config["command_permissions"]["meta.definir"]["channel_ids"] == ["11"]
+    assert config["command_permissions"]["meta.definir"]["role_ids"] == ["99"]
+    assert config["command_permissions"]["meta.definir"]["category_ids"] == ["old-category"]
+    assert config["command_permissions"]["meta.registrar"]["channel_ids"] == ["old-channel"]
+    assert config["settings"]["meta"]["panel_channel_id"] == "11"
+    assert config["settings"]["meta"]["result_channel_id"] == "12"
+    assert config["settings"]["meta"]["allowed_role_id"] == "99"
+    assert config["settings"]["meta"]["panel_message_id"] == "1234"
+    assert config["settings"]["meta"]["last_definition_text"] == "item, 10"
+    assert config["settings"]["discord_setup"]["channel_ids"]["metas"] == "metas-channel"
+
+
+def test_meta_definir_permission_uses_configured_role_and_channel() -> None:
+    config = SimpleNamespace(
+        modules={"meta": True},
+        admin_role_ids=[],
+        command_permissions={"meta.definir": {"role_ids": ["99"], "channel_ids": ["11"]}},
+    )
+
+    assert check_permission(config, module="meta", command="definir", user_role_ids=["99"], channel_id="11", category_id=None) == (
+        True,
+        "Permitido.",
+    )
+    assert check_permission(config, module="meta", command="definir", user_role_ids=["98"], channel_id="11", category_id=None) == (
+        False,
+        "Cargo sem permissao para este comando.",
+    )
+    assert check_permission(config, module="meta", command="definir", user_role_ids=["99"], channel_id="10", category_id=None) == (
+        False,
+        "Canal sem permissao para este comando.",
+    )
+
+
+def test_meta_definition_embed_lists_multiple_items() -> None:
+    interaction = SimpleNamespace(user=SimpleNamespace(mention="<@42>", id=42))
+    embed = meta_definition_embed(interaction, {"id": 123}, [{"name": "item", "quantity": 10}, {"name": "item", "quantity": 20}])
+    data = embed.to_dict()
+
+    assert data["title"] == "Meta definida"
+    assert data["fields"][1]["value"] == "#123"
+    assert "**1. item** - `10`" in data["fields"][2]["value"]
+    assert "**2. item** - `20`" in data["fields"][2]["value"]
 
 
 def test_set_panel_config_saves_channels_roles_and_message() -> None:
