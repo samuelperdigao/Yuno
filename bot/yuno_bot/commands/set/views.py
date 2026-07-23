@@ -2,7 +2,25 @@ import discord
 
 from yuno_bot.api_client import YunoAPI
 from yuno_bot.commands.set.actions import approve_set_record
+from yuno_bot.commands.set.embeds import approved_public_embed
 from yuno_bot.guards import ensure_allowed
+
+
+class SetPanelView(discord.ui.View):
+    def __init__(self, api: YunoAPI):
+        super().__init__(timeout=None)
+        self.api = api
+
+    @discord.ui.button(label="Pedir Set", style=discord.ButtonStyle.primary, custom_id="yuno:set:panel:request")
+    async def pedir_set(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        allowed, reason = await ensure_allowed(interaction, self.api, "set", "solicitar")
+        if not allowed:
+            await interaction.response.send_message(f"Yuno nao pode executar isso agora: {reason}", ephemeral=True)
+            return
+
+        from yuno_bot.commands.set.modals import SetSolicitarModal
+
+        await interaction.response.send_modal(SetSolicitarModal(self.api))
 
 
 class SetApprovalView(discord.ui.View):
@@ -31,6 +49,14 @@ class SetApprovalView(discord.ui.View):
         if interaction.message:
             try:
                 await interaction.message.edit(view=None)
+            except discord.HTTPException:
+                pass
+        if interaction.channel:
+            try:
+                await interaction.channel.send(
+                    embed=approved_public_embed(interaction, record, message),
+                    allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+                )
             except discord.HTTPException:
                 pass
         await interaction.followup.send(f"Set #{self.protocolo} aprovado. {message}", ephemeral=True)

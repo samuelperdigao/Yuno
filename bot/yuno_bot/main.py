@@ -10,6 +10,7 @@ from yuno_bot.commands.parceria.cog import ParceriaCog
 from yuno_bot.commands.producao.cog import ProducaoCog
 from yuno_bot.commands.radio.cog import RadioCog
 from yuno_bot.commands.set.cog import SetCog
+from yuno_bot.commands.set.views import SetPanelView
 from yuno_bot.commands.ticket.cog import TicketCog
 from yuno_bot.config import get_settings
 from yuno_bot.guards import deny
@@ -28,6 +29,7 @@ class YunoBot(commands.Bot):
         self.api = YunoAPI()
 
     async def setup_hook(self) -> None:
+        self.add_view(SetPanelView(self.api))
         await self.add_cog(YunoAdminCog(self))
         await self.add_cog(SetCog(self))
         await self.add_cog(MetaCog(self))

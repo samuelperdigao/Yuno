@@ -3,14 +3,14 @@ import httpx
 
 from yuno_bot.api_client import YunoAPI
 from yuno_bot.commands.set.actions import approve_set_record, reject_set_record
-from yuno_bot.commands.set.embeds import build_set_payload, created_log_embed, request_embed
+from yuno_bot.commands.set.embeds import approved_public_embed, build_set_payload, created_log_embed, rejected_public_embed, request_embed
 from yuno_bot.commands.set.views import SetApprovalView
 from yuno_bot.commands.shared import create_record, parse_positive_int, send_module_log, send_to_setup_channel
 
 
 class SetSolicitarModal(discord.ui.Modal, title="Solicitacao de Set"):
-    nome = discord.ui.TextInput(label="Nome do membro", placeholder="Ex: Joao Silva", max_length=100)
-    id_fivem = discord.ui.TextInput(label="ID FiveM", placeholder="Ex: 12345", max_length=20)
+    id_fivem = discord.ui.TextInput(label="ID no Jogo", placeholder="Ex: 12345", max_length=20)
+    nome = discord.ui.TextInput(label="Nome do Membro", placeholder="Ex: Joao Silva", max_length=32)
 
     def __init__(self, api: YunoAPI):
         super().__init__()
@@ -23,8 +23,12 @@ class SetSolicitarModal(discord.ui.Modal, title="Solicitacao de Set"):
             await interaction.response.send_message(f"Erro: {exc}", ephemeral=True)
             return
 
-        await interaction.response.defer(ephemeral=True)
         payload = build_set_payload(self.nome.value, self.id_fivem.value)
+        if not payload["nome"]:
+            await interaction.response.send_message("Erro: Nome do Membro precisa ser informado.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
         try:
             record = await create_record(self.api, interaction, module="set", title=f"Set de {payload['nome']}", payload=payload)
         except httpx.HTTPError:
@@ -67,6 +71,7 @@ class SetAprovarModal(discord.ui.Modal, title="Aprovar Set"):
         if not record:
             await interaction.followup.send(message, ephemeral=True)
             return
+        await _send_public_embed(interaction, approved_public_embed(interaction, record, message))
         await interaction.followup.send(f"Set #{protocolo} aprovado. {message}", ephemeral=True)
 
 
@@ -88,6 +93,9 @@ class SetReprovarModal(discord.ui.Modal, title="Reprovar Set"):
             await interaction.response.send_message(f"Erro: {exc}", ephemeral=True)
             return
         motivo = self.motivo.value.strip()
+        if not motivo:
+            await interaction.response.send_message("Erro: Motivo precisa ser informado.", ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
         record, message = await reject_set_record(self.api, interaction, protocolo, motivo)
         if not record:
@@ -98,4 +106,14 @@ class SetReprovarModal(discord.ui.Modal, title="Reprovar Set"):
                 await self.source_message.edit(view=None)
             except discord.HTTPException:
                 pass
+        await _send_public_embed(interaction, rejected_public_embed(interaction, record, motivo))
         await interaction.followup.send(f"Set #{protocolo} reprovado.", ephemeral=True)
+
+
+async def _send_public_embed(interaction: discord.Interaction, embed: discord.Embed) -> None:
+    if not interaction.channel:
+        return
+    try:
+        await interaction.channel.send(embed=embed, allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
+    except discord.HTTPException:
+        pass
