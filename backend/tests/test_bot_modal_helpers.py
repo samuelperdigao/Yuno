@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "bot"))
 from yuno_bot.commands.encomenda.embeds import build_encomenda_payload
 from app.services import check_permission
 from yuno_bot.commands.meta.embeds import (
+    build_meta_definition_text,
     build_meta_panel_config,
     build_meta_payload,
     meta_definition_embed,
@@ -78,10 +79,12 @@ def test_modal_payload_builders() -> None:
 
 
 def test_parse_meta_definition_accepts_multiple_items() -> None:
-    assert parse_meta_definition("item, 10\nitem, 1.250") == [
+    items = parse_meta_definition("item, 10\nitem, 1.250")
+    assert items == [
         {"name": "item", "quantity": 10},
         {"name": "item", "quantity": 1250},
     ]
+    assert build_meta_definition_text(items) == "item, 10\nitem, 1250"
 
 
 def test_parse_meta_definition_rejects_invalid_values() -> None:
@@ -152,14 +155,17 @@ def test_meta_definir_permission_uses_configured_role_and_channel() -> None:
 
 
 def test_meta_definition_embed_lists_multiple_items() -> None:
-    interaction = SimpleNamespace(user=SimpleNamespace(mention="<@42>", id=42))
+    interaction = SimpleNamespace(user=SimpleNamespace(mention="<@42>", id=42), guild=SimpleNamespace(name="Cidade Yuno"))
     embed = meta_definition_embed(interaction, {"id": 123}, [{"name": "item", "quantity": 10}, {"name": "item", "quantity": 20}])
     data = embed.to_dict()
 
-    assert data["title"] == "Meta definida"
-    assert data["fields"][1]["value"] == "#123"
-    assert "**1. item** - `10`" in data["fields"][2]["value"]
-    assert "**2. item** - `20`" in data["fields"][2]["value"]
+    assert data["title"] == "🎯 Meta definida"
+    assert "Cidade Yuno" in data["description"]
+    assert "Protocolo" not in str(data)
+    assert "Responsavel" not in str(data)
+    assert "🔸 **item**" in data["fields"][0]["value"]
+    assert "Quantidade: `10`" in data["fields"][0]["value"]
+    assert "Quantidade: `20`" in data["fields"][0]["value"]
 
 
 def test_set_panel_config_saves_channels_roles_and_message() -> None:

@@ -33,6 +33,30 @@ def parse_meta_definition(raw_definition: str, *, max_items: int = 20) -> list[d
     return items
 
 
+def build_meta_definition_text(items: list[dict]) -> str:
+    return "\n".join(f"{item['name']}, {item['quantity']}" for item in items)
+
+
+def meta_builder_embed(guild_name: str | None, items: list[dict]) -> discord.Embed:
+    embed = discord.Embed(
+        title="🎯 Definir Metas",
+        description="\n".join(
+            [
+                f"Servidor: **{guild_name or 'Servidor'}**",
+                "",
+                "Adicione uma linha para cada item da meta. Quando terminar, envie a definicao.",
+            ]
+        ),
+        color=YUNO_GOLD,
+    )
+    if items:
+        embed.add_field(name="📋 Linhas adicionadas", value=_format_item_lines(items), inline=False)
+    else:
+        embed.add_field(name="📋 Linhas adicionadas", value="Nenhum item adicionado ainda.", inline=False)
+    embed.set_footer(text="Yuno - painel privado de metas")
+    return embed
+
+
 def build_meta_panel_config(
     current_config: dict,
     *,
@@ -90,12 +114,15 @@ def meta_panel_embed(guild_name: str | None = None) -> discord.Embed:
 
 
 def meta_definition_embed(interaction: discord.Interaction, record: dict, items: list[dict]) -> discord.Embed:
-    embed = discord.Embed(title="Meta definida", color=YUNO_BLUE, timestamp=discord.utils.utcnow())
-    embed.add_field(name="Responsavel", value=f"{interaction.user.mention}\n`{interaction.user.id}`", inline=True)
-    embed.add_field(name="Protocolo", value=f"#{record['id']}", inline=True)
-    item_lines = [f"**{index}. {item['name']}** - `{item['quantity']}`" for index, item in enumerate(items, start=1)]
-    embed.add_field(name="Itens", value="\n".join(item_lines)[:1024], inline=False)
-    embed.set_footer(text="Yuno - Definicao de metas")
+    guild_name = interaction.guild.name if interaction.guild else "Servidor"
+    embed = discord.Embed(
+        title="🎯 Meta definida",
+        description=f"🏙️ **{guild_name}**",
+        color=YUNO_BLUE,
+        timestamp=discord.utils.utcnow(),
+    )
+    embed.add_field(name="📋 Itens da meta", value=_format_item_lines(items), inline=False)
+    embed.set_footer(text=guild_name)
     return embed
 
 
@@ -106,3 +133,8 @@ def meta_log_embed(interaction: discord.Interaction, record: dict, payload: dict
     embed.add_field(name="Quantidade", value=f"`{payload['quantidade']}`", inline=True)
     embed.add_field(name="Observacao", value=payload["observacao"][:1024], inline=False)
     return embed
+
+
+def _format_item_lines(items: list[dict]) -> str:
+    lines = [f"🔸 **{item['name']}**\nQuantidade: `{item['quantity']}`" for item in items]
+    return "\n".join(lines)[:1024]
