@@ -36,7 +36,13 @@ docker compose up --build
 
 ## Deploy
 
-Veja [docs/deployment.md](docs/deployment.md). O caminho recomendado e hospedar tudo no Oracle com Docker Compose: API, bot, dashboard, PostgreSQL, Redis e Caddy/HTTPS.
+Deploy simples para o Oracle atual:
+
+```powershell
+.\deploy.yuno.cmd
+```
+
+O script envia a branch `main` para o GitHub, atualiza `/home/ubuntu/yuno` no Oracle e reinicia `yuno-api` e `yuno-bot`.
 
 ## Marca
 
