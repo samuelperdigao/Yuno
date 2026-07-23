@@ -1,3 +1,7 @@
+{
+  email {$ADMIN_EMAIL}
+}
+
 {$YUNO_DOMAIN} {
   encode gzip zstd
 
@@ -5,7 +9,7 @@
     reverse_proxy api:8000
   }
 
-  handle_path /auth/* {
+  handle /auth/* {
     reverse_proxy api:8000
   }
 

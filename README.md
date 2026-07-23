@@ -36,7 +36,7 @@ docker compose up --build
 
 ## Deploy
 
-Veja [docs/deployment.md](docs/deployment.md). A Vercel fica responsavel pelo dashboard; API e bot precisam rodar em um host com processo persistente.
+Veja [docs/deployment.md](docs/deployment.md). O caminho recomendado e hospedar tudo no Oracle com Docker Compose: API, bot, dashboard, PostgreSQL, Redis e Caddy/HTTPS.
 
 ## Marca
 
