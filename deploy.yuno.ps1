@@ -25,11 +25,11 @@ $remoteCommand = @"
 set -euo pipefail
 cd $RemoteDir
 GIT_SSH_COMMAND='ssh -i $DeployKey -o StrictHostKeyChecking=accept-new' git pull --ff-only origin $Branch
-.venv/bin/pip install -q -r backend/requirements.txt -r bot/requirements.txt
-sudo systemctl restart yuno-api.service yuno-bot.service
-sleep 5
-systemctl is-active yuno-api.service yuno-bot.service
+docker compose up -d --build
+sleep 10
+docker compose ps
 curl -fsS http://127.0.0.1:8000/health
+curl -fsSI http://127.0.0.1:5173/ >/dev/null
 "@
 
 Write-Host "Atualizando servidor Oracle..."

@@ -4,12 +4,17 @@ from discord.ext import commands
 
 from yuno_bot.api_client import YunoAPI
 from yuno_bot.commands.ausencia.cog import AusenciaCog
+from yuno_bot.commands.ausencia.views import AusenciaPanelView
 from yuno_bot.commands.encomenda.cog import EncomendaCog
+from yuno_bot.commands.farm_tickets.cog import FarmTicketsCog
+from yuno_bot.commands.farm_tickets.views import FarmPanelView, FarmTicketControlView
 from yuno_bot.commands.meta.cog import MetaCog
 from yuno_bot.commands.meta.views import MetaPanelView
 from yuno_bot.commands.parceria.cog import ParceriaCog
-from yuno_bot.commands.producao.cog import ProducaoCog
+from yuno_bot.commands.parceria.repository import ParceriasRepository
+from yuno_bot.commands.parceria.views import ParceriaPanelView
 from yuno_bot.commands.radio.cog import RadioCog
+from yuno_bot.commands.radio.views import RadioPainelView
 from yuno_bot.commands.set.cog import SetCog
 from yuno_bot.commands.set.views import SetPanelView
 from yuno_bot.commands.ticket.cog import TicketCog
@@ -28,19 +33,28 @@ class YunoBot(commands.Bot):
     def __init__(self) -> None:
         super().__init__(command_prefix="y!", intents=INTENTS)
         self.api = YunoAPI()
+        settings = get_settings()
+        self.parcerias_repository = ParceriasRepository(settings.parcerias_database_path)
 
     async def setup_hook(self) -> None:
+        await self.parcerias_repository.initialize()
+        farm_tickets_cog = FarmTicketsCog(self)
         self.add_view(SetPanelView(self.api))
         self.add_view(MetaPanelView(self.api))
+        self.add_view(AusenciaPanelView(self.api))
+        self.add_view(ParceriaPanelView(self.api, self.parcerias_repository))
+        self.add_view(RadioPainelView(self.api))
+        self.add_view(FarmPanelView(farm_tickets_cog))
+        self.add_view(FarmTicketControlView(farm_tickets_cog))
         await self.add_cog(YunoAdminCog(self))
         await self.add_cog(SetCog(self))
         await self.add_cog(MetaCog(self))
+        await self.add_cog(farm_tickets_cog)
         await self.add_cog(TicketCog(self))
-        await self.add_cog(ParceriaCog(self))
+        await self.add_cog(ParceriaCog(self, self.parcerias_repository))
         await self.add_cog(EncomendaCog(self))
         await self.add_cog(AusenciaCog(self))
         await self.add_cog(RadioCog(self))
-        await self.add_cog(ProducaoCog(self))
 
         settings = get_settings()
         if settings.discord_test_guild_id:

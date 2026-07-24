@@ -57,7 +57,7 @@ A logo oficial do Yuno fica em `Yuno.png` na raiz do projeto e tambem em `dashbo
 - `/ticket abrir`
 - `/parceria cadastrar`
 - `/encomenda criar`
-- `/ausencia avisar`
+- `/setup_ausencia`, `/painel_ausencia`, `/ausencias`
 - `/radio alterar`
 - `/producao registrar`
 

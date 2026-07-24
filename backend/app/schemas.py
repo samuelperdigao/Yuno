@@ -10,6 +10,7 @@ MODULES = [
     "set",
     "meta",
     "ticket",
+    "farm_tickets",
     "parceria",
     "encomenda",
     "ausencia",
@@ -125,3 +126,155 @@ class MercadoPagoWebhookOut(BaseModel):
     accepted: bool
     license_key: str | None = None
     duplicate: bool = False
+
+
+class AusenciaUpsertIn(BaseModel):
+    user_id: str
+    nome: str | None = None
+    dias: int = Field(ge=1, le=7)
+    motivo: str = Field(default="Não informado", max_length=300)
+    inicio: datetime
+    fim: datetime
+
+
+class AusenciaMessagePatch(BaseModel):
+    message_id: str | None = None
+
+
+class AusenciaOut(BaseModel):
+    guild_id: str
+    user_id: str
+    nome: str | None = None
+    dias: int
+    motivo: str
+    inicio: datetime
+    fim: datetime
+    avisado: int = 0
+    message_id: str | None = None
+
+
+class FarmTicketConfigIn(BaseModel):
+    category_ids: list[str] = Field(default_factory=list)
+    admin_role_ids: list[str] = Field(default_factory=list)
+    log_channel_id: str
+    panel_channel_id: str
+    folders_category_id: str | None = None
+    participant_role_ids: list[str] = Field(default_factory=list)
+
+
+class FarmTicketConfigOut(FarmTicketConfigIn):
+    guild_id: str
+
+
+class FarmWeeklyGoalIn(BaseModel):
+    week_id: str
+    items: list[dict[str, Any]] = Field(min_length=1, max_length=5)
+    created_by: str | None = None
+
+
+class FarmWeeklyGoalOut(FarmWeeklyGoalIn):
+    id: int
+    guild_id: str
+    active: bool
+    created_at: datetime
+
+
+class FarmTicketReserveIn(BaseModel):
+    week_id: str
+    user_id: str
+    member_name: str
+
+
+class FarmTicketChannelPatch(BaseModel):
+    channel_id: str
+    panel_message_id: str | None = None
+    status: str = "aberto"
+
+
+class FarmTicketEntryIn(BaseModel):
+    actor_id: str
+    values: dict[str, int]
+    proof_channel_id: str
+    proof_message_id: str
+    proof_url: str
+    observacao: str | None = None
+
+
+class FarmTicketActionIn(BaseModel):
+    actor_id: str | None = None
+    action: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class FarmTicketReviewIn(BaseModel):
+    actor_id: str
+    entry_id: int
+    reason: str
+
+
+class FarmTicketFinalizeIn(BaseModel):
+    actor_id: str | None = None
+    reason: str
+
+
+class FarmTicketApproveIn(BaseModel):
+    actor_id: str
+
+
+class FarmTicketActionLogPatch(BaseModel):
+    log_message_id: str | None = None
+
+
+class FarmTicketEntryOut(BaseModel):
+    id: int
+    ticket_id: int
+    guild_id: str
+    values: dict[str, int]
+    proof_channel_id: str
+    proof_message_id: str
+    proof_url: str
+    log_proof_url: str | None = None
+    observacao: str | None = None
+    status: str
+    reviewed_by: str | None = None
+    review_reason: str | None = None
+    created_at: datetime
+
+
+class FarmTicketOut(BaseModel):
+    id: int
+    guild_id: str
+    week_id: str
+    user_id: str
+    member_name: str
+    channel_id: str | None = None
+    panel_message_id: str | None = None
+    status: str
+    assigned_to: str | None = None
+    goal_items: list[dict[str, Any]]
+    progress: dict[str, Any]
+    created_at: datetime
+    finalized_at: datetime | None = None
+    finalized_by: str | None = None
+    finalization_reason: str | None = None
+    deleted_at: datetime | None = None
+    entries: list[FarmTicketEntryOut] = Field(default_factory=list)
+
+
+class FarmTicketReserveOut(BaseModel):
+    ticket: FarmTicketOut
+    existing: bool = False
+
+
+class FarmTicketActionOut(BaseModel):
+    id: int
+    ticket_id: int | None = None
+    guild_id: str
+    action: str
+    actor_id: str | None = None
+    event_id: str | None = None
+    payload: dict[str, Any]
+    created_at: datetime
+    log_sent_at: datetime | None = None
+    log_message_id: str | None = None
+    log_attempts: int

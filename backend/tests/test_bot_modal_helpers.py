@@ -1,5 +1,7 @@
 import os
+import sqlite3
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,6 +15,17 @@ sys.path.insert(0, str(ROOT / "bot"))
 
 from yuno_bot.commands.encomenda.embeds import build_encomenda_payload
 from app.services import check_permission
+from yuno_bot.commands.ausencia.embeds import (
+    ausencia_channel_id,
+    ausencias_list_embed,
+    build_ausencia_setup_config,
+    dias_restantes,
+    format_date_br,
+    normalize_motivo,
+    parse_dias,
+)
+from yuno_bot.commands.farm_tickets.helpers import current_week_id, is_farm_admin, parse_discord_ids
+from yuno_bot.commands.farm_tickets.views import FarmPanelView
 from yuno_bot.commands.meta.embeds import (
     build_meta_definition_text,
     build_meta_panel_config,
@@ -21,6 +34,15 @@ from yuno_bot.commands.meta.embeds import (
     parse_meta_definition,
 )
 from yuno_bot.commands.parceria.embeds import build_parceria_payload
+from yuno_bot.commands.parceria.embeds import (
+    format_brazilian_date,
+    is_valid_image_attachment,
+    parceria_active_embed,
+    parcerias_panel_embed,
+    uniform_filename,
+)
+from yuno_bot.commands.parceria.permissions import member_has_named_management_role, role_name_matches
+from yuno_bot.commands.parceria.repository import ParceriasRepository
 from yuno_bot.commands.producao.embeds import build_producao_payload
 from yuno_bot.commands.set.embeds import build_set_panel_config, build_set_payload, panel_embed
 from yuno_bot.commands.shared import log_channel_id_from_setup, parse_positive_int, send_module_log
@@ -213,12 +235,186 @@ def test_set_panel_embed_copy_matches_requested_layout() -> None:
     assert "Pedir Set" in data["description"]
 
 
+def test_parcerias_image_helpers_and_date_format() -> None:
+    assert uniform_filename("Comando Vermelho", "foto.PNG") == "uniforme_comando-vermelho.png"
+    assert uniform_filename("Família São João", "uniforme.webp") == "uniforme_familia-sao-joao.webp"
+    assert is_valid_image_attachment("uniforme.gif", None) is True
+    assert is_valid_image_attachment("arquivo.txt", "image/png") is True
+    assert is_valid_image_attachment("arquivo.txt", "text/plain") is False
+    assert format_brazilian_date("2026-07-23 18:40:00") == "23/07/2026 às 18:40"
+
+
+def test_parcerias_embeds_match_requested_layout() -> None:
+    panel_data = parcerias_panel_embed().to_dict()
+    assert panel_data["title"] == "Painel de Parcerias"
+    assert "registrar, editar ou remover" in panel_data["description"]
+    assert panel_data["footer"]["text"] == "Sistema de Parcerias"
+    assert panel_data["fields"][0]["name"] == "Registro"
+    assert panel_data["fields"][1]["name"] == "Lista ativa"
+
+    active_data = parceria_active_embed(
+        {
+            "nome_familia": "Comando Vermelho",
+            "produto": "Armamento",
+            "contato_01": "João: (31) 99999-9999",
+            "contato_02": "",
+            "criado_em": "2026-07-23 18:40:00",
+        },
+        attachment_filename="uniforme_comando-vermelho.png",
+    ).to_dict()
+    assert active_data["title"] == "Comando Vermelho"
+    assert active_data["color"] == 16766720
+    assert active_data["fields"][0]["name"] == "🛒 Produto"
+    assert active_data["image"]["url"] == "attachment://uniforme_comando-vermelho.png"
+    assert active_data["footer"]["text"] == "Parceria registrada em 23/07/2026 às 18:40"
+
+
+def test_parcerias_role_name_permissions() -> None:
+    assert role_name_matches("Gerente Geral") is True
+    assert role_name_matches("Equipe de Aprovação") is True
+    assert role_name_matches("Membro") is False
+
+    member = SimpleNamespace(roles=[SimpleNamespace(name="Membro"), SimpleNamespace(name="Editor de Parcerias")])
+    assert member_has_named_management_role(member) is True
+
+
+@pytest.mark.asyncio
+async def test_parcerias_repository_config_and_active_lifecycle(tmp_path: Path) -> None:
+    repository = ParceriasRepository(str(tmp_path / "parcerias.sqlite3"))
+    await repository.initialize()
+
+    await repository.upsert_config(
+        guild_id=123,
+        category_id=10,
+        registrar_channel_id=11,
+        ativas_channel_id=12,
+        panel_message_id=13,
+    )
+    config = await repository.get_config(123)
+    assert config is not None
+    assert config.parceria_category_id == 10
+    assert config.parceria_registrar_channel_id == 11
+    assert config.parceria_ativas_channel_id == 12
+    assert config.parceria_panel_message_id == 13
+
+    created = await repository.create_parceria(
+        guild_id=123,
+        nome_familia="Comando Vermelho",
+        produto="Armamento",
+        contato_01="João",
+        contato_02=None,
+        mensagem_lista_id=999,
+        nome_arquivo_imagem="uniforme_comando-vermelho.png",
+        registrado_por=42,
+    )
+    assert created["mensagem_lista_id"] == 999
+    assert (await repository.find_by_name(123, "comando vermelho"))["id"] == created["id"]
+
+    with pytest.raises(sqlite3.IntegrityError):
+        await repository.create_parceria(
+            guild_id=123,
+            nome_familia="COMANDO VERMELHO",
+            produto="Munição",
+            contato_01=None,
+            contato_02=None,
+            mensagem_lista_id=1000,
+            nome_arquivo_imagem="uniforme_comando-vermelho.png",
+            registrado_por=43,
+        )
+
+    updated = await repository.update_details(
+        parceria_id=created["id"],
+        nome_familia="Comando Azul",
+        produto="Veículos",
+        contato_01=None,
+        contato_02="Pedro",
+    )
+    assert updated["mensagem_lista_id"] == 999
+    assert updated["nome_familia"] == "Comando Azul"
+    assert await repository.name_exists_for_other(123, "Comando Azul", created["id"]) is False
+
+    with_image = await repository.update_image(parceria_id=created["id"], nome_arquivo_imagem="uniforme_comando-azul.webp")
+    assert with_image["nome_arquivo_imagem"] == "uniforme_comando-azul.webp"
+
+    assert len(await repository.list_active(123)) == 1
+    await repository.deactivate(created["id"])
+    assert await repository.list_active(123) == []
+
+
 def test_parse_positive_int_rejects_invalid_values() -> None:
     assert parse_positive_int("1.250", "Quantidade") == 1250
     with pytest.raises(ValueError):
         parse_positive_int("abc", "Quantidade")
     with pytest.raises(ValueError):
         parse_positive_int("0", "Quantidade")
+
+
+def test_ausencia_helpers_validate_days_motivo_dates_and_config() -> None:
+    assert parse_dias("5") == 5
+    with pytest.raises(ValueError, match="apenas o número de dias"):
+        parse_dias("5 dias")
+    with pytest.raises(ValueError, match="pelo menos 1"):
+        parse_dias("0")
+    with pytest.raises(ValueError, match="acima de 7 dias"):
+        parse_dias("8")
+
+    assert normalize_motivo("") == "Não informado"
+    fim = datetime(2026, 7, 25, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 23, 12, tzinfo=timezone.utc)
+    assert format_date_br(fim) == "25/07/2026"
+    assert dias_restantes(fim, now) == 2
+
+    config = build_ausencia_setup_config(
+        {"settings": {"discord_setup": {"channel_ids": {"metas": "10"}}}, "modules": {"ausencia": True}},
+        channel_id=99,
+    )
+    assert config["settings"]["ausencia"]["canal_ausencias_id"] == "99"
+    assert config["settings"]["discord_setup"]["channel_ids"]["metas"] == "10"
+    assert ausencia_channel_id(config) == 99
+
+
+def test_ausencias_list_embed_uses_active_record_fields() -> None:
+    fim = datetime.now(timezone.utc) + timedelta(days=2)
+    embed = ausencias_list_embed(
+        [
+            {
+                "guild_id": "1",
+                "user_id": "42",
+                "nome": "Ana",
+                "dias": 3,
+                "motivo": "Viagem",
+                "inicio": datetime.now(timezone.utc).isoformat(),
+                "fim": fim.isoformat(),
+                "avisado": 0,
+                "message_id": None,
+            }
+        ]
+    )
+    data = embed.to_dict()
+    assert data["title"] == "📋 Membros em Ausência"
+    assert data["fields"][0]["name"] == "👤 Ana"
+    assert "Motivo: Viagem" in data["fields"][0]["value"]
+
+
+def test_farm_ticket_helpers_parse_ids_week_and_admin_permissions() -> None:
+    assert parse_discord_ids("<#123>, 456, <@&789>") == [123, 456, 789]
+    assert current_week_id(datetime(2026, 7, 23, 12, tzinfo=timezone.utc)) == "2026-W30"
+
+    member = SimpleNamespace(
+        guild_permissions=SimpleNamespace(manage_guild=False, administrator=False),
+        roles=[SimpleNamespace(id=99)],
+    )
+    assert is_farm_admin(member, {"admin_role_ids": ["99"]}) is True
+    assert is_farm_admin(member, {"admin_role_ids": ["98"]}) is False
+
+
+@pytest.mark.asyncio
+async def test_farm_panel_view_has_open_weekly_ticket_button() -> None:
+    view = FarmPanelView(SimpleNamespace())
+    labels = [child.label for child in view.children]
+    custom_ids = [child.custom_id for child in view.children]
+    assert "Abrir Ticket Semanal" in labels
+    assert "yuno:farm:panel:open" in custom_ids
 
 
 @pytest.mark.asyncio

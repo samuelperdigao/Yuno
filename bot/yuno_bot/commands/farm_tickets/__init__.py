@@ -1,0 +1,1 @@
+"""Farm ticket command package."""

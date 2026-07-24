@@ -25,7 +25,7 @@ SETUP_CHANNELS: tuple[SetupChannel, ...] = (
     SetupChannel("tickets", "tickets", "operacao", ("ticket.abrir",)),
     SetupChannel("parcerias", "parcerias", "operacao", ("parceria.cadastrar",)),
     SetupChannel("encomendas", "encomendas", "operacao", ("encomenda.criar",)),
-    SetupChannel("ausencias", "ausencias", "operacao", ("ausencia.avisar",)),
+    SetupChannel("ausencias", "ausencias", "operacao", ()),
     SetupChannel("radio", "radio", "operacao", ("radio.alterar",)),
     SetupChannel("producao", "producao", "operacao", ("producao.registrar",)),
 )
