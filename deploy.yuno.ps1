@@ -56,9 +56,27 @@ fi
 
 Write-Host "Atualizando servidor Oracle..."
 $remoteScript = $remoteCommand -replace "`r", ""
-$remoteScript | ssh -i $SshKey -o StrictHostKeyChecking=accept-new $Remote "bash -s"
-if ($LASTEXITCODE -ne 0) {
-    throw "Falha ao atualizar o servidor Oracle."
+$localScript = [System.IO.Path]::GetTempFileName()
+$remoteScriptPath = "/tmp/yuno-deploy-$([Guid]::NewGuid().ToString("N")).sh"
+
+try {
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($localScript, $remoteScript, $utf8NoBom)
+
+    scp -i $SshKey -o StrictHostKeyChecking=accept-new $localScript "${Remote}:$remoteScriptPath"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Falha ao enviar script temporario para o servidor Oracle."
+    }
+
+    ssh -i $SshKey -o StrictHostKeyChecking=accept-new $Remote "bash $remoteScriptPath; status=`$?; rm -f $remoteScriptPath; exit `$status"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Falha ao atualizar o servidor Oracle."
+    }
+}
+finally {
+    if (Test-Path $localScript) {
+        Remove-Item -LiteralPath $localScript -Force
+    }
 }
 
 Write-Host ""
