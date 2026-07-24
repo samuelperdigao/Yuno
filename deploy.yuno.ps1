@@ -20,6 +20,9 @@ if ($dirty) {
 
 Write-Host "Enviando main para o GitHub..."
 git push origin $Branch
+if ($LASTEXITCODE -ne 0) {
+    throw "Falha ao enviar $Branch para o GitHub."
+}
 
 $remoteCommand = @"
 set -euo pipefail
@@ -52,7 +55,11 @@ fi
 "@
 
 Write-Host "Atualizando servidor Oracle..."
-$remoteCommand | ssh -i $SshKey -o StrictHostKeyChecking=accept-new $Remote "bash -s"
+$remoteScript = $remoteCommand -replace "`r", ""
+$remoteScript | ssh -i $SshKey -o StrictHostKeyChecking=accept-new $Remote "bash -s"
+if ($LASTEXITCODE -ne 0) {
+    throw "Falha ao atualizar o servidor Oracle."
+}
 
 Write-Host ""
 Write-Host "Deploy concluido."
