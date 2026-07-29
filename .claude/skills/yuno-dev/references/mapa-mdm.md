@@ -60,7 +60,7 @@ Duas tabelas:
 | `encomenda.py` | 269 | Encomendas | Já existe no Yuno |
 | `radio.py` | 261 | Definição de rádio | Já existe no Yuno |
 | `ausencia.py` | 260 | Ausências multi-server | Já existe no Yuno |
-| `mod.py` | 252 | `/clear`, `/organizar_canais` | Sim — barato |
+| `mod.py` | 252 | `/clear`, `/organizar_canais` | Já existe no Yuno (`commands/mod/`, `/mod limpar` e `/mod organizar_canais`) |
 | `farm_embeds.py` | 222 | Builders de embed do farm | Fase 2 |
 | `membros.py` | 190 | Eventos join/leave, reconciliação de pastas | Já existe no Yuno (`commands/membros/`, libera pasta de farm ao sair) |
 | `sistema.py` | 67 | `/ping`, `/status` | Yuno já tem `/yuno status` |

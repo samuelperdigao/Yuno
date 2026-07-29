@@ -21,6 +21,7 @@ MODULES = [
     "hierarquia",
     "membros",
     "acao",
+    "mod",
 ]
 
 

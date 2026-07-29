@@ -29,6 +29,7 @@ from yuno_bot.commands.acao.helpers import (
     upsert_tipo,
 )
 from yuno_bot.commands.membros.embeds import format_delta
+from yuno_bot.commands.mod.helpers import eh_categoria_visual, nome_com_separador
 from yuno_bot.commands.hierarquia.helpers import cargo_atual, tipo_mudanca
 from yuno_bot.commands.encomenda.embeds import build_encomenda_payload
 from app.services import check_permission
@@ -284,6 +285,16 @@ def test_acao_id_from_message_le_o_footer() -> None:
 
     assert acao_id_from_message(SimpleNamespace(embeds=[])) is None
     assert acao_id_from_message(None) is None
+
+
+def test_mod_categoria_visual_e_separador_de_canal() -> None:
+    assert eh_categoria_visual("▬▬▬▬▬▬▬▬▬▬") is True
+    assert eh_categoria_visual("Operações") is False
+    assert eh_categoria_visual("▬▬") is False  # menos de 3 caracteres
+
+    assert nome_com_separador("geral") == "┃geral"
+    assert nome_com_separador("1-regras") == "┃📁-1-regras"
+    assert nome_com_separador("┃ja-tem") is None
 
 
 def test_parse_meta_definition_accepts_multiple_items() -> None:

@@ -151,7 +151,7 @@ Ordem, do que ensina o padrão para o que exige mais cuidado:
 | 3 | ~~`hierarquia`~~ | `cogs/hierarquia.py` | 335 | **CONCLUÍDO.** Manipulação de cargo; exercita permissão do bot |
 | 4 | ~~`membros`~~ | `cogs/membros.py` | 190 | **CONCLUÍDO.** Primeiro módulo sem slash command (listeners) |
 | 5 | ~~`acao`~~ | `cogs/acao.py` + `acao_painel.py` | 1223 | **CONCLUÍDO.** Maior; padrão já consolidado |
-| 6 | `mod` | `cogs/mod.py` | 252 | Trivial, fecha a fase |
+| 6 | ~~`mod`~~ | `cogs/mod.py` | 252 | **CONCLUÍDO.** Trivial, fecha a fase |
 | 7 | `disparo` | `cogs/disparo.py` | 545 | Rate limit exige cuidado; por último |
 
 Fora do escopo desta fase, por serem específicos da facção: `bau`, `colete`, `recolhimento`, `heroina`, e o `farm` de itens ilegais.
@@ -221,6 +221,14 @@ O módulo maior e mais arriscado da fase, por dois motivos que só apareceram ao
 **Divergências propositais do MDM:** bypass de `guild_permissions.administrator` não portado (mesma razão dos módulos anteriores). Pagamento continua 50% facção / 50% participantes com sobra de arredondamento pra facção — regra de negócio do MDM que decidi manter como está, por ser um padrão de RP genérico o suficiente (não é específico de nomes de cargo ou item).
 
 **Entregue:** `bot/yuno_bot/commands/acao/` completo (`helpers.py` puro — datas, dinheiro, catálogo —, `embeds.py`, `modals.py`, `views.py`, `cog.py`), `GET /systems/{module}/records/{record_id}` novo no backend + `YunoAPI.get_record`. `acao` em `MODULES`, registry (`ordem=130`, `plano_minimo="pro"`) e `_COMMAND_HINTS`. 92 testes passando (12 novos, cobrindo data/horário/resultado, cálculo de pagamento, catálogo e extração de ID do rodapé).
+
+### `mod` — CONCLUÍDO
+
+O único módulo desta fase sem nada específico do Morro do Mineiro para separar — `/clear` (purge de mensagens) e `/organizar_canais` (adiciona prefixo visual `┃` nos canais) são utilitários genéricos de qualquer servidor Discord de RP. Os únicos "valores MDM" (`┃`, `📁`, o padrão `▬▬▬▬▬▬▬▬▬▬` de categoria visual) são convenção estética comum a servidores FiveM, não regra de negócio — não valia criar configuração para isso.
+
+**Duplo guard proposital:** `@app_commands.checks.has_permissions(manage_messages=True/manage_channels=True)` do discord.py foi mantido **junto com** `ensure_allowed`, não substituído por ele. Todo o resto do Yuno usa só `command_permissions` (cargo configurável, pode ficar vazio = liberado pra todo mundo com o módulo ligado) — mas isso seria perigoso demais como único gate para `/clear`: sem cargo configurado, qualquer membro do servidor apagaria mensagens em massa. A permissão nativa do Discord fica como piso de segurança; `ensure_allowed` cobre módulo desligado/licença.
+
+**Entregue:** `bot/yuno_bot/commands/mod/` (`helpers.py` puro, `cog.py`, sem canal de setup nem log — utilitário puro). `mod` em `MODULES` e registry (`ordem=140`). 93 testes passando.
 
 ---
 
