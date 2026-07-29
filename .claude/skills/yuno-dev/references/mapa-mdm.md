@@ -48,7 +48,7 @@ Duas tabelas:
 | `parcerias.py` | 674 | Registro de parcerias | Já existe no Yuno (com débito) |
 | `farm_painel.py` | 603 | Painel fixo de farm | Fase 2 |
 | `colete.py` | 565 | Fabricação de coletes com custo de materiais | **Não** — específico |
-| `disparo.py` | 545 | Disparo de mensagem em canais privados em massa | Sim — útil e genérico |
+| `disparo.py` | 545 | Disparo de mensagem em canais privados em massa | Já existe no Yuno (`commands/disparo/`, alvo é `farm_tickets.folders_category_id`, sem JSON local) |
 | `farm_relatorio.py` | 505 | Relatório de pendentes da semana | Fase 2 |
 | `set_views.py` | 363 | SetModal, ApprovalView, SetPanelView, rate-limit | Já validado no Yuno |
 | `paineis.py` | 379 | Listeners e handlers dos painéis | Conceito |

@@ -29,6 +29,7 @@ from yuno_bot.commands.acao.helpers import (
     upsert_tipo,
 )
 from yuno_bot.commands.membros.embeds import format_delta
+from yuno_bot.commands.disparo.helpers import valid_member_channels
 from yuno_bot.commands.mod.helpers import eh_categoria_visual, nome_com_separador
 from yuno_bot.commands.hierarquia.helpers import cargo_atual, tipo_mudanca
 from yuno_bot.commands.encomenda.embeds import build_encomenda_payload
@@ -295,6 +296,20 @@ def test_mod_categoria_visual_e_separador_de_canal() -> None:
     assert nome_com_separador("geral") == "┃geral"
     assert nome_com_separador("1-regras") == "┃📁-1-regras"
     assert nome_com_separador("┃ja-tem") is None
+
+
+def test_disparo_valid_member_channels_filtra_pastas_de_verdade() -> None:
+    category = SimpleNamespace(
+        text_channels=[
+            SimpleNamespace(name="┃📁-1-mineiro-6627", id=1),
+            SimpleNamespace(name="┃📁-2-livre", id=2),
+            SimpleNamespace(name="tutorial-de-farm", id=3),
+            SimpleNamespace(name="▬▬▬▬▬▬▬▬▬▬", id=4),
+            SimpleNamespace(name="┃📁-3-ana-111", id=5),
+        ]
+    )
+    canais = valid_member_channels(category)
+    assert [c.id for c in canais] == [1, 5]
 
 
 def test_parse_meta_definition_accepts_multiple_items() -> None:

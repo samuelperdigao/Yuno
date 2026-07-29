@@ -22,6 +22,7 @@ MODULES = [
     "membros",
     "acao",
     "mod",
+    "disparo",
 ]
 
 

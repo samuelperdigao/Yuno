@@ -152,9 +152,11 @@ Ordem, do que ensina o padrão para o que exige mais cuidado:
 | 4 | ~~`membros`~~ | `cogs/membros.py` | 190 | **CONCLUÍDO.** Primeiro módulo sem slash command (listeners) |
 | 5 | ~~`acao`~~ | `cogs/acao.py` + `acao_painel.py` | 1223 | **CONCLUÍDO.** Maior; padrão já consolidado |
 | 6 | ~~`mod`~~ | `cogs/mod.py` | 252 | **CONCLUÍDO.** Trivial, fecha a fase |
-| 7 | `disparo` | `cogs/disparo.py` | 545 | Rate limit exige cuidado; por último |
+| 7 | ~~`disparo`~~ | `cogs/disparo.py` | 545 | **CONCLUÍDO.** Rate limit exige cuidado; por último |
 
 Fora do escopo desta fase, por serem específicos da facção: `bau`, `colete`, `recolhimento`, `heroina`, e o `farm` de itens ilegais.
+
+**Fase 2 concluída — os 7 módulos do núcleo genérico foram portados.** Registry com 16 módulos no total.
 
 ### `adv` — CONCLUÍDO
 
@@ -229,6 +231,20 @@ O único módulo desta fase sem nada específico do Morro do Mineiro para separa
 **Duplo guard proposital:** `@app_commands.checks.has_permissions(manage_messages=True/manage_channels=True)` do discord.py foi mantido **junto com** `ensure_allowed`, não substituído por ele. Todo o resto do Yuno usa só `command_permissions` (cargo configurável, pode ficar vazio = liberado pra todo mundo com o módulo ligado) — mas isso seria perigoso demais como único gate para `/clear`: sem cargo configurado, qualquer membro do servidor apagaria mensagens em massa. A permissão nativa do Discord fica como piso de segurança; `ensure_allowed` cobre módulo desligado/licença.
 
 **Entregue:** `bot/yuno_bot/commands/mod/` (`helpers.py` puro, `cog.py`, sem canal de setup nem log — utilitário puro). `mod` em `MODULES` e registry (`ordem=140`). 93 testes passando.
+
+### `disparo` — CONCLUÍDO (fecha a Fase 2)
+
+O módulo que o plano avisou para deixar por último por causa de rate limit — mas o achado real, de novo, foi um acoplamento não-óbvio entre módulos do MDM que virou simplificação real no Yuno.
+
+**`BROADCAST_CATEGORY_ID` (categoria hardcoded) e a regex própria de reconhecimento de pasta** viraram, juntos, uma única linha: `settings.farm_tickets.folders_category_id`. O disparo do MDM e as pastas de membro do MDM eram sistemas irmãos que nunca foram formalmente conectados no código — cada um tinha sua própria noção de "isso é uma pasta de membro" (a regex do disparo, a lógica de `set_service` em outro lugar). No Yuno, `farm_tickets` já é a fonte única da verdade sobre pasta de membro (`parse_member_folder`, construído na Frente A desta sessão). `disparo` importa essa função direto em vez de reimplementar reconhecimento de canal — como bônus, a lista de 7 nomes de canal bloqueados (`tutorial-de-farm`, `avisos`, `fichas`...) do MDM desaparece inteira: qualquer canal que não bater no padrão de pasta simplesmente falha o parse e fica de fora.
+
+**`BROADCAST_HISTORY_FILE` (JSON local em disco)** — violava a regra mais básica deste plano (multi-tenant, sem estado local no container). Virou `SystemRecord` (`module="disparo"`, payload com mensagem e lista de `{channel_id, message_id}` enviados) + `settings.disparo.last_batch_record_id` na guild config apontando pro mais recente. MDM guardava até 10 lotes por servidor "para o futuro" mas só lia o mais recente em todo o código — não portei a retenção de histórico que nunca era usada.
+
+**Permissão mais simples de todos os módulos portados:** o MDM já dizia isso no próprio embed do painel — "qualquer membro com acesso a este painel pode utilizá-lo." Sem checagem de cargo em lugar nenhum. Virou `command_permissions["disparo.enviar"]` só com `channel_ids`, sem `role_ids` — o controle de acesso real é literalmente quem consegue ver o canal, exatamente como no original.
+
+**Rate limit:** não adicionei nenhum throttle manual. O `HTTPClient` do discord.py já respeita os headers de rate limit do Discord e enfileira automaticamente — um loop sequencial de `channel.send()` não quebra, só demora mais em servidor com muitas pastas. Como o comando já usa `defer(thinking=True)` e a resposta final é um `followup` (janela de 15 minutos, não 3 segundos), isso é seguro sem cuidado extra.
+
+**Entregue:** `bot/yuno_bot/commands/disparo/` completo (`helpers.py` puro reaproveitando `farm_tickets.parse_member_folder`, `embeds.py`, `modals.py`, `views.py`, `cog.py`). `disparo` em `MODULES`, registry (`ordem=150`, `plano_minimo="pro"`) e dashboard. 94 testes passando.
 
 ---
 
