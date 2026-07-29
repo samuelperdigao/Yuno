@@ -24,7 +24,14 @@ from yuno_bot.commands.ausencia.embeds import (
     normalize_motivo,
     parse_dias,
 )
-from yuno_bot.commands.farm_tickets.helpers import current_week_id, is_farm_admin, parse_discord_ids
+from yuno_bot.commands.farm_tickets.helpers import (
+    current_week_id,
+    is_farm_admin,
+    member_folder_nickname_and_game_id,
+    next_folder_slot,
+    parse_discord_ids,
+    parse_member_folder,
+)
 from yuno_bot.commands.farm_tickets.views import FarmPanelView
 from yuno_bot.commands.meta.embeds import (
     build_meta_definition_text,
@@ -46,7 +53,7 @@ from yuno_bot.commands.parceria.repository import ParceriasRepository
 from yuno_bot.commands.producao.embeds import build_producao_payload
 from yuno_bot.commands.set.embeds import build_set_panel_config, build_set_payload, panel_embed
 from yuno_bot.commands.shared import log_channel_id_from_setup, parse_positive_int, send_module_log
-from yuno_bot.server_setup import SETUP_LOG_CHANNELS, build_setup_config
+from yuno_bot.server_setup import build_setup_config, log_channels, module_keys
 
 
 def test_setup_config_includes_system_log_channels() -> None:
@@ -66,7 +73,7 @@ def test_setup_config_includes_system_log_channels() -> None:
         "ausencias": SimpleNamespace(id=17),
         "radio": SimpleNamespace(id=18),
         "producao": SimpleNamespace(id=19),
-        **{f"log_{module}": SimpleNamespace(id=100 + index) for index, module in enumerate(SETUP_LOG_CHANNELS)},
+        **{f"log_{module}": SimpleNamespace(id=100 + index) for index, module in enumerate(log_channels())},
     }
 
     config = build_setup_config(
@@ -79,8 +86,16 @@ def test_setup_config_includes_system_log_channels() -> None:
     setup = config["settings"]["discord_setup"]
     assert setup["category_ids"]["logs"] == "3"
     assert setup["channel_ids"]["set_aprovacao"] == "12"
-    assert setup["log_channel_ids"]["set"] == "100"
-    assert setup["log_channel_ids"]["producao"] == "107"
+
+    # Derivado do registry em vez de indices fixos: assim o teste continua
+    # valido quando um modulo novo entra no meio da ordem.
+    esperado = {module: str(100 + index) for index, module in enumerate(log_channels())}
+    assert setup["log_channel_ids"] == esperado
+
+    # Todo modulo do registry precisa aparecer em `modules`, senao o cliente
+    # nao consegue liga-lo nem desliga-lo.
+    assert set(config["modules"]) == set(module_keys())
+    assert all(config["modules"].values())
 
 
 def test_modal_payload_builders() -> None:
@@ -399,6 +414,17 @@ def test_ausencias_list_embed_uses_active_record_fields() -> None:
 def test_farm_ticket_helpers_parse_ids_week_and_admin_permissions() -> None:
     assert parse_discord_ids("<#123>, 456, <@&789>") == [123, 456, 789]
     assert current_week_id(datetime(2026, 7, 23, 12, tzinfo=timezone.utc)) == "2026-W30"
+    folder = parse_member_folder("┃📁-7-mineiro-6627", 500)
+    assert (folder.channel_id, folder.slot, folder.nickname, folder.game_id) == (500, 7, "Mineiro", "6627")
+    category = SimpleNamespace(
+        text_channels=[
+            SimpleNamespace(name="┃📁-1-ana-111", id=1),
+            SimpleNamespace(name="┃📁-2-bruno-222", id=2),
+        ]
+    )
+    assert next_folder_slot(category) == 3
+    member_identity = SimpleNamespace(display_name="Mineiro | 6627", name="Mineiro", id=42)
+    assert member_folder_nickname_and_game_id(member_identity) == ("Mineiro", "6627")
 
     member = SimpleNamespace(
         guild_permissions=SimpleNamespace(manage_guild=False, administrator=False),

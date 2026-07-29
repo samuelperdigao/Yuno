@@ -2,6 +2,7 @@ from typing import Any
 
 import httpx
 
+from yuno_bot.cache import TTLCache
 from yuno_bot.config import get_settings
 
 
@@ -10,6 +11,12 @@ class YunoAPI:
         settings = get_settings()
         self.base_url = settings.api_base_url.rstrip("/")
         self.headers = {"x-yuno-bot-token": settings.bot_internal_token}
+        # O cache mora aqui, e nao numa camada acima, porque views e modals
+        # recebem o `api` e nao o bot — colocar por fora exigiria alterar os 20
+        # pontos que leem a config e bastaria esquecer um para o ganho sumir.
+        self._guild_config_cache: TTLCache[dict[str, Any]] = TTLCache(
+            settings.guild_config_cache_ttl
+        )
 
     async def validate_license(self, guild_id: int) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -21,7 +28,20 @@ class YunoAPI:
             response.raise_for_status()
             return response.json()
 
-    async def get_guild_config(self, guild_id: int) -> dict[str, Any]:
+    async def get_guild_config(self, guild_id: int, *, force: bool = False) -> dict[str, Any]:
+        """Config do servidor, servida do cache quando vigente.
+
+        `force=True` para fluxos que precisam do estado real e nao do recente —
+        `/yuno diagnostico` e o caso: diagnostico com dado velho manda o cliente
+        atras do problema errado.
+        """
+        if force:
+            self._guild_config_cache.invalidate(guild_id)
+        return await self._guild_config_cache.get_or_fetch(
+            guild_id, lambda: self._fetch_guild_config(guild_id)
+        )
+
+    async def _fetch_guild_config(self, guild_id: int) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(
                 f"{self.base_url}/internal/guilds/{guild_id}/config",
@@ -38,7 +58,16 @@ class YunoAPI:
                 json=config,
             )
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+
+        # A resposta do PUT e o estado novo: popular o cache com ela evita que a
+        # proxima leitura pegue a versao antiga e evita um GET desnecessario.
+        # Se o PUT falhou, nada e tocado — o cache antigo continua correto.
+        self._guild_config_cache.set(guild_id, data)
+        return data
+
+    def cache_stats(self) -> dict[str, Any]:
+        return self._guild_config_cache.stats()
 
     async def upsert_ausencia(
         self,
