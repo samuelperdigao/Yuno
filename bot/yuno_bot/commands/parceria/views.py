@@ -1,8 +1,8 @@
 import asyncio
 import io
-import sqlite3
 
 import discord
+import httpx
 
 from yuno_bot.api_client import YunoAPI
 from yuno_bot.commands.parceria.embeds import (
@@ -11,7 +11,7 @@ from yuno_bot.commands.parceria.embeds import (
     uniform_filename,
 )
 from yuno_bot.commands.parceria.permissions import can_manage_parcerias
-from yuno_bot.commands.parceria.repository import ParceriasRepository
+from yuno_bot.commands.parceria.repository import ParceriaDuplicadaError, ParceriasRepository
 from yuno_bot.commands.shared import resolve_text_channel
 
 
@@ -135,7 +135,7 @@ class ParceriaRegisterModal(discord.ui.Modal, title="Registrar Parceria"):
                 nome_arquivo_imagem=filename,
                 registrado_por=interaction.user.id,
             )
-        except sqlite3.Error:
+        except (ParceriaDuplicadaError, httpx.HTTPError):
             try:
                 await public_message.delete()
             except discord.HTTPException:
@@ -175,13 +175,22 @@ class ParceriaEditModal(discord.ui.Modal, title="Editar Parceria"):
             return
 
         await interaction.response.defer(ephemeral=True)
-        updated = await self.repository.update_details(
-            parceria_id=self.parceria["id"],
-            nome_familia=nome_familia,
-            produto=self.produto.value.strip(),
-            contato_01=_optional_text(self.contato_01.value),
-            contato_02=_optional_text(self.contato_02.value),
-        )
+        try:
+            updated = await self.repository.update_details(
+                parceria_id=self.parceria["id"],
+                nome_familia=nome_familia,
+                produto=self.produto.value.strip(),
+                contato_01=_optional_text(self.contato_01.value),
+                contato_02=_optional_text(self.contato_02.value),
+            )
+        except ParceriaDuplicadaError:
+            await interaction.followup.send(
+                "Essa família já possui parceria registrada. Use o botão Editar Parceria.", ephemeral=True
+            )
+            return
+        except httpx.HTTPError:
+            await interaction.followup.send("Sistema de parcerias indisponível.", ephemeral=True)
+            return
         if not updated:
             await interaction.followup.send("Sistema de parcerias indisponível.", ephemeral=True)
             return

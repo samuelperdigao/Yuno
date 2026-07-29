@@ -384,3 +384,111 @@ def test_farm_ticket_admin_actions_and_log_queue(client: TestClient) -> None:
     )
     assert sent.status_code == 200
     assert sent.json()["log_message_id"] == "123"
+
+
+def test_parceria_requires_active_license(client: TestClient) -> None:
+    response = client.get(
+        "/internal/parcerias/guilds/no-license/config",
+        headers={"x-yuno-bot-token": "bot-test"},
+    )
+    assert response.status_code == 403
+
+
+def test_parceria_config_registration_edit_and_lifecycle(client: TestClient) -> None:
+    activate_test_guild(client, "parceria-a")
+
+    config = client.put(
+        "/internal/parcerias/guilds/parceria-a/config",
+        headers={"x-yuno-bot-token": "bot-test"},
+        json={
+            "category_id": "10",
+            "registrar_channel_id": "11",
+            "ativas_channel_id": "12",
+            "panel_message_id": None,
+        },
+    )
+    assert config.status_code == 200
+    assert config.json()["ativas_channel_id"] == "12"
+
+    read_config = client.get("/internal/parcerias/guilds/parceria-a/config", headers={"x-yuno-bot-token": "bot-test"})
+    assert read_config.status_code == 200
+    assert read_config.json()["registrar_channel_id"] == "11"
+
+    created = client.post(
+        "/internal/parcerias/guilds/parceria-a",
+        headers={"x-yuno-bot-token": "bot-test"},
+        json={
+            "nome_familia": "Comando Vermelho",
+            "produto": "Armamento",
+            "contato_01": "João",
+            "contato_02": None,
+            "mensagem_lista_id": "999",
+            "nome_arquivo_imagem": "uniforme_comando-vermelho.png",
+            "registrado_por": "42",
+        },
+    )
+    assert created.status_code == 200
+    parceria_id = created.json()["id"]
+    assert created.json()["mensagem_lista_id"] == "999"
+
+    duplicate = client.post(
+        "/internal/parcerias/guilds/parceria-a",
+        headers={"x-yuno-bot-token": "bot-test"},
+        json={
+            "nome_familia": "COMANDO VERMELHO",
+            "produto": "Munição",
+            "contato_01": None,
+            "contato_02": None,
+            "mensagem_lista_id": "1000",
+            "nome_arquivo_imagem": "uniforme_comando-vermelho.png",
+            "registrado_por": "43",
+        },
+    )
+    assert duplicate.status_code == 409
+
+    found = client.get(
+        "/internal/parcerias/guilds/parceria-a/by-name",
+        headers={"x-yuno-bot-token": "bot-test"},
+        params={"nome_familia": "comando vermelho"},
+    )
+    assert found.status_code == 200
+    assert found.json()["id"] == parceria_id
+
+    exists = client.get(
+        "/internal/parcerias/guilds/parceria-a/name-exists",
+        headers={"x-yuno-bot-token": "bot-test"},
+        params={"nome_familia": "Comando Vermelho", "exclude_id": parceria_id},
+    )
+    assert exists.status_code == 200
+    assert exists.json()["exists"] is False
+
+    updated = client.patch(
+        f"/internal/parcerias/{parceria_id}",
+        headers={"x-yuno-bot-token": "bot-test"},
+        json={"nome_familia": "Comando Azul", "produto": "Veículos", "contato_01": None, "contato_02": "Pedro"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["nome_familia"] == "Comando Azul"
+    assert updated.json()["mensagem_lista_id"] == "999"
+
+    with_image = client.patch(
+        f"/internal/parcerias/{parceria_id}/imagem",
+        headers={"x-yuno-bot-token": "bot-test"},
+        json={"nome_arquivo_imagem": "uniforme_comando-azul.webp"},
+    )
+    assert with_image.status_code == 200
+    assert with_image.json()["nome_arquivo_imagem"] == "uniforme_comando-azul.webp"
+
+    active = client.get("/internal/parcerias/guilds/parceria-a/active", headers={"x-yuno-bot-token": "bot-test"})
+    assert active.status_code == 200
+    assert len(active.json()) == 1
+
+    deactivated = client.post(f"/internal/parcerias/{parceria_id}/desativar", headers={"x-yuno-bot-token": "bot-test"})
+    assert deactivated.status_code == 200
+
+    active_after = client.get("/internal/parcerias/guilds/parceria-a/active", headers={"x-yuno-bot-token": "bot-test"})
+    assert active_after.json() == []
+
+    missing = client.get(f"/internal/parcerias/{parceria_id + 9999}", headers={"x-yuno-bot-token": "bot-test"})
+    assert missing.status_code == 200
+    assert missing.json() is None

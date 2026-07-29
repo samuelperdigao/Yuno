@@ -153,6 +153,53 @@ class AusenciaOut(BaseModel):
     message_id: str | None = None
 
 
+class ParceriaConfigIn(BaseModel):
+    category_id: str | None = None
+    registrar_channel_id: str
+    ativas_channel_id: str
+    panel_message_id: str | None = None
+
+
+class ParceriaConfigOut(ParceriaConfigIn):
+    guild_id: str
+
+
+class ParceriaCreateIn(BaseModel):
+    nome_familia: str
+    produto: str
+    contato_01: str | None = None
+    contato_02: str | None = None
+    mensagem_lista_id: str
+    nome_arquivo_imagem: str
+    registrado_por: str
+
+
+class ParceriaUpdateIn(BaseModel):
+    nome_familia: str
+    produto: str
+    contato_01: str | None = None
+    contato_02: str | None = None
+
+
+class ParceriaImagePatch(BaseModel):
+    nome_arquivo_imagem: str
+
+
+class ParceriaOut(BaseModel):
+    id: int
+    guild_id: str
+    nome_familia: str
+    produto: str
+    contato_01: str | None = None
+    contato_02: str | None = None
+    mensagem_lista_id: str
+    nome_arquivo_imagem: str
+    registrado_por: str
+    ativo: bool
+    criado_em: datetime
+    atualizado_em: datetime | None = None
+
+
 class FarmTicketConfigIn(BaseModel):
     category_ids: list[str] = Field(default_factory=list)
     admin_role_ids: list[str] = Field(default_factory=list)

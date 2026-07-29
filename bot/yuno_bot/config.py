@@ -8,7 +8,6 @@ class BotSettings(BaseSettings):
     discord_test_guild_id: int | None = None
     api_base_url: str = "http://api:8000"
     bot_internal_token: str = "development-bot"
-    parcerias_database_path: str = "./data/parcerias.sqlite3"
     # TTL do cache de guild config. Curto de proposito: alteracao feita no
     # dashboard web nao invalida o cache deste processo, entao este numero e o
     # tempo maximo que o cliente espera para ver a mudanca refletida no bot.

@@ -1,10 +1,10 @@
 import os
-import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 os.environ.setdefault("DISCORD_BOT_TOKEN", "test-token")
@@ -49,7 +49,7 @@ from yuno_bot.commands.parceria.embeds import (
     uniform_filename,
 )
 from yuno_bot.commands.parceria.permissions import member_has_named_management_role, role_name_matches
-from yuno_bot.commands.parceria.repository import ParceriasRepository
+from yuno_bot.commands.parceria.repository import ParceriaDuplicadaError, ParceriasRepository
 from yuno_bot.commands.producao.embeds import build_producao_payload
 from yuno_bot.commands.set.embeds import build_set_panel_config, build_set_payload, panel_embed
 from yuno_bot.commands.shared import log_channel_id_from_setup, parse_positive_int, send_module_log
@@ -294,66 +294,51 @@ def test_parcerias_role_name_permissions() -> None:
 
 
 @pytest.mark.asyncio
-async def test_parcerias_repository_config_and_active_lifecycle(tmp_path: Path) -> None:
-    repository = ParceriasRepository(str(tmp_path / "parcerias.sqlite3"))
-    await repository.initialize()
+async def test_parcerias_repository_translates_conflict_and_tolerates_network_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`ParceriasRepository` fala HTTP com o backend (ver test_api.py para o ciclo de vida completo).
 
-    await repository.upsert_config(
-        guild_id=123,
-        category_id=10,
-        registrar_channel_id=11,
-        ativas_channel_id=12,
-        panel_message_id=13,
-    )
-    config = await repository.get_config(123)
-    assert config is not None
-    assert config.parceria_category_id == 10
-    assert config.parceria_registrar_channel_id == 11
-    assert config.parceria_ativas_channel_id == 12
-    assert config.parceria_panel_message_id == 13
+    Aqui cobrimos so a traducao de erro que a camada HTTP acrescenta: 409 vira
+    `ParceriaDuplicadaError` e falha de rede numa leitura vira `None`/lista
+    vazia em vez de propagar, porque os call-sites em views.py tratam ausencia
+    de dado, nao excecao de transporte.
+    """
+    repository = ParceriasRepository()
 
-    created = await repository.create_parceria(
-        guild_id=123,
-        nome_familia="Comando Vermelho",
-        produto="Armamento",
-        contato_01="João",
-        contato_02=None,
-        mensagem_lista_id=999,
-        nome_arquivo_imagem="uniforme_comando-vermelho.png",
-        registrado_por=42,
-    )
-    assert created["mensagem_lista_id"] == 999
-    assert (await repository.find_by_name(123, "comando vermelho"))["id"] == created["id"]
+    class FakeResponse:
+        def __init__(self, status_code: int, payload=None) -> None:
+            self.status_code = status_code
+            self._payload = payload
 
-    with pytest.raises(sqlite3.IntegrityError):
+        def json(self):
+            return self._payload
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                raise httpx.HTTPStatusError("erro", request=None, response=self)
+
+    async def fake_post_conflict(self, *args, **kwargs):
+        return FakeResponse(409)
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post_conflict)
+    with pytest.raises(ParceriaDuplicadaError):
         await repository.create_parceria(
             guild_id=123,
-            nome_familia="COMANDO VERMELHO",
-            produto="Munição",
+            nome_familia="Comando Vermelho",
+            produto="Armamento",
             contato_01=None,
             contato_02=None,
-            mensagem_lista_id=1000,
-            nome_arquivo_imagem="uniforme_comando-vermelho.png",
-            registrado_por=43,
+            mensagem_lista_id=999,
+            nome_arquivo_imagem="uniforme.png",
+            registrado_por=42,
         )
 
-    updated = await repository.update_details(
-        parceria_id=created["id"],
-        nome_familia="Comando Azul",
-        produto="Veículos",
-        contato_01=None,
-        contato_02="Pedro",
-    )
-    assert updated["mensagem_lista_id"] == 999
-    assert updated["nome_familia"] == "Comando Azul"
-    assert await repository.name_exists_for_other(123, "Comando Azul", created["id"]) is False
+    async def fake_get_unavailable(self, *args, **kwargs):
+        raise httpx.ConnectError("sem rede")
 
-    with_image = await repository.update_image(parceria_id=created["id"], nome_arquivo_imagem="uniforme_comando-azul.webp")
-    assert with_image["nome_arquivo_imagem"] == "uniforme_comando-azul.webp"
-
-    assert len(await repository.list_active(123)) == 1
-    await repository.deactivate(created["id"])
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get_unavailable)
+    assert await repository.get_config(123) is None
     assert await repository.list_active(123) == []
+    assert await repository.name_exists_for_other(123, "Comando Vermelho", 1) is False
 
 
 def test_parse_positive_int_rejects_invalid_values() -> None:

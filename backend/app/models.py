@@ -136,6 +136,41 @@ class PaymentEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class ParceriaConfig(Base):
+    __tablename__ = "parceria_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    guild_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    category_id: Mapped[str | None] = mapped_column(String(32))
+    registrar_channel_id: Mapped[str] = mapped_column(String(32))
+    ativas_channel_id: Mapped[str] = mapped_column(String(32))
+    panel_message_id: Mapped[str | None] = mapped_column(String(32))
+
+
+class Parceria(Base):
+    __tablename__ = "parcerias"
+    __table_args__ = (UniqueConstraint("guild_id", "nome_familia_normalizado", name="uq_parcerias_guild_nome"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    guild_id: Mapped[str] = mapped_column(String(32), index=True)
+    nome_familia: Mapped[str] = mapped_column(String(100))
+    # Postgres nao tem COLLATE NOCASE; a coluna normalizada e o que garante
+    # unicidade e busca sem diferenciar maiusculas em ambos os dialetos.
+    nome_familia_normalizado: Mapped[str] = mapped_column(String(100), index=True)
+    produto: Mapped[str] = mapped_column(String(100))
+    contato_01: Mapped[str | None] = mapped_column(String(150))
+    contato_02: Mapped[str | None] = mapped_column(String(150))
+    mensagem_lista_id: Mapped[str] = mapped_column(String(32))
+    nome_arquivo_imagem: Mapped[str] = mapped_column(String(255))
+    registrado_por: Mapped[str] = mapped_column(String(32))
+    ativo: Mapped[bool] = mapped_column(default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Setado explicitamente em app/parceria.py, nao via onupdate=func.now():
+    # ler esse valor de volta na mesma resposta (como o cliente HTTP do bot
+    # precisa) dispara um refresh lazy fora do contexto async do SQLAlchemy.
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Ausencia(Base):
     __tablename__ = "ausencias"
 

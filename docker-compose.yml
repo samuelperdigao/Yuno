@@ -39,8 +39,6 @@ services:
       context: ./bot
     restart: unless-stopped
     env_file: .env
-    volumes:
-      - bot_data:/app/data
     depends_on:
       api:
         condition: service_started
@@ -72,6 +70,5 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  bot_data:
   caddy_data:
   caddy_config:

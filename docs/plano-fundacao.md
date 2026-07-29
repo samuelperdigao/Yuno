@@ -96,11 +96,25 @@ Incluir `/yuno diagnostico`: lista o que está configurado, o que falta, quais p
 
 **Entregue:** `backend/alembic.ini`, `backend/migrations/` (`env.py` configurado, 2 migrações: `b83c59e0158e` baseline e `d4b265e2fb2a` colunas de pasta), `app/db.py` reescrito (`_ensure_compat_columns` removido, `create_database()` agora roda `stamp`+`upgrade` via Alembic), `alembic==1.18.5` em `requirements.txt`, `Dockerfile` copiando `alembic.ini` e `migrations/` para a imagem. 67 testes passando (sem teste novo — é infraestrutura de schema, verificado manualmente com os dois cenários acima).
 
-### 0.6 Abstração de storage e licença
+### 0.6 Abstração de storage e licença — CONCLUÍDO
 
-`Repository` (protocolo) com implementação `ApiRepository` hoje. `LicenseProvider` com `RemoteLicenseProvider` hoje. É o que preserva a opção de self-host sem custo agora.
+**`Repository`/`LicenseProvider`:** `bot/yuno_bot/interfaces.py` declara `GuildConfigRepository` (`get_guild_config`/`save_guild_config`) e `LicenseProvider` (`validate_license`) como `typing.Protocol`. `YunoAPI` já satisfaz os dois estruturalmente — nada foi renomeado nem movido, porque Python resolve por estrutura, não por herança: os ~20 call sites que recebem `api` continuam recebendo `YunoAPI`. O valor não é técnico agora, é documental — os dois protocolos nomeiam exatamente o que uma implementação self-host precisaria reimplementar, e ficam sem custo até esse dia chegar. `test_interfaces.py` trava que `YunoAPI` continua satisfazendo os dois (`isinstance` com `@runtime_checkable`).
 
-Junto: migrar `parcerias_repository` do SQLite local para o backend. Hoje o estado de parcerias some no redeploy.
+**Não fiz uma abstração maior que isso.** `YunoAPI` tem 30+ métodos específicos de farm_tickets (débito conhecido) — formalizar um protocolo com essa superfície inteira seria documentar a bagunça, não abstrair. Os dois protocolos cobrem só os dois pontos que o self-host de fato precisa trocar.
+
+**Migração de `parcerias_repository` (SQLite local → backend):** era o item concreto e valioso de 0.6 — o local anterior perdia todo o estado de parcerias a cada redeploy, e quebrava multi-tenant (estado no filesystem do container, não no banco compartilhado). Agora:
+
+- `backend/app/models.py`: `Parceria` e `ParceriaConfig` novas. `nome_familia_normalizado` guarda a versão sem acento/minúscula para unicidade e busca — SQLite tinha `COLLATE NOCASE`, Postgres não tem equivalente direto.
+- `backend/app/parceria.py` (lógica) + `backend/app/api/parceria.py` (rotas `/internal/parcerias/*`, mesmo padrão de `farm_tickets`: `require_bot_token` + `assert_license` por guild).
+- `bot/yuno_bot/commands/parceria/repository.py` reescrito: mesma classe `ParceriasRepository`, mesmos nomes de método — `cog.py` não mudou uma linha. Por dentro, HTTP em vez de `sqlite3`. Leituras (`get_config`, `find_by_name`, `list_active`, `get`, `name_exists_for_other`) tratam falha de rede/licença como "sem dado" (mesmo comportamento que "não achei a linha" tinha no SQLite); escritas propagam erro — `views.py` ganhou tratamento para `ParceriaDuplicadaError` (409, antes era `sqlite3.IntegrityError`) nos dois pontos que criam/editam.
+- Migração Alembic `3795707f5b0a` para as duas tabelas novas.
+- `docker-compose.yml`: removido o volume `bot_data` (existia só para o SQLite local que não existe mais). `.env.example`: removido `PARCERIAS_DATABASE_PATH`.
+
+**Achado ao migrar, não corrigido:** as rotas novas de parceria checam licença ativa (`assert_license`) e o fluxo antigo via SQLite nunca checava — o painel de parcerias funcionava mesmo sem licença. Isso é uma correção de produto (parceria agora se comporta como todo módulo licenciado), não uma regressão, mas é uma mudança de comportamento real que vale testar num servidor com licença revogada antes do próximo deploy.
+
+**Achado que exigiu depuração:** `Parceria.updated_at` com `onupdate=func.now()` quebrava com `MissingGreenlet` ao ser lido de volta na mesma resposta HTTP — SQLAlchemy async tenta um refresh lazy fora do contexto async ao acessar um atributo que só o banco calculou. `FarmTicket.updated_at` tem o mesmo `onupdate` e nunca deu esse erro porque nenhuma resposta o serializa de volta. Corrigido setando `updated_at` explicitamente em Python (`app/parceria.py`), não via `onupdate`. Vale desconfiar do mesmo padrão em qualquer coluna nova que precise ser lida na mesma request em que foi escrita.
+
+**Entregue:** 70 testes passando (3 novos: `test_interfaces.py`, mais os de `test_api.py` para `/internal/parcerias/*`, mais a reescrita do teste de `ParceriasRepository` em `test_bot_modal_helpers.py` para cobrir tradução de erro HTTP em vez do ciclo de vida do SQLite).
 
 ---
 
@@ -164,7 +178,7 @@ Fase 0 é bloqueante — cada módulo portado antes dela carrega o setup frágil
 
 Fase 1 pode começar assim que 0.1 (registry) estiver de pé, porque o dashboard consome o registry.
 
-**Ordem de execução: ~~0.1~~ ~~0.2~~ ~~0.3~~ ~~0.4~~ ~~0.5~~ (feitos) → 0.6 → Fase 1 → Fase 2.**
+**Ordem de execução: ~~0.1~~ ~~0.2~~ ~~0.3~~ ~~0.4~~ ~~0.5~~ ~~0.6~~ (feitos) → Fase 1 → Fase 2.**
 
 ---
 

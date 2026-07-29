@@ -42,14 +42,16 @@ Consequências práticas do modelo SaaS que precisam estar sempre na cabeça:
 Três serviços, orquestrados por `docker-compose.yml`, atrás de Caddy.
 
 ```
-backend/   FastAPI + SQLAlchemy async + Postgres (SQLite em dev)
-           app/api/*.py     → rotas (auth, config, licenses, systems, farm_tickets, webhooks, internal, products, health)
+backend/   FastAPI + SQLAlchemy async + Postgres (SQLite em dev), migrações via Alembic
+           app/api/*.py     → rotas (auth, config, licenses, systems, farm_tickets, parceria, webhooks, internal, products, health)
            app/services.py  → regras de negócio + check_permission + audit
-           app/models.py    → License, GuildConfig, SystemRecord, AuditLog, PaymentEvent, Farm*
+           app/models.py    → License, GuildConfig, SystemRecord, AuditLog, PaymentEvent, Farm*, Parceria*
+           migrations/      → Alembic; toda alteração em models.py vem com migração no mesmo commit
 bot/       discord.py 2.4 — cliente puro da API, sem banco próprio
            yuno_bot/main.py         → YunoBot, registro de cogs e views persistentes
-           yuno_bot/api_client.py   → YunoAPI (httpx)
-           yuno_bot/guards.py       → ensure_allowed / deny
+           yuno_bot/api_client.py   → YunoAPI (httpx) — implementa GuildConfigRepository e LicenseProvider
+           yuno_bot/interfaces.py   → protocolos que uma implementação self-host precisaria satisfazer
+           yuno_bot/guards.py       → ensure_allowed / deny / requires_module
            yuno_bot/server_setup.py → criação de categorias/canais no primeiro setup
            yuno_bot/commands/<mod>/ → cog.py, embeds.py, modals.py, views.py
 dashboard/ React/Vite — ativação de licença e configuração web
@@ -144,11 +146,10 @@ Roteiro, em `references/port-checklist.md` com o detalhamento. Resumo:
 Mantida em ordem de impacto na venda. Ao resolver um item, remova-o daqui e registre no CHANGELOG.
 
 1. **Não há dashboard de configuração dentro do Discord.** Hoje o cliente precisa sair do Discord e ir no painel web. O MDM resolveu isso muito bem em `cogs/dashboard.py` com Components V2 (`Section` + `accessory`, paginado). É o maior gap de UX do produto e o item mais rentável da lista. O registry já expõe `dashboard_fields`, `icon`, `nome` e `descricao` — a UI pode ser gerada a partir dele.
-2. **`parcerias_repository` grava SQLite local no container do bot.** Viola o multi-tenant e o estado some no redeploy. Migrar para o backend.
-3. **`api_client.py` tem 30+ métodos específicos de farm_tickets.** Domínio vazando para a camada de transporte. Deve ser um cliente genérico com os métodos de domínio nos módulos.
-4. **`_apply_set_visibility` itera todas as categorias e todos os canais chamando `set_permissions`.** Em servidor com 80 canais isso é rate-limit garantido e trava o setup na frente do cliente. Precisa operar só nos canais afetados.
-5. **`messages` não é consumido.** Cliente não consegue mudar nenhum texto.
-6. **Licença só é validada em `/yuno status` e `/yuno configurar`.** Revogação não tem efeito imediato nos demais comandos. O `/radio alterar` nem isso faz — só checa cargo, nunca módulo/licença (achado ao portar o guard de views).
+2. **`api_client.py` tem 30+ métodos específicos de farm_tickets.** Domínio vazando para a camada de transporte. Deve ser um cliente genérico com os métodos de domínio nos módulos.
+3. **`_apply_set_visibility` itera todas as categorias e todos os canais chamando `set_permissions`.** Em servidor com 80 canais isso é rate-limit garantido e trava o setup na frente do cliente. Precisa operar só nos canais afetados.
+4. **`messages` não é consumido.** Cliente não consegue mudar nenhum texto.
+5. **Licença só é validada em `/yuno status` e `/yuno configurar`.** Revogação não tem efeito imediato nos demais comandos. O `/radio alterar` nem isso faz — só checa cargo, nunca módulo/licença (achado ao portar o guard de views).
 
 **Resolvido:**
 
@@ -156,6 +157,9 @@ Mantida em ordem de impacto na venda. Ao resolver um item, remova-o daqui e regi
 - Setup idempotente por ID + `/yuno diagnostico` (`server_setup.ensure_setup_channels`, `diagnostics.py`). Canal renomeado ou movido pelo cliente é respeitado — identidade é o ID, e o bot nunca reorganiza o servidor dele.
 - Guard de módulo em views (`@requires_module` em `guards.py`). Aplicado nos botões que não passavam por `ensure_allowed`/`can_manage_parcerias`: `AusenciaPanelView`, `RadioPainelView`, `FarmPanelView` e `FarmTicketControlView` (9 botões ao todo). `SetPanelView`/`SetApprovalView` e `MetaPanelView` foram migrados do `ensure_allowed` inline para o decorator, por consistência. `ParceriaPanelView` já checava módulo via `can_manage_parcerias` e não foi tocado. O decorator lê `self.api` quando existe, senão `self.controller.bot.api` — as views de `farm_tickets` guardam a instância do cog (`controller`), não a `YunoAPI` diretamente.
 - Alembic (`backend/alembic.ini`, `backend/migrations/`). `_ensure_compat_columns` (ALTER TABLE manual em `db.py`) foi substituído por migração versionada. **Regra a partir de agora: toda alteração em `models.py` vem com migração no mesmo commit** — `alembic revision --autogenerate -m "..."` a partir de `backend/`, revisar o arquivo gerado (autogenerate erra em enums cross-tabela e esquece o import de `Text` quando usa `JSONB(astext_type=...)`), testar `upgrade` antes de commitar. `create_database()` adota bancos criados antes do Alembic existir via `stamp` na baseline (`LEGACY_BASELINE_REVISION` em `db.py`) quando detecta tabela antiga sem `alembic_version` — é o caminho que a produção atual vai percorrer no próximo deploy.
+- `Repository`/`LicenseProvider` (`bot/yuno_bot/interfaces.py`, protocolos estruturais) e `parcerias_repository` migrado do SQLite local para o backend (`app/parceria.py`, `app/api/parceria.py`, tabelas `parcerias`/`parceria_configs`). `ParceriasRepository` manteve nome e assinatura — só a implementação interna virou HTTP; `cog.py` não mudou. **Cuidado ao ler de volta uma coluna com `onupdate=func.now()` na mesma resposta que a escreveu:** dispara `MissingGreenlet` no SQLAlchemy async (refresh lazy fora do contexto). Setar o timestamp explicitamente em Python evita o problema.
+
+**Nota de arquitetura:** `bot/yuno_bot/interfaces.py` define `GuildConfigRepository` e `LicenseProvider` como contrato para self-host. `YunoAPI` os satisfaz estruturalmente hoje (é o `ApiRepository`/`RemoteLicenseProvider` do plano); nao ha necessidade de importar essas classes em call sites normais, elas existem para o dia em que uma segunda implementacao precisar existir.
 
 ## Verificação antes de fechar qualquer entrega
 

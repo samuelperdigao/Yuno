@@ -23,12 +23,10 @@ class YunoBot(commands.Bot):
         super().__init__(command_prefix="y!", intents=INTENTS)
         self.log = logging.getLogger("yuno")
         self.api = YunoAPI()
-        settings = get_settings()
-        self.parcerias_repository = ParceriasRepository(settings.parcerias_database_path)
+        self.parcerias_repository = ParceriasRepository()
         self.module_context: ModuleContext | None = None
 
     async def setup_hook(self) -> None:
-        await self.parcerias_repository.initialize()
         await self.add_cog(YunoAdminCog(self))
 
         # Cogs e views persistentes vem do registry. Adicionar um modulo novo e
