@@ -48,7 +48,12 @@ _STATUS_COLOR = {"configurado": 0x2ECC71, "incompleto": 0xF1C40F, "desligado": 0
 # um resumo em settings.<modulo> pelo mesmo motivo (ver app/farm_tickets.py e
 # app/parceria.py); encomenda/producao/ticket nao tem comando de painel
 # proprio -- o unico dado e o canal que `/yuno configurar` ja cria.
-_SIMPLE_MODULES: dict[str, str] = {"encomenda": "encomendas", "producao": "producao", "ticket": "tickets"}
+_SIMPLE_MODULES: dict[str, str] = {
+    "encomenda": "encomendas",
+    "producao": "producao",
+    "ticket": "tickets",
+    "adv": "adv",
+}
 
 _COMMAND_HINTS: dict[str, str] = {
     "set": "/set painel",
@@ -60,6 +65,7 @@ _COMMAND_HINTS: dict[str, str] = {
     "encomenda": "/yuno configurar",
     "producao": "/yuno configurar",
     "ticket": "/yuno configurar",
+    "adv": "/yuno configurar",
 }
 
 

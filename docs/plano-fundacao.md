@@ -146,7 +146,7 @@ Ordem, do que ensina o padrão para o que exige mais cuidado:
 
 | # | Módulo | Origem MDM | LOC origem | Por que nessa posição |
 |---|---|---|---|---|
-| 1 | `adv` | `cogs/adv.py` | 309 | Pequeno; exercita painel + modal + log ponta a ponta |
+| 1 | ~~`adv`~~ | `cogs/adv.py` | 309 | **CONCLUÍDO.** Pequeno; exercita painel + modal + log ponta a ponta |
 | 2 | `anuncio` | `cogs/anuncio.py` | 335 | Cargos anunciantes exercitam `command_permissions` |
 | 3 | `hierarquia` | `cogs/hierarquia.py` | 335 | Manipulação de cargo; exercita permissão do bot |
 | 4 | `membros` | `cogs/membros.py` | 190 | Primeiro módulo sem slash command (listeners) |
@@ -155,6 +155,14 @@ Ordem, do que ensina o padrão para o que exige mais cuidado:
 | 7 | `disparo` | `cogs/disparo.py` | 545 | Rate limit exige cuidado; por último |
 
 Fora do escopo desta fase, por serem específicos da facção: `bau`, `colete`, `recolhimento`, `heroina`, e o `farm` de itens ilegais.
+
+### `adv` — CONCLUÍDO
+
+Portado sem tabela nova: cabe inteiro em `SystemRecord` (`module="adv"`, `payload={membro_id, descricao, dias}`), seguindo a regra do checklist ("registro simples, sem query analítica → `SystemRecord`, prefira isso"). Zero migração, zero rota nova no backend — só a chave `adv` em `MODULES`.
+
+**Divergências propositais do MDM:** os comandos legados do MDM (`/setup-adv` configurando canal via parâmetro, `/adv` como atalho direto) não foram portados — o Yuno já resolve "onde fica o canal" via `setup_channels`/`/yuno configurar`, então existir um segundo jeito de configurar seria a mesma inconsistência que a Fase 1 encontrou em outros módulos. Permissão trocou de `manage_guild` hardcoded para `ensure_allowed("adv", "aplicar")` (módulo + `command_permissions`), consistente com todo o resto do Yuno em vez de um cargo fixo do Discord.
+
+**Entregue:** `bot/yuno_bot/commands/adv/` completo (`cog.py`, `embeds.py`, `modals.py`, `views.py`, `__init__.py`), `MODULE` registrado (`ordem=90`), `adv` em `_SIMPLE_MODULES`/`_COMMAND_HINTS` do dashboard (Fase 1). 84 testes passando.
 
 ---
 

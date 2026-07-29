@@ -54,7 +54,7 @@ Duas tabelas:
 | `paineis.py` | 379 | Listeners e handlers dos painéis | Conceito |
 | `hierarquia.py` | 335 | Painel de gestão de hierarquia de cargos | Sim — núcleo |
 | `anuncio.py` | 335 | Sistema de anúncios com cargos anunciantes | Sim — núcleo |
-| `adv.py` | 309 | Advertências manuais (painel + modal + dias) | Sim — núcleo |
+| `adv.py` | 309 | Advertências manuais (painel + modal + dias) | Já existe no Yuno (`commands/adv/`, via `SystemRecord`, sem tabela própria) |
 | `lideranca.py` | 308 | Handlers do painel de liderança | Avaliar |
 | `ranking_painel.py` | 294 | Ranking semanal público | Fase 2 |
 | `encomenda.py` | 269 | Encomendas | Já existe no Yuno |

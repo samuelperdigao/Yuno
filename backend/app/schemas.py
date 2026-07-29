@@ -16,6 +16,7 @@ MODULES = [
     "ausencia",
     "radio",
     "producao",
+    "adv",
 ]
 
 

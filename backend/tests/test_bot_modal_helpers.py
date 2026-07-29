@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(ROOT / "bot"))
 
+from yuno_bot.commands.adv.embeds import adv_log_embed, adv_post_embed, build_adv_payload
 from yuno_bot.commands.encomenda.embeds import build_encomenda_payload
 from app.services import check_permission
 from yuno_bot.commands.ausencia.embeds import (
@@ -113,6 +114,27 @@ def test_modal_payload_builders() -> None:
     assert build_producao_payload("Municao", 50, "turno noite")["quantidade"] == 50
     assert build_encomenda_payload("Item", 2, "amanha", "Familia", "")["valor_observacao"] == "Nao informado"
     assert build_parceria_payload("Fam", "Produto", "Contato", "", "")["contato_secundario"] == "Nao informado"
+    assert build_adv_payload(42, "  Faltou ao turno  ", 7) == {"membro_id": "42", "descricao": "Faltou ao turno", "dias": 7}
+
+
+def test_adv_embeds_show_membro_and_duracao() -> None:
+    membro = SimpleNamespace(
+        mention="<@42>", display_name="Mineiro", id=42, display_avatar=SimpleNamespace(url="https://example.com/a.png")
+    )
+    interaction = SimpleNamespace(
+        user=SimpleNamespace(mention="<@1>", id=1, display_name="Admin"),
+        channel=SimpleNamespace(mention="<#9>"),
+    )
+    payload = build_adv_payload(membro.id, "Descumpriu regra", 3)
+    record = {"id": 55}
+
+    post = adv_post_embed(interaction, record, membro, payload).to_dict()
+    assert post["fields"][0]["value"] == "#55"
+    assert "Mineiro" in post["fields"][1]["value"]
+    assert "3" in post["fields"][2]["value"]
+
+    log_embed = adv_log_embed(interaction, record, membro, payload).to_dict()
+    assert any(field["name"] == "Membro" and "42" in field["value"] for field in log_embed["fields"])
 
 
 def test_parse_meta_definition_accepts_multiple_items() -> None:
