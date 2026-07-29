@@ -6,6 +6,7 @@ import httpx
 from yuno_bot.commands.farm_tickets.embeds import farm_ticket_embed, recent_proofs_text
 from yuno_bot.commands.farm_tickets.helpers import MemberFolderIdentity, build_ticket_channel_name_from_folder, choose_ticket_category, is_farm_admin
 from yuno_bot.commands.farm_tickets.modals import FarmEntryModal, FarmFinalizeModal, FarmReviewModal
+from yuno_bot.guards import requires_module
 
 
 class FarmPanelView(discord.ui.View):
@@ -14,6 +15,7 @@ class FarmPanelView(discord.ui.View):
         self.controller = controller
 
     @discord.ui.button(label="Abrir Ticket Semanal", style=discord.ButtonStyle.primary, custom_id="yuno:farm:panel:open")
+    @requires_module("farm_tickets", "abrir")
     async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message("Use este painel dentro de um servidor.", ephemeral=True)
@@ -22,6 +24,7 @@ class FarmPanelView(discord.ui.View):
         await self.controller.open_weekly_ticket(interaction)
 
     @discord.ui.button(label="Ver Meu Farm", style=discord.ButtonStyle.secondary, custom_id="yuno:farm:panel:mine")
+    @requires_module("farm_tickets", "ver")
     async def my_farm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not interaction.guild:
             await interaction.response.send_message("Use este painel dentro de um servidor.", ephemeral=True)
@@ -37,6 +40,7 @@ class FarmPanelView(discord.ui.View):
         await interaction.followup.send(f"Seu ticket atual: {link}\nProgresso: `{(ticket.get('progress') or {}).get('percent', 0)}%`.", ephemeral=True)
 
     @discord.ui.button(label="Excluir Ticket", style=discord.ButtonStyle.danger, custom_id="yuno:farm:panel:delete")
+    @requires_module("farm_tickets", "excluir")
     async def delete_ticket(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message("Use este painel dentro de um servidor.", ephemeral=True)
@@ -64,6 +68,7 @@ class FarmTicketControlView(discord.ui.View):
         self.controller = controller
 
     @discord.ui.button(label="Lancar Farm", style=discord.ButtonStyle.primary, custom_id="yuno:farm:ticket:entry")
+    @requires_module("farm_tickets", "lancar")
     async def entry(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         ticket = await self.controller.ticket_from_interaction(interaction)
         if not ticket:
@@ -74,6 +79,7 @@ class FarmTicketControlView(discord.ui.View):
         await interaction.response.send_modal(FarmEntryModal(self.controller, ticket))
 
     @discord.ui.button(label="Ver Comprovantes", style=discord.ButtonStyle.secondary, custom_id="yuno:farm:ticket:proofs")
+    @requires_module("farm_tickets", "comprovantes")
     async def proofs(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         ticket = await self.controller.ticket_from_interaction(interaction)
         if not ticket or not interaction.guild or not isinstance(interaction.user, discord.Member):
@@ -85,6 +91,7 @@ class FarmTicketControlView(discord.ui.View):
         await interaction.response.send_message(recent_proofs_text(ticket), ephemeral=True)
 
     @discord.ui.button(label="Assumir Ticket", style=discord.ButtonStyle.secondary, custom_id="yuno:farm:ticket:assign")
+    @requires_module("farm_tickets", "assumir")
     async def assign(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         ticket = await self.controller.ticket_from_interaction(interaction)
         if not ticket or not await self._ensure_admin(interaction):
@@ -100,6 +107,7 @@ class FarmTicketControlView(discord.ui.View):
         await interaction.followup.send("Ticket assumido.", ephemeral=True)
 
     @discord.ui.button(label="Revisar", style=discord.ButtonStyle.secondary, custom_id="yuno:farm:ticket:review")
+    @requires_module("farm_tickets", "revisar")
     async def review(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         ticket = await self.controller.ticket_from_interaction(interaction)
         if not ticket or not await self._ensure_admin(interaction):
@@ -107,6 +115,7 @@ class FarmTicketControlView(discord.ui.View):
         await interaction.response.send_modal(FarmReviewModal(self.controller, ticket))
 
     @discord.ui.button(label="Aprovar Meta", style=discord.ButtonStyle.success, custom_id="yuno:farm:ticket:approve")
+    @requires_module("farm_tickets", "aprovar")
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         ticket = await self.controller.ticket_from_interaction(interaction)
         if not ticket or not await self._ensure_admin(interaction):
@@ -123,6 +132,7 @@ class FarmTicketControlView(discord.ui.View):
         await interaction.followup.send("Meta aprovada.", ephemeral=True)
 
     @discord.ui.button(label="Finalizar Ticket", style=discord.ButtonStyle.danger, custom_id="yuno:farm:ticket:finalize")
+    @requires_module("farm_tickets", "finalizar")
     async def finalize(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         ticket = await self.controller.ticket_from_interaction(interaction)
         if not ticket or not await self._ensure_admin(interaction):

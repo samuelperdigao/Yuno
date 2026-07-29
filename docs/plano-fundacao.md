@@ -66,11 +66,19 @@ Incluir `/yuno diagnostico`: lista o que está configurado, o que falta, quais p
 - **TTL curto por um motivo específico:** alteração feita no dashboard web não invalida o cache deste processo. O TTL é o tempo máximo que o cliente espera para ver a mudança refletida no bot. Invalidação cross-process via Redis pub/sub (o Redis já está no compose) é o caminho quando isso incomodar — hoje não justifica.
 - **Não mexi no cliente HTTP.** Cada método de `api_client.py` ainda faz `async with httpx.AsyncClient(...)`, o que descarta o pool de conexões e refaz handshake TCP a cada request. É um problema real, mas é de transporte, não de cache — misturar as duas mudanças dificultaria isolar regressão. Virou débito.
 
-### 0.4 Guard de módulo em views
+### 0.4 Guard de módulo em views — CONCLUÍDO
 
 **Problema:** `check_permission` valida `modules` no backend, mas botões de painel não passam por ele. Módulo desligado continua clicável.
 
-**Solução:** decorator `@requires_module("set")` aplicado em callback de view e de botão. Mesma resposta padronizada de `deny`.
+**Solução:** decorator `@requires_module(modulo, comando)` em `bot/yuno_bot/guards.py`, chamando o mesmo `ensure_allowed` dos slash commands (módulo + licença + cargo/canal/categoria) antes do callback do botão, com a resposta padronizada de `deny`.
+
+**Levantamento antes de aplicar:** três das sete views já guardavam módulo — `SetPanelView`/`SetApprovalView` e `MetaPanelView` chamavam `ensure_allowed` inline, `ParceriaPanelView` passa por `can_manage_parcerias` (que também checa `check_permission`). As sem guard nenhum eram `AusenciaPanelView`, `RadioPainelView`, `FarmPanelView` e `FarmTicketControlView` — 9 botões ao todo, incluindo os únicos pontos de entrada de farm ticket (não há slash command equivalente para a maioria das ações).
+
+**Decisão que revisou a decisão original:** a proposta inicial era padronizar todas as views para `self.api`. Investigando o código, `FarmPanelView`/`FarmTicketControlView` guardam `self.controller` — a instância do `FarmTicketsCog`, com dezenas de métodos de domínio, não um `YunoAPI`. Renomear teria sido enganoso. O decorator resolve isso lendo `self.api` quando existe e caindo para `self.controller.bot.api` caso contrário — sem exigir renomear nada.
+
+**Achado colateral:** `/radio alterar` (slash command, não só o botão do painel) nunca checou módulo nem licença — só um cargo customizado. Não corrigido nesta sessão (fora do escopo de "views"); vira item 7 dos débitos técnicos.
+
+**Entregue:** `requires_module` em `guards.py`; aplicado em `ausencia/views.py`, `radio/views.py`, `farm_tickets/views.py` (2 classes, 9 botões); `set/views.py` e `meta/views.py` migrados do `ensure_allowed` inline para o decorator. 3 testes novos em `backend/tests/test_view_guard.py` cobrindo módulo desligado (nega e não chama o callback), módulo ligado (chama) e extração do `api` via `controller.bot.api`. 67 testes passando.
 
 ### 0.5 Alembic
 
@@ -144,7 +152,7 @@ Fase 0 é bloqueante — cada módulo portado antes dela carrega o setup frágil
 
 Fase 1 pode começar assim que 0.1 (registry) estiver de pé, porque o dashboard consome o registry.
 
-**Ordem de execução: ~~0.1~~ ~~0.2~~ ~~0.3~~ (feitos) → 0.4 → 0.5 → 0.6 → Fase 1 → Fase 2.**
+**Ordem de execução: ~~0.1~~ ~~0.2~~ ~~0.3~~ ~~0.4~~ (feitos) → 0.5 → 0.6 → Fase 1 → Fase 2.**
 
 ---
 

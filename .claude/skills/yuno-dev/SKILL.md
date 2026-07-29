@@ -144,18 +144,18 @@ Roteiro, em `references/port-checklist.md` com o detalhamento. Resumo:
 Mantida em ordem de impacto na venda. Ao resolver um item, remova-o daqui e registre no CHANGELOG.
 
 1. **Não há dashboard de configuração dentro do Discord.** Hoje o cliente precisa sair do Discord e ir no painel web. O MDM resolveu isso muito bem em `cogs/dashboard.py` com Components V2 (`Section` + `accessory`, paginado). É o maior gap de UX do produto e o item mais rentável da lista. O registry já expõe `dashboard_fields`, `icon`, `nome` e `descricao` — a UI pode ser gerada a partir dele.
-2. **Nenhum comando verifica `modules`.** `check_permission` valida no backend, mas painéis e botões de view não passam por ele. Módulo "desligado" continua clicável. Com o registry no lugar, um decorator `@requires_module` resolve.
-3. **`parcerias_repository` grava SQLite local no container do bot.** Viola o multi-tenant e o estado some no redeploy. Migrar para o backend.
-4. **`api_client.py` tem 30+ métodos específicos de farm_tickets.** Domínio vazando para a camada de transporte. Deve ser um cliente genérico com os métodos de domínio nos módulos.
-5. **`_apply_set_visibility` itera todas as categorias e todos os canais chamando `set_permissions`.** Em servidor com 80 canais isso é rate-limit garantido e trava o setup na frente do cliente. Precisa operar só nos canais afetados.
-6. **Sem Alembic.** Produto vendido sem migração versionada não sobrevive à segunda atualização.
-7. **`messages` não é consumido.** Cliente não consegue mudar nenhum texto.
-8. **Licença só é validada em `/yuno status` e `/yuno configurar`.** Revogação não tem efeito imediato nos demais comandos.
+2. **`parcerias_repository` grava SQLite local no container do bot.** Viola o multi-tenant e o estado some no redeploy. Migrar para o backend.
+3. **`api_client.py` tem 30+ métodos específicos de farm_tickets.** Domínio vazando para a camada de transporte. Deve ser um cliente genérico com os métodos de domínio nos módulos.
+4. **`_apply_set_visibility` itera todas as categorias e todos os canais chamando `set_permissions`.** Em servidor com 80 canais isso é rate-limit garantido e trava o setup na frente do cliente. Precisa operar só nos canais afetados.
+5. **Sem Alembic.** Produto vendido sem migração versionada não sobrevive à segunda atualização.
+6. **`messages` não é consumido.** Cliente não consegue mudar nenhum texto.
+7. **Licença só é validada em `/yuno status` e `/yuno configurar`.** Revogação não tem efeito imediato nos demais comandos. O `/radio alterar` nem isso faz — só checa cargo, nunca módulo/licença (achado ao portar o guard de views; não corrigido nesta sessão, mesma classe de risco do item resolvido abaixo).
 
 **Resolvido:**
 
 - Registry declarativo de módulos (`yuno_bot/modules.py`). `main.py` e `server_setup.py` não são mais editados a cada módulo; a divergência de `farm_tickets` entre bot e backend está travada por teste.
 - Setup idempotente por ID + `/yuno diagnostico` (`server_setup.ensure_setup_channels`, `diagnostics.py`). Canal renomeado ou movido pelo cliente é respeitado — identidade é o ID, e o bot nunca reorganiza o servidor dele.
+- Guard de módulo em views (`@requires_module` em `guards.py`). Aplicado nos botões que não passavam por `ensure_allowed`/`can_manage_parcerias`: `AusenciaPanelView`, `RadioPainelView`, `FarmPanelView` e `FarmTicketControlView` (9 botões ao todo). `SetPanelView`/`SetApprovalView` e `MetaPanelView` foram migrados do `ensure_allowed` inline para o decorator, por consistência. `ParceriaPanelView` já checava módulo via `can_manage_parcerias` e não foi tocado. O decorator lê `self.api` quando existe, senão `self.controller.bot.api` — as views de `farm_tickets` guardam a instância do cog (`controller`), não a `YunoAPI` diretamente.
 
 ## Verificação antes de fechar qualquer entrega
 

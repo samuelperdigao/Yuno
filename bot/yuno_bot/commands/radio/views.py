@@ -3,6 +3,7 @@ import discord
 from yuno_bot.api_client import YunoAPI
 from yuno_bot.commands.radio.modals import RadioModal
 from yuno_bot.commands.radio.permissions import pode_alterar_radio
+from yuno_bot.guards import requires_module
 
 
 class RadioPainelView(discord.ui.View):
@@ -16,6 +17,7 @@ class RadioPainelView(discord.ui.View):
         style=discord.ButtonStyle.primary,
         custom_id="yuno:radio:panel:definir",
     )
+    @requires_module("radio", "alterar")
     async def alterar_radio(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message("❌ Use este painel dentro de um servidor.", ephemeral=True)

@@ -3,7 +3,7 @@ import discord
 from yuno_bot.api_client import YunoAPI
 from yuno_bot.commands.set.actions import approve_set_record
 from yuno_bot.commands.set.embeds import approved_public_embed
-from yuno_bot.guards import ensure_allowed
+from yuno_bot.guards import requires_module
 
 
 class SetPanelView(discord.ui.View):
@@ -12,12 +12,8 @@ class SetPanelView(discord.ui.View):
         self.api = api
 
     @discord.ui.button(label="Pedir Set", emoji="📝", style=discord.ButtonStyle.primary, custom_id="yuno:set:panel:request")
+    @requires_module("set", "solicitar")
     async def pedir_set(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        allowed, reason = await ensure_allowed(interaction, self.api, "set", "solicitar")
-        if not allowed:
-            await interaction.response.send_message(f"Yuno nao pode executar isso agora: {reason}", ephemeral=True)
-            return
-
         from yuno_bot.commands.set.modals import SetSolicitarModal
 
         await interaction.response.send_modal(SetSolicitarModal(self.api))
@@ -31,11 +27,8 @@ class SetApprovalView(discord.ui.View):
         self._processing = False
 
     @discord.ui.button(label="Aprovar", style=discord.ButtonStyle.success)
+    @requires_module("set", "aprovar")
     async def aprovar(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        allowed, reason = await ensure_allowed(interaction, self.api, "set", "aprovar")
-        if not allowed:
-            await interaction.response.send_message(f"Yuno nao pode executar isso agora: {reason}", ephemeral=True)
-            return
         if self._processing:
             await interaction.response.send_message("Esta solicitacao ja esta sendo processada.", ephemeral=True)
             return
@@ -62,11 +55,8 @@ class SetApprovalView(discord.ui.View):
         await interaction.followup.send(f"Set #{self.protocolo} aprovado. {message}", ephemeral=True)
 
     @discord.ui.button(label="Reprovar", style=discord.ButtonStyle.danger)
+    @requires_module("set", "reprovar")
     async def reprovar(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        allowed, reason = await ensure_allowed(interaction, self.api, "set", "reprovar")
-        if not allowed:
-            await interaction.response.send_message(f"Yuno nao pode executar isso agora: {reason}", ephemeral=True)
-            return
         from yuno_bot.commands.set.modals import SetReprovarModal
 
         await interaction.response.send_modal(SetReprovarModal(self.api, protocolo=self.protocolo, source_message=interaction.message))

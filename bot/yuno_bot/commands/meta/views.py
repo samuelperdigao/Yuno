@@ -10,7 +10,7 @@ from yuno_bot.commands.meta.embeds import (
     parse_meta_definition,
 )
 from yuno_bot.commands.shared import create_record, parse_positive_int, resolve_text_channel
-from yuno_bot.guards import ensure_allowed
+from yuno_bot.guards import requires_module
 
 
 MAX_META_ITEMS = 20
@@ -22,12 +22,8 @@ class MetaPanelView(discord.ui.View):
         self.api = api
 
     @discord.ui.button(label="Definir Meta", style=discord.ButtonStyle.primary, custom_id="yuno:meta:panel:define")
+    @requires_module("meta", "definir")
     async def definir_meta(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        allowed, reason = await ensure_allowed(interaction, self.api, "meta", "definir")
-        if not allowed:
-            await interaction.response.send_message(f"Yuno nao pode executar isso agora: {reason}", ephemeral=True)
-            return
-
         if not interaction.guild:
             await interaction.response.send_message("Use este painel dentro de um servidor.", ephemeral=True)
             return
