@@ -62,7 +62,7 @@ Duas tabelas:
 | `ausencia.py` | 260 | Ausências multi-server | Já existe no Yuno |
 | `mod.py` | 252 | `/clear`, `/organizar_canais` | Sim — barato |
 | `farm_embeds.py` | 222 | Builders de embed do farm | Fase 2 |
-| `membros.py` | 190 | Eventos join/leave, reconciliação de pastas | Sim — núcleo |
+| `membros.py` | 190 | Eventos join/leave, reconciliação de pastas | Já existe no Yuno (`commands/membros/`, libera pasta de farm ao sair) |
 | `sistema.py` | 67 | `/ping`, `/status` | Yuno já tem `/yuno status` |
 
 ## O padrão que vale copiar: `cogs/dashboard.py`

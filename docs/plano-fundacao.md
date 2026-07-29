@@ -149,7 +149,7 @@ Ordem, do que ensina o padrão para o que exige mais cuidado:
 | 1 | ~~`adv`~~ | `cogs/adv.py` | 309 | **CONCLUÍDO.** Pequeno; exercita painel + modal + log ponta a ponta |
 | 2 | ~~`anuncio`~~ | `cogs/anuncio.py` | 335 | **CONCLUÍDO.** Cargos anunciantes exercitam `command_permissions` |
 | 3 | ~~`hierarquia`~~ | `cogs/hierarquia.py` | 335 | **CONCLUÍDO.** Manipulação de cargo; exercita permissão do bot |
-| 4 | `membros` | `cogs/membros.py` | 190 | Primeiro módulo sem slash command (listeners) |
+| 4 | ~~`membros`~~ | `cogs/membros.py` | 190 | **CONCLUÍDO.** Primeiro módulo sem slash command (listeners) |
 | 5 | `acao` | `cogs/acao.py` + `acao_painel.py` | 1223 | Maior; padrão já consolidado |
 | 6 | `mod` | `cogs/mod.py` | 252 | Trivial, fecha a fase |
 | 7 | `disparo` | `cogs/disparo.py` | 545 | Rate limit exige cuidado; por último |
@@ -185,6 +185,24 @@ Este era o módulo escolhido pelo plano justamente para exercitar `command_permi
 **Auditoria:** cada promoção/rebaixamento vira `SystemRecord` (`module="hierarquia"`, payload com cargo anterior/novo/tipo) — o MDM só logava em canal, sem histórico consultável.
 
 **Entregue:** `bot/yuno_bot/commands/hierarquia/` completo (`helpers.py` puro, `embeds.py`, `views.py` com os três níveis de seleção — painel → membro → cargo —, `cog.py`, `__init__.py`). `hierarquia` em `MODULES`, registry (`ordem=110`, canal na categoria `admin`) e `_COMMAND_HINTS`. 87 testes passando.
+
+### `membros` — CONCLUÍDO
+
+Primeiro módulo do Yuno guiado por **listeners** (`on_member_join`, `on_member_remove`, `on_ready`), não por slash command — o comando `/membros configurar` que existe é só para o cargo automático opcional, não para a ação em si.
+
+**Achado ao separar genérico de específico:** dois dos três comportamentos do MDM eram inteiramente do Morro do Mineiro e ficaram de fora:
+- `CANAL_LOG_PD_ID` — lembrete manual pra staff remover o membro de um painel externo (FiveM) do próprio servidor. Não existe conceito equivalente no Yuno; descartado.
+- Atribuição de cargo hardcoded para `"| Pedir Set"`/`"Pedir Set"` — virou `settings.membros.welcome_role_id`, um cargo qualquer configurável por `/membros configurar`, desacoplado do módulo `set` (um cliente pode usar `membros` sem `set` estar nem ligado).
+
+**A parte que valia a pena portar de verdade — liberação de pasta ao sair:** o MDM chamava `liberar_pasta` (do próprio `set_service.py`, específico dele). No Yuno, o conceito de "pasta de membro" já existe em `farm_tickets` desde a Frente A desta sessão (`folder_channel_id`, `folder_slot` etc., resolvidos por overwrite de canal, não por linha de banco). Implementei `release_member_folder` em `farm_tickets/helpers.py`: renomeia o canal para conter `"livre"` e remove o overwrite do membro. O nome sem game_id numérico no final faz `parse_member_folder` falhar de propósito — é assim que o slot sai da contagem de `next_folder_slot` e fica disponível para o próximo membro.
+
+**Reconciliação no `on_ready`:** varre as pastas de cada guild com `membros` ligado procurando overwrite de membro que não está mais no servidor (saiu enquanto o bot estava offline) e libera. Mesmo papel do `_reconciliar_pastas` do MDM, adaptado ao modelo de pasta por overwrite do Yuno em vez de linha de banco.
+
+**Motivo de saída:** kick/ban detectado via audit log (janela de 10s), igual ao original, com `discord.Forbidden` tratado (bot sem `view_audit_log` cai para "saiu voluntariamente" em vez de quebrar).
+
+**Dois canais de log, não um:** `membros_entrada` e `membros_saida` como `SetupChannel` separados — o registry só tem um slot de `log_channel` por módulo, e este precisa de dois.
+
+**Entregue:** `bot/yuno_bot/commands/membros/` (`embeds.py` com `format_delta` puro, `cog.py`), `release_member_folder` em `farm_tickets/helpers.py`. `membros` em `MODULES`, registry (`ordem=120`) e `_COMMAND_HINTS`. 88 testes passando.
 
 ---
 

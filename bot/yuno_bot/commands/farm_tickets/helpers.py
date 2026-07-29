@@ -216,6 +216,39 @@ async def resolve_or_create_member_folder(
     return MemberFolderIdentity(channel_id=channel.id, slot=slot, nickname=nickname, game_id=game_id)
 
 
+async def release_member_folder(guild: discord.Guild, member: discord.Member, category_id: int) -> bool:
+    """Libera a pasta de um membro que saiu do servidor: renomeia para
+    "livre" e remove o overwrite dele, para o slot poder ser reaproveitado.
+
+    Renomear para um nome sem game_id numerico no final faz `parse_member_folder`
+    falhar de proposito -- e o que tira o slot da contagem de `next_folder_slot`.
+    """
+    category = guild.get_channel(category_id)
+    if not isinstance(category, discord.CategoryChannel):
+        return False
+    for channel in category.text_channels:
+        if "livre" in channel.name.casefold():
+            continue
+        if not _has_explicit_member_access(channel, member):
+            continue
+        try:
+            folder = parse_member_folder(channel.name, channel.id)
+        except MemberFolderError:
+            continue
+        overwrites = dict(channel.overwrites)
+        overwrites.pop(member, None)
+        try:
+            await channel.edit(
+                name=f"┃📁-{folder.slot}-livre",
+                overwrites=overwrites,
+                reason="Yuno: membro saiu, liberando pasta",
+            )
+        except discord.HTTPException:
+            return False
+        return True
+    return False
+
+
 def choose_ticket_category(guild: discord.Guild, category_ids: list[str]) -> discord.CategoryChannel | None:
     for category_id in category_ids:
         category = guild.get_channel(int(category_id))

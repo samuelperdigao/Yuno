@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "bot"))
 from yuno_bot.commands.adv.embeds import adv_log_embed, adv_post_embed, build_adv_payload
 from yuno_bot.commands.anuncio.embeds import build_anuncio_panel_config, build_anuncio_payload
 from yuno_bot.commands.hierarquia.embeds import build_hierarquia_panel_config
+from yuno_bot.commands.membros.embeds import format_delta
 from yuno_bot.commands.hierarquia.helpers import cargo_atual, tipo_mudanca
 from yuno_bot.commands.encomenda.embeds import build_encomenda_payload
 from app.services import check_permission
@@ -201,6 +202,13 @@ def test_hierarquia_panel_config_grava_escada_gerentes_e_permissao() -> None:
     assert config["settings"]["hierarquia"]["manager_role_ids"] == ["300"]
     assert config["command_permissions"]["hierarquia.gerenciar"]["role_ids"] == ["300"]
     assert config["command_permissions"]["hierarquia.gerenciar"]["channel_ids"] == ["11"]
+
+
+def test_format_delta_escolhe_a_unidade_certa() -> None:
+    assert format_delta(timedelta(minutes=5)) == "5m"
+    assert format_delta(timedelta(hours=3, minutes=20)) == "3h 20m"
+    assert format_delta(timedelta(days=2, hours=4, minutes=1)) == "2d 4h 1m"
+    assert format_delta(timedelta(days=400)) == "1a 35d"
 
 
 def test_parse_meta_definition_accepts_multiple_items() -> None:
