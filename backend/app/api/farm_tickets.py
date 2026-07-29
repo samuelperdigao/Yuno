@@ -98,6 +98,10 @@ def ticket_out(ticket: FarmTicket) -> FarmTicketOut:
         week_id=ticket.week_id,
         user_id=ticket.user_id,
         member_name=ticket.member_name,
+        folder_channel_id=ticket.folder_channel_id,
+        folder_slot=ticket.folder_slot,
+        game_id=ticket.game_id,
+        folder_nickname=ticket.folder_nickname,
         channel_id=ticket.channel_id,
         panel_message_id=ticket.panel_message_id,
         status=ticket.status,
@@ -166,6 +170,11 @@ async def reserve(guild_id: str, data: FarmTicketReserveIn, session: AsyncSessio
         week_id=data.week_id,
         user_id=data.user_id,
         member_name=data.member_name,
+        open_payload=data.open_payload,
+        folder_channel_id=data.folder_channel_id,
+        folder_slot=data.folder_slot,
+        game_id=data.game_id,
+        folder_nickname=data.folder_nickname,
     )
     await session.commit()
     return FarmTicketReserveOut(ticket=ticket_out(ticket), existing=existing)

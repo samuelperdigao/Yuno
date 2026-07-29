@@ -5,11 +5,24 @@ from yuno_bot.commands.shared import YUNO_BLUE, YUNO_GOLD, YUNO_GREEN, YUNO_ORAN
 
 def farm_panel_embed(guild_name: str | None = None) -> discord.Embed:
     embed = discord.Embed(
-        title="Painel de Farm",
-        description="Abra seu ticket semanal, acompanhe seu progresso e consulte seus comprovantes.",
+        title="Central de Tickets | Farm Semanal",
+        description="\n".join(
+            [
+                "Acompanhe sua **meta ativa da semana** em um canal privado, organizado e acessivel apenas por voce e pela administracao.",
+                "",
+                "**Como funciona**",
+                "- Um ticket individual por membro a cada semana",
+                "- Registre entregas parciais durante a semana",
+                "- Envie o comprovante de cada lancamento",
+                "- Acompanhe seu progresso automaticamente",
+                "",
+                "**Antes de abrir**",
+                "Confira se a meta semanal esta ativa e deixe o print do comprovante preparado.",
+            ]
+        ),
         color=YUNO_GOLD,
     )
-    embed.set_footer(text=f"Yuno - Farm{f' | {guild_name}' if guild_name else ''}")
+    embed.set_footer(text=f"Sistema de Farm{f' - {guild_name}' if guild_name else ''}")
     return embed
 
 
@@ -38,6 +51,13 @@ def farm_ticket_embed(ticket: dict, member: discord.Member | None = None) -> dis
     )
     owner = member.mention if member else f"<@{ticket.get('user_id')}>"
     embed.add_field(name="Membro", value=f"{owner}\n`{ticket.get('user_id')}`", inline=True)
+    if ticket.get("folder_slot") is not None:
+        embed.add_field(name="Slot da Pasta", value=f"`{int(ticket['folder_slot']):02d}`", inline=True)
+        embed.add_field(name="Apelido", value=ticket.get("folder_nickname") or ticket.get("member_name") or "-", inline=True)
+        if ticket.get("game_id"):
+            embed.add_field(name="ID do Jogo", value=f"`{ticket['game_id']}`", inline=True)
+        if ticket.get("folder_channel_id"):
+            embed.add_field(name="Pasta Individual", value=f"<#{ticket['folder_channel_id']}>", inline=False)
     if ticket.get("assigned_to"):
         embed.add_field(name="Responsavel", value=f"<@{ticket['assigned_to']}>", inline=True)
     embed.add_field(name="Meta e progresso", value=format_progress(ticket), inline=False)

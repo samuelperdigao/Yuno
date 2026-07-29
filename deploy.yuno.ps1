@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $Branch = "main"
 $Remote = "ubuntu@163.176.143.142"
-$SshKey = "C:\Projetos\Bot Discord\oracle.key"
+$SshKey = Join-Path $PSScriptRoot "..\Bot Discord\oracle.key"
 $RemoteDir = "/home/ubuntu/yuno"
 $DeployKey = "/home/ubuntu/.ssh/yuno_github_deploy_ed25519"
 

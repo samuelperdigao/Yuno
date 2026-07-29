@@ -4,7 +4,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from yuno_bot.commands.farm_tickets.embeds import farm_goal_embed, farm_log_embed, farm_panel_embed, farm_ticket_embed
-from yuno_bot.commands.farm_tickets.helpers import current_week_id, member_has_any_role, parse_discord_ids
+from yuno_bot.commands.farm_tickets.helpers import MemberFolderError, current_week_id, member_has_any_role, parse_discord_ids, resolve_or_create_member_folder
 from yuno_bot.commands.farm_tickets.views import FarmPanelView, FarmTicketControlView, create_private_ticket_channel, ticket_id_from_message
 from yuno_bot.commands.meta.embeds import parse_meta_definition
 from yuno_bot.guards import deny
@@ -29,7 +29,7 @@ class FarmTicketsCog(commands.Cog):
         cargos_admin: str,
         canal_log: discord.TextChannel,
         canal_painel: discord.TextChannel,
-        categoria_pastas: discord.CategoryChannel | None = None,
+        categoria_pastas: discord.CategoryChannel,
     ) -> None:
         if not await self._ensure_setup_admin(interaction):
             return
@@ -53,7 +53,7 @@ class FarmTicketsCog(commands.Cog):
             "admin_role_ids": [str(role_id) for role_id in admin_role_ids],
             "log_channel_id": str(canal_log.id),
             "panel_channel_id": str(canal_painel.id),
-            "folders_category_id": str(categoria_pastas.id) if categoria_pastas else None,
+            "folders_category_id": str(categoria_pastas.id),
             "participant_role_ids": [],
         }
         await interaction.response.defer(ephemeral=True)
@@ -133,10 +133,37 @@ class FarmTicketsCog(commands.Cog):
             await interaction.followup.send("Seu cargo nao participa do farm semanal.", ephemeral=True)
             return
 
+        folders_category_id = config.get("folders_category_id")
+        if not folders_category_id:
+            await interaction.followup.send("A categoria de pastas individuais nao esta configurada.", ephemeral=True)
+            return
+        try:
+            folder = await resolve_or_create_member_folder(
+                interaction.guild,
+                interaction.user,
+                int(folders_category_id),
+                config.get("admin_role_ids") or [],
+            )
+        except (MemberFolderError, ValueError) as exc:
+            await interaction.followup.send(
+                f"Nao foi possivel identificar sua pasta individual: {exc}\n"
+                "Procure a administracao para regularizar a pasta antes de abrir o ticket.",
+                ephemeral=True,
+            )
+            return
+
         try:
             reservation = await self.bot.api.reserve_farm_ticket(
                 interaction.guild.id,
-                {"week_id": week_id, "user_id": str(interaction.user.id), "member_name": interaction.user.display_name},
+                {
+                    "week_id": week_id,
+                    "user_id": str(interaction.user.id),
+                    "member_name": interaction.user.display_name,
+                    "folder_channel_id": str(folder.channel_id),
+                    "folder_slot": folder.slot,
+                    "game_id": folder.game_id,
+                    "folder_nickname": folder.nickname,
+                },
             )
         except httpx.HTTPStatusError as exc:
             await interaction.followup.send(_detail(exc), ephemeral=True)
@@ -154,7 +181,7 @@ class FarmTicketsCog(commands.Cog):
 
         channel = None
         try:
-            channel = await create_private_ticket_channel(interaction, config)
+            channel = await create_private_ticket_channel(interaction, config, folder)
             if not channel:
                 raise RuntimeError("sem categoria disponivel")
             message = await channel.send(

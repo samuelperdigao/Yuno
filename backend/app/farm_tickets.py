@@ -110,7 +110,19 @@ async def active_goal(session: AsyncSession, guild_id: str, week_id: str) -> Far
     return goal
 
 
-async def reserve_ticket(session: AsyncSession, *, guild_id: str, week_id: str, user_id: str, member_name: str) -> tuple[FarmTicket, bool]:
+async def reserve_ticket(
+    session: AsyncSession,
+    *,
+    guild_id: str,
+    week_id: str,
+    user_id: str,
+    member_name: str,
+    open_payload: dict | None = None,
+    folder_channel_id: str | None = None,
+    folder_slot: int | None = None,
+    game_id: str | None = None,
+    folder_nickname: str | None = None,
+) -> tuple[FarmTicket, bool]:
     result = await session.execute(
         select(FarmTicket)
         .where(
@@ -132,13 +144,31 @@ async def reserve_ticket(session: AsyncSession, *, guild_id: str, week_id: str, 
         week_id=week_id,
         user_id=user_id,
         member_name=member_name,
+        folder_channel_id=folder_channel_id,
+        folder_slot=folder_slot,
+        game_id=game_id,
+        folder_nickname=folder_nickname,
         status="reservado",
         goal_items=goal.items,
         progress=progress_from_entries(goal.items, []),
     )
     session.add(ticket)
     await session.flush()
-    await add_action(session, ticket, "ticket_aberto", actor_id=user_id, payload={"member_name": member_name, "week_id": week_id})
+    await add_action(
+        session,
+        ticket,
+        "ticket_aberto",
+        actor_id=user_id,
+        payload={
+            "member_name": member_name,
+            "week_id": week_id,
+            "open_payload": open_payload or {},
+            "folder_channel_id": folder_channel_id,
+            "folder_slot": folder_slot,
+            "game_id": game_id,
+            "folder_nickname": folder_nickname,
+        },
+    )
     return ticket, False
 
 

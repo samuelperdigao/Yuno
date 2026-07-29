@@ -183,6 +183,11 @@ class FarmTicketReserveIn(BaseModel):
     week_id: str
     user_id: str
     member_name: str
+    open_payload: dict[str, Any] = Field(default_factory=dict)
+    folder_channel_id: str | None = None
+    folder_slot: int | None = None
+    game_id: str | None = None
+    folder_nickname: str | None = None
 
 
 class FarmTicketChannelPatch(BaseModel):
@@ -247,6 +252,10 @@ class FarmTicketOut(BaseModel):
     week_id: str
     user_id: str
     member_name: str
+    folder_channel_id: str | None = None
+    folder_slot: int | None = None
+    game_id: str | None = None
+    folder_nickname: str | None = None
     channel_id: str | None = None
     panel_message_id: str | None = None
     status: str

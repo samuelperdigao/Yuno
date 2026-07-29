@@ -4,7 +4,7 @@ import discord
 import httpx
 
 from yuno_bot.commands.farm_tickets.embeds import farm_ticket_embed, recent_proofs_text
-from yuno_bot.commands.farm_tickets.helpers import build_ticket_channel_name, choose_ticket_category, is_farm_admin, member_has_any_role
+from yuno_bot.commands.farm_tickets.helpers import MemberFolderIdentity, build_ticket_channel_name_from_folder, choose_ticket_category, is_farm_admin
 from yuno_bot.commands.farm_tickets.modals import FarmEntryModal, FarmFinalizeModal, FarmReviewModal
 
 
@@ -144,7 +144,11 @@ class FarmTicketControlView(discord.ui.View):
         return True
 
 
-async def create_private_ticket_channel(interaction: discord.Interaction, config: dict) -> discord.TextChannel | None:
+async def create_private_ticket_channel(
+    interaction: discord.Interaction,
+    config: dict,
+    folder: MemberFolderIdentity | None = None,
+) -> discord.TextChannel | None:
     guild = interaction.guild
     member = interaction.user
     if not guild or not isinstance(member, discord.Member):
@@ -178,7 +182,7 @@ async def create_private_ticket_channel(interaction: discord.Interaction, config
                 attach_files=True,
             )
     return await guild.create_text_channel(
-        build_ticket_channel_name(member),
+        build_ticket_channel_name_from_folder(member, folder),
         category=category,
         overwrites=overwrites,
         reason="Yuno farm ticket semanal",
