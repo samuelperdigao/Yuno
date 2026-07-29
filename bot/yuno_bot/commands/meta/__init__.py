@@ -16,6 +16,6 @@ MODULE = ModuleSpec(
     log_channel="logs-meta",
     dashboard_fields=(
         DashboardField("panel_channel_id", "Canal do painel de metas", "channel"),
-        DashboardField("manager_role_ids", "Cargos que definem meta", "roles", obrigatorio=False),
+        DashboardField("allowed_role_id", "Cargo que define meta", "role"),
     ),
 )

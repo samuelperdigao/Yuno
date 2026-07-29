@@ -12,8 +12,9 @@ MODULE = ModuleSpec(
     cogs=(lambda ctx: EncomendaCog(ctx.bot),),
     setup_channels=(SetupChannel("encomendas", "encomendas", "operacao", ("encomenda.criar",)),),
     log_channel="logs-encomenda",
+    # Sem comando de restricao por cargo hoje -- so o canal criado por
+    # `/yuno configurar` (setup_channels abaixo). Ver debito tecnico.
     dashboard_fields=(
         DashboardField("panel_channel_id", "Canal de encomendas", "channel"),
-        DashboardField("manager_role_ids", "Cargos que atendem encomenda", "roles", obrigatorio=False),
     ),
 )

@@ -27,8 +27,11 @@ SETUP_CATEGORIES: dict[str, str] = {
     "logs": "Yuno - Logs",
 }
 
-# Canal do proprio Yuno, nao pertence a modulo nenhum.
-CORE_CHANNELS: tuple[SetupChannel, ...] = (SetupChannel("logs", "yuno-logs", "admin", ()),)
+# Canais do proprio Yuno, nao pertencem a modulo nenhum.
+CORE_CHANNELS: tuple[SetupChannel, ...] = (
+    SetupChannel("logs", "yuno-logs", "admin", ()),
+    SetupChannel("painel", "yuno-painel", "admin", ()),
+)
 
 # Permissoes que o bot precisa, com a explicacao que o cliente entende.
 PERMISSOES_NECESSARIAS: tuple[tuple[str, str], ...] = (

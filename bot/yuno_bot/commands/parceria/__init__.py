@@ -4,9 +4,8 @@ from yuno_bot.commands.parceria.cog import ParceriaCog
 from yuno_bot.commands.parceria.views import ParceriaPanelView
 from yuno_bot.modules import DashboardField, ModuleSpec, SetupChannel
 
-# DEBITO #4: o repositorio de parcerias ainda grava SQLite local no container do
-# bot, o que quebra o multi-tenant e perde estado no redeploy. Enquanto nao
-# migrar para o backend, as fabricas dependem de `bot.parcerias_repository`.
+# As fabricas dependem de `bot.parcerias_repository` (ParceriasRepository),
+# que fala HTTP com /internal/parcerias/* no backend -- ver app/parceria.py.
 MODULE = ModuleSpec(
     key="parceria",
     nome="Sistema de Parceria",
@@ -18,7 +17,7 @@ MODULE = ModuleSpec(
     setup_channels=(SetupChannel("parcerias", "parcerias", "operacao", ("parceria.cadastrar",)),),
     log_channel="logs-parceria",
     dashboard_fields=(
-        DashboardField("panel_channel_id", "Canal do painel de parcerias", "channel"),
+        DashboardField("registrar_channel_id", "Canal do painel de parcerias", "channel"),
         DashboardField("ativas_channel_id", "Canal das parcerias ativas", "channel"),
         DashboardField("category_id", "Categoria das parcerias", "category", obrigatorio=False),
     ),

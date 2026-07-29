@@ -53,6 +53,7 @@ bot/       discord.py 2.4 — cliente puro da API, sem banco próprio
            yuno_bot/interfaces.py   → protocolos que uma implementação self-host precisaria satisfazer
            yuno_bot/guards.py       → ensure_allowed / deny / requires_module
            yuno_bot/server_setup.py → criação de categorias/canais no primeiro setup
+           yuno_bot/dashboard.py    → /yuno painel — board de status, aponta o comando de cada módulo
            yuno_bot/commands/<mod>/ → cog.py, embeds.py, modals.py, views.py
 dashboard/ React/Vite — ativação de licença e configuração web
 ```
@@ -145,11 +146,12 @@ Roteiro, em `references/port-checklist.md` com o detalhamento. Resumo:
 
 Mantida em ordem de impacto na venda. Ao resolver um item, remova-o daqui e registre no CHANGELOG.
 
-1. **Não há dashboard de configuração dentro do Discord.** Hoje o cliente precisa sair do Discord e ir no painel web. O MDM resolveu isso muito bem em `cogs/dashboard.py` com Components V2 (`Section` + `accessory`, paginado). É o maior gap de UX do produto e o item mais rentável da lista. O registry já expõe `dashboard_fields`, `icon`, `nome` e `descricao` — a UI pode ser gerada a partir dele.
-2. **`api_client.py` tem 30+ métodos específicos de farm_tickets.** Domínio vazando para a camada de transporte. Deve ser um cliente genérico com os métodos de domínio nos módulos.
-3. **`_apply_set_visibility` itera todas as categorias e todos os canais chamando `set_permissions`.** Em servidor com 80 canais isso é rate-limit garantido e trava o setup na frente do cliente. Precisa operar só nos canais afetados.
-4. **`messages` não é consumido.** Cliente não consegue mudar nenhum texto.
-5. **Licença só é validada em `/yuno status` e `/yuno configurar`.** Revogação não tem efeito imediato nos demais comandos. O `/radio alterar` nem isso faz — só checa cargo, nunca módulo/licença (achado ao portar o guard de views).
+1. **`api_client.py` tem 30+ métodos específicos de farm_tickets.** Domínio vazando para a camada de transporte. Deve ser um cliente genérico com os métodos de domínio nos módulos.
+2. **`_apply_set_visibility` itera todas as categorias e todos os canais chamando `set_permissions`.** Em servidor com 80 canais isso é rate-limit garantido e trava o setup na frente do cliente. Precisa operar só nos canais afetados.
+3. **`messages` não é consumido.** Cliente não consegue mudar nenhum texto.
+4. **Licença só é validada em `/yuno status` e `/yuno configurar`.** Revogação não tem efeito imediato nos demais comandos. O `/radio alterar` nem isso faz — só checa cargo, nunca módulo/licença.
+5. **Não existe conceito de plano por licença.** `plano_minimo` é declarado em todo `ModuleSpec` (basico/pro/premium) mas não tem ligação com nenhum dado de `License`/`GuildConfig` — hoje todo módulo liga por padrão pra todo mundo. Bloqueia o CTA de upgrade no painel (Fase 1) e qualquer diferenciação de preço por módulo.
+6. **`radio`, `encomenda`, `producao` e `ticket` não têm como restringir por cargo.** `/radio alterar` decide por nome de cargo contendo "gerente" (hardcoded, não configurável por servidor); os outros três nunca tiveram comando de restrição nenhum — só o canal criado por `/yuno configurar`. Achado ao auditar `dashboard_fields` contra o código real (Fase 1): os quatro declaravam um campo de cargo no registry que não correspondia a nada, removido.
 
 **Resolvido:**
 
@@ -158,6 +160,7 @@ Mantida em ordem de impacto na venda. Ao resolver um item, remova-o daqui e regi
 - Guard de módulo em views (`@requires_module` em `guards.py`). Aplicado nos botões que não passavam por `ensure_allowed`/`can_manage_parcerias`: `AusenciaPanelView`, `RadioPainelView`, `FarmPanelView` e `FarmTicketControlView` (9 botões ao todo). `SetPanelView`/`SetApprovalView` e `MetaPanelView` foram migrados do `ensure_allowed` inline para o decorator, por consistência. `ParceriaPanelView` já checava módulo via `can_manage_parcerias` e não foi tocado. O decorator lê `self.api` quando existe, senão `self.controller.bot.api` — as views de `farm_tickets` guardam a instância do cog (`controller`), não a `YunoAPI` diretamente.
 - Alembic (`backend/alembic.ini`, `backend/migrations/`). `_ensure_compat_columns` (ALTER TABLE manual em `db.py`) foi substituído por migração versionada. **Regra a partir de agora: toda alteração em `models.py` vem com migração no mesmo commit** — `alembic revision --autogenerate -m "..."` a partir de `backend/`, revisar o arquivo gerado (autogenerate erra em enums cross-tabela e esquece o import de `Text` quando usa `JSONB(astext_type=...)`), testar `upgrade` antes de commitar. `create_database()` adota bancos criados antes do Alembic existir via `stamp` na baseline (`LEGACY_BASELINE_REVISION` em `db.py`) quando detecta tabela antiga sem `alembic_version` — é o caminho que a produção atual vai percorrer no próximo deploy.
 - `Repository`/`LicenseProvider` (`bot/yuno_bot/interfaces.py`, protocolos estruturais) e `parcerias_repository` migrado do SQLite local para o backend (`app/parceria.py`, `app/api/parceria.py`, tabelas `parcerias`/`parceria_configs`). `ParceriasRepository` manteve nome e assinatura — só a implementação interna virou HTTP; `cog.py` não mudou. **Cuidado ao ler de volta uma coluna com `onupdate=func.now()` na mesma resposta que a escreveu:** dispara `MissingGreenlet` no SQLAlchemy async (refresh lazy fora do contexto). Setar o timestamp explicitamente em Python evita o problema.
+- Painel de status dentro do Discord (`bot/yuno_bot/dashboard.py`, comando `/yuno painel`). **Não é um editor de configuração** — cada módulo já tinha comando próprio com seletor nativo (`/set painel`, `/meta painel`, etc.), alguns com efeito colateral (`/set painel` também tranca visibilidade de canal); reimplementar isso genericamente teria duplicado ou perdido esses efeitos, sem como testar contra Discord real. O painel mostra estado (configurado/incompleto/desligado) por módulo e aponta o comando certo. `dashboard_fields` de 6 dos 9 módulos estavam com a chave errada ou descrevendo campo inexistente desde o 0.1 — corrigido módulo a módulo (ver débito #6 acima para o que continua sem solução). Achado um bug real no caminho: `/setup_farm_tickets` nunca deixava setar `participant_role_ids`, e sem isso ninguém consegue abrir ticket de farm — corrigido com um parâmetro novo no comando.
 
 **Nota de arquitetura:** `bot/yuno_bot/interfaces.py` define `GuildConfigRepository` e `LicenseProvider` como contrato para self-host. `YunoAPI` os satisfaz estruturalmente hoje (é o `ApiRepository`/`RemoteLicenseProvider` do plano); nao ha necessidade de importar essas classes em call sites normais, elas existem para o dia em que uma segunda implementacao precisar existir.
 

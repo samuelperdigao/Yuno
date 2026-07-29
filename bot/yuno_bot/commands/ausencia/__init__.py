@@ -15,6 +15,6 @@ MODULE = ModuleSpec(
     setup_channels=(SetupChannel("ausencias", "ausencias", "operacao", ()),),
     log_channel="logs-ausencia",
     dashboard_fields=(
-        DashboardField("panel_channel_id", "Canal de ausencias", "channel"),
+        DashboardField("canal_ausencias_id", "Canal de ausencias", "channel"),
     ),
 )

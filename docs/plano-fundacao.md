@@ -118,19 +118,25 @@ Incluir `/yuno diagnostico`: lista o que está configurado, o que falta, quais p
 
 ---
 
-## Fase 1 — Dashboard dentro do Discord
+## Fase 1 — Dashboard dentro do Discord — CONCLUÍDO (com escopo revisado)
 
-**O item mais rentável da lista.** Hoje o cliente compra, entra no Discord, e para configurar precisa sair, abrir navegador, logar com OAuth. Metade desiste ali.
+**O item mais rentável da lista.** A premissa original era que o cliente precisava sair do Discord pra configurar. Investigando antes de portar `cogs/dashboard.py` do MDM, essa premissa se mostrou errada: **todo módulo já tem um comando de painel funcionando dentro do Discord**, com seletor nativo (`/set painel <canal> <canal> <cargo> <cargo>`, `/meta painel`, `/radio painel`, `/parceria setup_parcerias`, `/setup_farm_tickets`, `/setup_ausencia`), e alguns têm efeito colateral além de salvar dado — `/set painel` também tranca visibilidade de canal pra membro novo. Portar o padrão do MDM (modal genérico gerado por campo, reescrevendo a lógica de cada sistema) teria custo escondido real: duplicar ou perder esses efeitos colaterais, sem meio de testar contra um Discord de verdade pra pegar a regressão.
 
-Base: `cogs/dashboard.py` do Morro do Mineiro (Components V2, `Section` + `accessory`, paginado, modal por sistema). O padrão está certo. O que muda:
+**Escopo entregue, confirmado com o dono antes de escrever código:** o painel é um board de status + atalho pro comando certo, não um editor. `/yuno painel` publica uma mensagem Components V2 (payload cru — a versão de discord.py do projeto, 2.4, não tem `discord.ui.LayoutView`; mesmo padrão já provado em produção no MDM) listando os 9 módulos do registry, cada um com ✅ configurado / ⚠️ incompleto / ⛔ desligado. O botão **≡** de cada módulo abre uma resposta efêmera com os valores atuais e, se incompleto, qual comando roda (`Rode /set painel para completar a configuração`).
 
-- Lista de sistemas **gerada pelo registry**, não hardcoded
-- Persistência via `PUT /guilds/{id}/config`, não SQLite
-- `DASHBOARD_CHANNEL_ID` sai; o canal vem do setup
-- Módulos fora do plano aparecem bloqueados com CTA de upgrade — **o dashboard vira canal de venda**
-- Cada sistema mostra estado: configurado / incompleto / desligado
+**Sem CTA de upgrade de plano** (decisão tomada antes de começar): não existe hoje nenhum campo de plano em `License`/`GuildConfig`, só `plano_minimo` declarado no registry sem ligação com nada. Registrado como débito técnico.
 
-Comando: `/yuno painel`. Publica um painel persistente no canal de administração.
+**O trabalho real não foi a UI, foi auditar `dashboard_fields` de cada módulo contra onde o dado realmente mora** — a metadata tinha sido escrita durante o 0.1 (criação do registry) e nunca validada contra código real, porque nada a consumia ainda:
+
+- `meta`: campo declarado `manager_role_ids` (lista) não existe — o campo real é `allowed_role_id` (singular). Corrigido.
+- `ausencia`: campo declarado `panel_channel_id` não existe — o real é `canal_ausencias_id`. Corrigido.
+- `radio`, `encomenda`, `producao`, `ticket`: declaravam um campo de cargo (`manager_role_ids`/`staff_role_ids`) que **não corresponde a nenhuma funcionalidade real** — `/radio alterar` restringe por nome de cargo contendo "gerente" (hardcoded, não configurável); `encomenda`/`producao`/`ticket` nunca tiveram comando de restrição por cargo. Campos removidos da declaração em vez de fingir uma configuração que não existe. Vira item de débito técnico (nenhum dos quatro tem como restringir por cargo hoje).
+- `farm_tickets`: achado um **bug real, não só de metadata** — `participant_role_ids` é obrigatório pra alguém conseguir abrir ticket (`member_has_any_role` contra lista vazia nunca autoriza ninguém), mas `/setup_farm_tickets` hardcodeava `[]` e não tinha parâmetro pra isso. Corrigido: novo parâmetro `cargos_participantes` no comando.
+- `parceria`: campo declarado `panel_channel_id` não existe no model — o real é `registrar_channel_id`. Corrigido. Também não espelhava resumo em `guild_config.settings.parceria` (farm_tickets já fazia isso desde a criação); adicionado, é o que permite o painel ler o estado de parceria sem saber que ela tem tabela própria.
+
+**Canal do painel:** novo `CORE_CHANNEL` (`yuno-painel`, categoria admin), criado automaticamente por `/yuno configurar` como `yuno-logs` já era — não precisa de comando de setup próprio.
+
+**Entregue:** `bot/yuno_bot/dashboard.py` (cálculo de estado, payload V2, view dispatcher persistente, `show_module_info`), `/yuno painel` em `main.py`, `CORE_CHANNELS` com `painel`. 83 testes passando (13 novos em `test_dashboard.py`, cobrindo cálculo de estado e leitura de valores — a parte que não é só payload).
 
 ---
 
@@ -178,7 +184,7 @@ Fase 0 é bloqueante — cada módulo portado antes dela carrega o setup frágil
 
 Fase 1 pode começar assim que 0.1 (registry) estiver de pé, porque o dashboard consome o registry.
 
-**Ordem de execução: ~~0.1~~ ~~0.2~~ ~~0.3~~ ~~0.4~~ ~~0.5~~ ~~0.6~~ (feitos) → Fase 1 → Fase 2.**
+**Ordem de execução: ~~0.1~~ ~~0.2~~ ~~0.3~~ ~~0.4~~ ~~0.5~~ ~~0.6~~ ~~Fase 1~~ (feitos) → Fase 2.**
 
 ---
 

@@ -14,8 +14,10 @@ MODULE = ModuleSpec(
     views=(lambda ctx: RadioPainelView(ctx.api),),
     setup_channels=(SetupChannel("radio", "radio", "operacao", ("radio.alterar",)),),
     log_channel="logs-radio",
+    # Quem pode `/radio alterar` e definido por nome de cargo contendo "gerente"
+    # (radio/permissions.pode_alterar_radio), nao por um cargo configuravel --
+    # por isso nao ha campo de cargo aqui. Ver debito tecnico correspondente.
     dashboard_fields=(
         DashboardField("panel_channel_id", "Canal do painel de radio", "channel"),
-        DashboardField("manager_role_ids", "Cargos que alteram radio", "roles", obrigatorio=False),
     ),
 )

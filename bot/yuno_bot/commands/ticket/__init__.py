@@ -12,8 +12,9 @@ MODULE = ModuleSpec(
     cogs=(lambda ctx: TicketCog(ctx.bot),),
     setup_channels=(SetupChannel("tickets", "tickets", "operacao", ("ticket.abrir",)),),
     log_channel="logs-ticket",
+    # Sem comando de restricao por cargo hoje -- so o canal criado por
+    # `/yuno configurar` (setup_channels abaixo). Ver debito tecnico.
     dashboard_fields=(
         DashboardField("panel_channel_id", "Canal de tickets", "channel"),
-        DashboardField("staff_role_ids", "Cargos de atendimento", "roles", obrigatorio=False),
     ),
 )

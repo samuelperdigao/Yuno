@@ -27,6 +27,7 @@ class FarmTicketsCog(commands.Cog):
         interaction: discord.Interaction,
         categorias_tickets: str,
         cargos_admin: str,
+        cargos_participantes: str,
         canal_log: discord.TextChannel,
         canal_painel: discord.TextChannel,
         categoria_pastas: discord.CategoryChannel,
@@ -39,13 +40,21 @@ class FarmTicketsCog(commands.Cog):
 
         category_ids = parse_discord_ids(categorias_tickets)
         admin_role_ids = parse_discord_ids(cargos_admin)
+        participant_role_ids = parse_discord_ids(cargos_participantes)
         categories = [interaction.guild.get_channel(category_id) for category_id in category_ids]
-        roles = [interaction.guild.get_role(role_id) for role_id in admin_role_ids]
+        admin_roles = [interaction.guild.get_role(role_id) for role_id in admin_role_ids]
+        participant_roles = [interaction.guild.get_role(role_id) for role_id in participant_role_ids]
         if not category_ids or any(not isinstance(category, discord.CategoryChannel) for category in categories):
             await interaction.response.send_message("Informe categorias validas em `categorias_tickets`.", ephemeral=True)
             return
-        if not admin_role_ids or any(role is None for role in roles):
+        if not admin_role_ids or any(role is None for role in admin_roles):
             await interaction.response.send_message("Informe cargos administrativos validos em `cargos_admin`.", ephemeral=True)
+            return
+        if not participant_role_ids or any(role is None for role in participant_roles):
+            await interaction.response.send_message(
+                "Informe cargos participantes validos em `cargos_participantes` — sem isso, ninguem consegue abrir ticket.",
+                ephemeral=True,
+            )
             return
 
         payload = {
@@ -54,7 +63,7 @@ class FarmTicketsCog(commands.Cog):
             "log_channel_id": str(canal_log.id),
             "panel_channel_id": str(canal_painel.id),
             "folders_category_id": str(categoria_pastas.id),
-            "participant_role_ids": [],
+            "participant_role_ids": [str(role_id) for role_id in participant_role_ids],
         }
         await interaction.response.defer(ephemeral=True)
         try:

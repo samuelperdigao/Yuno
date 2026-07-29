@@ -5,7 +5,7 @@ import httpx
 from discord import app_commands
 from discord.ext import commands
 
-from yuno_bot import diagnostics, server_setup
+from yuno_bot import dashboard, diagnostics, server_setup
 from yuno_bot.api_client import YunoAPI
 from yuno_bot.commands.parceria.repository import ParceriasRepository
 from yuno_bot.config import get_settings
@@ -28,6 +28,10 @@ class YunoBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         await self.add_cog(YunoAdminCog(self))
+        # Nunca renderizada diretamente -- a mensagem do painel usa payload V2
+        # cru (yuno_bot.dashboard.build_payload). Precisa ser registrada aqui
+        # para os custom_id sobreviverem a um restart do bot.
+        self.add_view(dashboard.PainelDispatcherView(self.api))
 
         # Cogs e views persistentes vem do registry. Adicionar um modulo novo e
         # criar a pasta com MODULE = ModuleSpec(...); este arquivo nao muda.
@@ -117,6 +121,43 @@ class YunoAdminCog(commands.Cog):
         linhas.append("Use `/yuno diagnostico` a qualquer momento para conferir o estado.")
 
         await interaction.followup.send("\n".join(linhas), ephemeral=True)
+
+    @yuno.command(name="painel", description="Publica ou atualiza o painel de status dos modulos")
+    @app_commands.default_permissions(manage_guild=True)
+    async def yuno_painel(self, interaction: discord.Interaction) -> None:
+        if not await self._exigir_admin(interaction):
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        config = await self._carregar_config(interaction)
+        if config is None:
+            return
+
+        channel_id = server_setup.saved_channel_id(config, "painel")
+        channel = interaction.guild.get_channel(channel_id) if channel_id else None
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.followup.send(
+                "Canal do painel ainda nao existe. Rode `/yuno configurar` primeiro.", ephemeral=True
+            )
+            return
+
+        try:
+            message_id = await dashboard.publish_or_update(self.bot, channel, config)
+        except discord.HTTPException:
+            await interaction.followup.send("Nao consegui publicar o painel no canal.", ephemeral=True)
+            return
+
+        updated_config = dashboard.with_dashboard_ref(config, channel_id=channel.id, message_id=message_id)
+        try:
+            await self.bot.api.save_guild_config(interaction.guild.id, updated_config)
+        except httpx.HTTPError:
+            await interaction.followup.send(
+                "Painel publicado, mas nao consegui salvar a referencia da mensagem.", ephemeral=True
+            )
+            return
+
+        await interaction.followup.send(f"Painel publicado em {channel.mention}.", ephemeral=True)
 
     @yuno.command(name="diagnostico", description="Mostra o que ja esta configurado e o que falta")
     @app_commands.default_permissions(manage_guild=True)

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Parceria, ParceriaConfig
 from app.schemas import ParceriaConfigIn, ParceriaCreateIn, ParceriaUpdateIn
+from app.services import get_or_create_config
 
 
 def normalize_nome_familia(nome_familia: str) -> str:
@@ -28,6 +29,19 @@ async def upsert_config(session: AsyncSession, guild_id: str, data: ParceriaConf
     config.registrar_channel_id = data.registrar_channel_id
     config.ativas_channel_id = data.ativas_channel_id
     config.panel_message_id = data.panel_message_id
+
+    # Espelha em guild_config.settings, mesma convencao do farm_tickets: e o
+    # que permite o dashboard (Fase 1) ler o estado de todo modulo por um so
+    # lugar, sem precisar saber que parceria tem tabela propria.
+    guild_config = await get_or_create_config(session, guild_id)
+    settings = dict(guild_config.settings or {})
+    settings["parceria"] = {
+        "category_id": data.category_id,
+        "registrar_channel_id": data.registrar_channel_id,
+        "ativas_channel_id": data.ativas_channel_id,
+        "panel_message_id": data.panel_message_id,
+    }
+    guild_config.settings = settings
     return config
 
 
