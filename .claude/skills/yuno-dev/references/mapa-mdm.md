@@ -52,7 +52,7 @@ Duas tabelas:
 | `farm_relatorio.py` | 505 | Relatório de pendentes da semana | Fase 2 |
 | `set_views.py` | 363 | SetModal, ApprovalView, SetPanelView, rate-limit | Já validado no Yuno |
 | `paineis.py` | 379 | Listeners e handlers dos painéis | Conceito |
-| `hierarquia.py` | 335 | Painel de gestão de hierarquia de cargos | Sim — núcleo |
+| `hierarquia.py` | 335 | Painel de gestão de hierarquia de cargos | Já existe no Yuno (`commands/hierarquia/`, escada configurável por ID, não nome) |
 | `anuncio.py` | 335 | Sistema de anúncios com cargos anunciantes | Já existe no Yuno (`commands/anuncio/`, cargos via `command_permissions`) |
 | `adv.py` | 309 | Advertências manuais (painel + modal + dias) | Já existe no Yuno (`commands/adv/`, via `SystemRecord`, sem tabela própria) |
 | `lideranca.py` | 308 | Handlers do painel de liderança | Avaliar |

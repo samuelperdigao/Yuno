@@ -148,7 +148,7 @@ Ordem, do que ensina o padrão para o que exige mais cuidado:
 |---|---|---|---|---|
 | 1 | ~~`adv`~~ | `cogs/adv.py` | 309 | **CONCLUÍDO.** Pequeno; exercita painel + modal + log ponta a ponta |
 | 2 | ~~`anuncio`~~ | `cogs/anuncio.py` | 335 | **CONCLUÍDO.** Cargos anunciantes exercitam `command_permissions` |
-| 3 | `hierarquia` | `cogs/hierarquia.py` | 335 | Manipulação de cargo; exercita permissão do bot |
+| 3 | ~~`hierarquia`~~ | `cogs/hierarquia.py` | 335 | **CONCLUÍDO.** Manipulação de cargo; exercita permissão do bot |
 | 4 | `membros` | `cogs/membros.py` | 190 | Primeiro módulo sem slash command (listeners) |
 | 5 | `acao` | `cogs/acao.py` + `acao_painel.py` | 1223 | Maior; padrão já consolidado |
 | 6 | `mod` | `cogs/mod.py` | 252 | Trivial, fecha a fase |
@@ -173,6 +173,18 @@ Este era o módulo escolhido pelo plano justamente para exercitar `command_permi
 **Divergência proposital:** o bypass de administrador do MDM (`if member.guild_permissions.administrator: return True`, ignorando a lista de cargos) não foi portado — o Yuno já tem seu próprio conceito de admin (`admin_role_ids` da guild config, checado dentro do `check_permission` do backend) e replicar o bypass do Discord aqui seria inconsistente com todo o resto do produto, que não faz essa checagem em nenhum outro módulo.
 
 **Entregue:** `bot/yuno_bot/commands/anuncio/` completo, incluindo o fluxo de anexo opcional (espera de 60s por mensagem com arquivo, igual ao original). `anuncio` em `MODULES`, registry (`ordem=100`) e `_COMMAND_HINTS` do dashboard. 85 testes passando.
+
+### `hierarquia` — CONCLUÍDO
+
+**O que era específico do MDM e virou configuração:** `HIERARQUIA_CARGOS`, uma lista Python fixa com os 11 nomes exatos de cargo do Morro do Mineiro (`"| 01 Dono"`, `"| Gerente de Produção"`, etc.), comparados por **nome**. No Yuno virou `settings.hierarquia.role_ids` — lista de IDs configurável por servidor via `/hierarquia painel <canal> <cargos_hierarquia> <cargos_gerentes>` (mesmo padrão `parse_discord_ids` do `farm_tickets`, ordem do texto = ordem da escada, do menor pro maior).
+
+**Melhoria real, não só port:** comparar por **ID** em vez de nome sobrevive a renomear o cargo. O MDM quebraria silenciosamente (`_cargo_hierarquia_atual` não acha o cargo na lista) se alguém renomeasse `"| 03"`. A lógica de comparação (`cargo_atual`, `tipo_mudanca` em `helpers.py`) é pura — só IDs, sem `discord.py` — exatamente para ficar testável sem mock de Discord.
+
+**Quem pode gerenciar:** vira `command_permissions["hierarquia.gerenciar"]`, mesmo padrão do `anuncio`. O bypass de `guild_permissions.administrator` do MDM não foi portado, pela mesma razão do `anuncio`.
+
+**Auditoria:** cada promoção/rebaixamento vira `SystemRecord` (`module="hierarquia"`, payload com cargo anterior/novo/tipo) — o MDM só logava em canal, sem histórico consultável.
+
+**Entregue:** `bot/yuno_bot/commands/hierarquia/` completo (`helpers.py` puro, `embeds.py`, `views.py` com os três níveis de seleção — painel → membro → cargo —, `cog.py`, `__init__.py`). `hierarquia` em `MODULES`, registry (`ordem=110`, canal na categoria `admin`) e `_COMMAND_HINTS`. 87 testes passando.
 
 ---
 

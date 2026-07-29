@@ -67,6 +67,7 @@ _COMMAND_HINTS: dict[str, str] = {
     "ticket": "/yuno configurar",
     "adv": "/yuno configurar",
     "anuncio": "/anuncio painel",
+    "hierarquia": "/hierarquia painel",
 }
 
 

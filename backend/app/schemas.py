@@ -18,6 +18,7 @@ MODULES = [
     "producao",
     "adv",
     "anuncio",
+    "hierarquia",
 ]
 
 

@@ -15,6 +15,8 @@ sys.path.insert(0, str(ROOT / "bot"))
 
 from yuno_bot.commands.adv.embeds import adv_log_embed, adv_post_embed, build_adv_payload
 from yuno_bot.commands.anuncio.embeds import build_anuncio_panel_config, build_anuncio_payload
+from yuno_bot.commands.hierarquia.embeds import build_hierarquia_panel_config
+from yuno_bot.commands.hierarquia.helpers import cargo_atual, tipo_mudanca
 from yuno_bot.commands.encomenda.embeds import build_encomenda_payload
 from app.services import check_permission
 from yuno_bot.commands.ausencia.embeds import (
@@ -163,6 +165,42 @@ def test_anuncio_payload_and_panel_config() -> None:
     assert config["command_permissions"]["anuncio.publicar"]["channel_ids"] == ["11"]
     assert config["settings"]["anuncio"]["panel_channel_id"] == "11"
     assert config["settings"]["anuncio"]["panel_message_id"] == "44"
+
+
+def test_hierarquia_cargo_atual_e_tipo_mudanca() -> None:
+    escada = [100, 200, 300, 400]  # do menor ao maior
+
+    assert cargo_atual(member_role_ids=[999, 200], ladder_role_ids=escada) == 200
+    assert cargo_atual(member_role_ids=[999], ladder_role_ids=escada) is None
+    # membro com dois cargos da escada: vale o mais alto
+    assert cargo_atual(member_role_ids=[100, 300], ladder_role_ids=escada) == 300
+
+    assert tipo_mudanca(escada, None, 100) == "atribuicao"
+    assert tipo_mudanca(escada, 100, 300) == "promocao"
+    assert tipo_mudanca(escada, 300, 100) == "rebaixamento"
+    assert tipo_mudanca(escada, 200, 200) == "reatribuicao"
+
+
+def test_hierarquia_panel_config_grava_escada_gerentes_e_permissao() -> None:
+    config = build_hierarquia_panel_config(
+        {
+            "guild_name": "Cidade",
+            "admin_role_ids": [],
+            "log_channel_id": "logs",
+            "modules": {"hierarquia": True},
+            "command_permissions": {},
+            "messages": {},
+            "settings": {},
+        },
+        panel_channel_id=11,
+        ladder_role_ids=[100, 200, 300],
+        manager_role_ids=[300],
+        panel_message_id=22,
+    )
+    assert config["settings"]["hierarquia"]["role_ids"] == ["100", "200", "300"]
+    assert config["settings"]["hierarquia"]["manager_role_ids"] == ["300"]
+    assert config["command_permissions"]["hierarquia.gerenciar"]["role_ids"] == ["300"]
+    assert config["command_permissions"]["hierarquia.gerenciar"]["channel_ids"] == ["11"]
 
 
 def test_parse_meta_definition_accepts_multiple_items() -> None:
