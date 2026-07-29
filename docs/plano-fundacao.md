@@ -80,9 +80,21 @@ Incluir `/yuno diagnostico`: lista o que está configurado, o que falta, quais p
 
 **Entregue:** `requires_module` em `guards.py`; aplicado em `ausencia/views.py`, `radio/views.py`, `farm_tickets/views.py` (2 classes, 9 botões); `set/views.py` e `meta/views.py` migrados do `ensure_allowed` inline para o decorator. 3 testes novos em `backend/tests/test_view_guard.py` cobrindo módulo desligado (nega e não chama o callback), módulo ligado (chama) e extração do `api` via `controller.bot.api`. 67 testes passando.
 
-### 0.5 Alembic
+### 0.5 Alembic — CONCLUÍDO
 
-Sem migração versionada, a segunda atualização em produção quebra o banco de cliente. `alembic init`, baseline do schema atual, e a regra: **toda alteração em `models.py` vem com migração no mesmo commit.**
+**Problema:** sem migração versionada, a segunda atualização em produção quebra o banco de cliente. `db.py` já tinha um sintoma disso: `_ensure_compat_columns` fazia `ALTER TABLE` manual via SQL cru porque `Base.metadata.create_all` não altera tabela existente.
+
+**Solução:** `alembic init -t async migrations` (o template async casa com o `create_async_engine` que o projeto já usa). `migrations/env.py` importa `app.models` e lê a URL de `get_settings().database_url` — a mesma fonte que a aplicação usa em runtime, nunca duplicada em `alembic.ini`.
+
+**O problema real de introduzir Alembic com produção já rodando:** a baseline não podia refletir o `models.py` atual (que já tem as colunas de pasta de membro do farm ticket, ver 0.1) porque a produção real ainda está no schema *anterior* a essas colunas — gerar a baseline do estado atual faria `alembic upgrade head` tentar `CREATE TABLE` em cima de tabelas que já existem e derrubar o próximo deploy. Duas migrações, então: **baseline** = schema tal como está hoje em produção (sem as colunas de pasta), **segunda migração** = `add_column` das 4 colunas de pasta, autogerada comparando a baseline aplicada contra o `models.py` atual. Efeito final idêntico ao `_ensure_compat_columns`, só que versionado.
+
+**Adoção do banco de produção:** `create_database()` (chamada no `lifespan` do FastAPI, como já era) inspeciona o banco antes de migrar. Sem `alembic_version` mas com a tabela `licenses` já existindo = banco antigo, criado por `create_all` antes do Alembic existir → `alembic stamp` na baseline (marca como já aplicada, sem reexecutar `CREATE TABLE`) e só então `upgrade head`, que roda de verdade só a migração das colunas de pasta. Testado simulando esse cenário exato (schema pré-Alembic → `create_database()` → schema completo, `alembic_version` na head). Banco novo (dev, teste, cliente novo) não tem `licenses` nem `alembic_version` → pula o stamp e roda as duas migrações do zero, resultado idêntico.
+
+**Regra daqui pra frente: toda alteração em `models.py` vem com migração no mesmo commit** (`alembic revision --autogenerate -m "..."`, revisar o arquivo gerado, testar `upgrade`+`downgrade` antes de commitar).
+
+**Nota de deploy:** o próximo `deploy.yuno.ps1` contra o servidor Oracle é a primeira vez que esse caminho de adoção roda contra o banco de produção de verdade — foi testado contra uma simulação fiel (mesmo schema, mesma ausência de `alembic_version`), não contra o banco real. Vale rodar com backup do Postgres em mãos.
+
+**Entregue:** `backend/alembic.ini`, `backend/migrations/` (`env.py` configurado, 2 migrações: `b83c59e0158e` baseline e `d4b265e2fb2a` colunas de pasta), `app/db.py` reescrito (`_ensure_compat_columns` removido, `create_database()` agora roda `stamp`+`upgrade` via Alembic), `alembic==1.18.5` em `requirements.txt`, `Dockerfile` copiando `alembic.ini` e `migrations/` para a imagem. 67 testes passando (sem teste novo — é infraestrutura de schema, verificado manualmente com os dois cenários acima).
 
 ### 0.6 Abstração de storage e licença
 
@@ -152,7 +164,7 @@ Fase 0 é bloqueante — cada módulo portado antes dela carrega o setup frágil
 
 Fase 1 pode começar assim que 0.1 (registry) estiver de pé, porque o dashboard consome o registry.
 
-**Ordem de execução: ~~0.1~~ ~~0.2~~ ~~0.3~~ ~~0.4~~ (feitos) → 0.5 → 0.6 → Fase 1 → Fase 2.**
+**Ordem de execução: ~~0.1~~ ~~0.2~~ ~~0.3~~ ~~0.4~~ ~~0.5~~ (feitos) → 0.6 → Fase 1 → Fase 2.**
 
 ---
 

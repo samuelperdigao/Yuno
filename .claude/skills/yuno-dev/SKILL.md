@@ -147,15 +147,15 @@ Mantida em ordem de impacto na venda. Ao resolver um item, remova-o daqui e regi
 2. **`parcerias_repository` grava SQLite local no container do bot.** Viola o multi-tenant e o estado some no redeploy. Migrar para o backend.
 3. **`api_client.py` tem 30+ métodos específicos de farm_tickets.** Domínio vazando para a camada de transporte. Deve ser um cliente genérico com os métodos de domínio nos módulos.
 4. **`_apply_set_visibility` itera todas as categorias e todos os canais chamando `set_permissions`.** Em servidor com 80 canais isso é rate-limit garantido e trava o setup na frente do cliente. Precisa operar só nos canais afetados.
-5. **Sem Alembic.** Produto vendido sem migração versionada não sobrevive à segunda atualização.
-6. **`messages` não é consumido.** Cliente não consegue mudar nenhum texto.
-7. **Licença só é validada em `/yuno status` e `/yuno configurar`.** Revogação não tem efeito imediato nos demais comandos. O `/radio alterar` nem isso faz — só checa cargo, nunca módulo/licença (achado ao portar o guard de views; não corrigido nesta sessão, mesma classe de risco do item resolvido abaixo).
+5. **`messages` não é consumido.** Cliente não consegue mudar nenhum texto.
+6. **Licença só é validada em `/yuno status` e `/yuno configurar`.** Revogação não tem efeito imediato nos demais comandos. O `/radio alterar` nem isso faz — só checa cargo, nunca módulo/licença (achado ao portar o guard de views).
 
 **Resolvido:**
 
 - Registry declarativo de módulos (`yuno_bot/modules.py`). `main.py` e `server_setup.py` não são mais editados a cada módulo; a divergência de `farm_tickets` entre bot e backend está travada por teste.
 - Setup idempotente por ID + `/yuno diagnostico` (`server_setup.ensure_setup_channels`, `diagnostics.py`). Canal renomeado ou movido pelo cliente é respeitado — identidade é o ID, e o bot nunca reorganiza o servidor dele.
 - Guard de módulo em views (`@requires_module` em `guards.py`). Aplicado nos botões que não passavam por `ensure_allowed`/`can_manage_parcerias`: `AusenciaPanelView`, `RadioPainelView`, `FarmPanelView` e `FarmTicketControlView` (9 botões ao todo). `SetPanelView`/`SetApprovalView` e `MetaPanelView` foram migrados do `ensure_allowed` inline para o decorator, por consistência. `ParceriaPanelView` já checava módulo via `can_manage_parcerias` e não foi tocado. O decorator lê `self.api` quando existe, senão `self.controller.bot.api` — as views de `farm_tickets` guardam a instância do cog (`controller`), não a `YunoAPI` diretamente.
+- Alembic (`backend/alembic.ini`, `backend/migrations/`). `_ensure_compat_columns` (ALTER TABLE manual em `db.py`) foi substituído por migração versionada. **Regra a partir de agora: toda alteração em `models.py` vem com migração no mesmo commit** — `alembic revision --autogenerate -m "..."` a partir de `backend/`, revisar o arquivo gerado (autogenerate erra em enums cross-tabela e esquece o import de `Text` quando usa `JSONB(astext_type=...)`), testar `upgrade` antes de commitar. `create_database()` adota bancos criados antes do Alembic existir via `stamp` na baseline (`LEGACY_BASELINE_REVISION` em `db.py`) quando detecta tabela antiga sem `alembic_version` — é o caminho que a produção atual vai percorrer no próximo deploy.
 
 ## Verificação antes de fechar qualquer entrega
 
