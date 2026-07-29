@@ -42,7 +42,7 @@ Duas tabelas:
 | `farm_advertencias.py` | 1164 | Advertência automática por meta não cumprida | Fase 2 |
 | `bau.py` + `bau_core.py` + `bau_gerentes.py` | 2370 | Baú da gerência, estoque, slots | **Não** — específico da facção |
 | `recolhimento.py` | 1093 | Ciclo semanal de recolhimento de dinheiro/farm | **Não** — específico |
-| `acao.py` + `acao_painel.py` | 1223 | Sistema de ações/missões (fuga, tiro) | Sim — núcleo |
+| `acao.py` + `acao_painel.py` | 1223 (metade de `acao.py` era código morto duplicado, nunca importado) | Sistema de ações/missões (fuga, tiro) | Já existe no Yuno (`commands/acao/`, catálogo de missões configurável por servidor, participantes em `SystemRecord`) |
 | `dashboard.py` | 874 | **Painel de configuração Components V2 dentro do Discord** | **Sim — prioridade máxima** |
 | `setup.py` | 683 | `/setup_bot`, `/setup_farm`, `/setup_ausencia` | Conceito, não código |
 | `parcerias.py` | 674 | Registro de parcerias | Já existe no Yuno (com débito) |

@@ -20,6 +20,7 @@ MODULES = [
     "anuncio",
     "hierarquia",
     "membros",
+    "acao",
 ]
 
 

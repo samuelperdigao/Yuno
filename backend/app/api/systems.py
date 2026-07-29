@@ -71,6 +71,15 @@ async def list_records(module: str, guild_id: str, session: AsyncSession = Depen
     return [record_out(record) for record in result.scalars()]
 
 
+@router.get("/{module}/records/{record_id}", response_model=SystemRecordOut, dependencies=[Depends(require_admin_or_bot_token)])
+async def get_record(module: str, record_id: int, session: AsyncSession = Depends(get_session)) -> SystemRecordOut:
+    assert_module(module)
+    record = await session.get(SystemRecord, record_id)
+    if not record or record.module != module:
+        raise HTTPException(status_code=404, detail="Registro nao encontrado.")
+    return record_out(record)
+
+
 @router.patch("/{module}/records/{record_id}", response_model=SystemRecordOut, dependencies=[Depends(require_admin_or_bot_token)])
 async def patch_record(module: str, record_id: int, data: SystemRecordPatch, session: AsyncSession = Depends(get_session)) -> SystemRecordOut:
     assert_module(module)

@@ -16,6 +16,18 @@ sys.path.insert(0, str(ROOT / "bot"))
 from yuno_bot.commands.adv.embeds import adv_log_embed, adv_post_embed, build_adv_payload
 from yuno_bot.commands.anuncio.embeds import build_anuncio_panel_config, build_anuncio_payload
 from yuno_bot.commands.hierarquia.embeds import build_hierarquia_panel_config
+from yuno_bot.commands.acao.helpers import (
+    acao_id_from_message,
+    calcular_pagamento,
+    find_tipo,
+    format_money_centavos,
+    normalize_date_br,
+    normalize_resultado,
+    normalizar_horario,
+    parse_money_centavos,
+    remove_tipo,
+    upsert_tipo,
+)
 from yuno_bot.commands.membros.embeds import format_delta
 from yuno_bot.commands.hierarquia.helpers import cargo_atual, tipo_mudanca
 from yuno_bot.commands.encomenda.embeds import build_encomenda_payload
@@ -209,6 +221,69 @@ def test_format_delta_escolhe_a_unidade_certa() -> None:
     assert format_delta(timedelta(hours=3, minutes=20)) == "3h 20m"
     assert format_delta(timedelta(days=2, hours=4, minutes=1)) == "2d 4h 1m"
     assert format_delta(timedelta(days=400)) == "1a 35d"
+
+
+def test_acao_data_horario_e_resultado_validam_formato() -> None:
+    assert normalize_date_br("08/06/2026") == "08/06/2026"
+    with pytest.raises(ValueError, match="DD/MM/AAAA"):
+        normalize_date_br("2026-06-08")
+    with pytest.raises(ValueError, match="valida"):
+        normalize_date_br("32/13/2026")
+
+    assert normalizar_horario("09:05") == "09:05"
+    with pytest.raises(ValueError, match="HH:MM"):
+        normalizar_horario("9h")
+    with pytest.raises(ValueError, match="valido"):
+        normalizar_horario("25:00")
+
+    assert normalize_resultado("Vitória") == "ganha"
+    assert normalize_resultado("derrota") == "perdida"
+    with pytest.raises(ValueError, match="invalido"):
+        normalize_resultado("empate")
+
+
+def test_acao_pagamento_divide_metade_e_sobra_fica_com_faccao() -> None:
+    valor = parse_money_centavos("R$ 50.000,00")
+    assert valor == 5_000_000
+
+    pagamento = calcular_pagamento(valor, 3)
+    assert pagamento["valor_por_participante_centavos"] == 833_333  # 2_500_000 // 3
+    assert pagamento["valor_participantes_centavos"] == 2_499_999  # 3 * 833_333
+    assert pagamento["valor_faccao_centavos"] == 2_500_001  # sobra do arredondamento fica com a faccao
+    assert pagamento["valor_faccao_centavos"] + pagamento["valor_participantes_centavos"] == valor
+
+    with pytest.raises(ValueError, match="pelo menos um participante"):
+        calcular_pagamento(valor, 0)
+    with pytest.raises(ValueError, match="valido"):
+        parse_money_centavos("abc")
+
+    assert format_money_centavos(5_000_000) == "R$ 50.000,00"
+    assert format_money_centavos(None) == "R$ 0,00"
+
+
+def test_acao_catalogo_upsert_remove_find() -> None:
+    tipos = upsert_tipo([], key="banco", nome="Banco Central", emoji="🏦", max_participantes=10, regras="Fuzil obrigatorio")
+    assert len(tipos) == 1
+    assert find_tipo(tipos, "banco")["nome"] == "Banco Central"
+
+    tipos = upsert_tipo(tipos, key="banco", nome="Banco Central v2", emoji="🏦", max_participantes=12, regras="Atualizado")
+    assert len(tipos) == 1
+    assert find_tipo(tipos, "banco")["max_participantes"] == 12
+
+    tipos = upsert_tipo(tipos, key="joalheria", nome="Joalheria", emoji="💎", max_participantes=None, regras="")
+    assert len(tipos) == 2
+
+    tipos = remove_tipo(tipos, "banco")
+    assert len(tipos) == 1
+    assert find_tipo(tipos, "banco") is None
+
+
+def test_acao_id_from_message_le_o_footer() -> None:
+    mensagem_valida = SimpleNamespace(embeds=[SimpleNamespace(footer=SimpleNamespace(text="Sistema de Ação · Ação #42"))])
+    assert acao_id_from_message(mensagem_valida) == 42
+
+    assert acao_id_from_message(SimpleNamespace(embeds=[])) is None
+    assert acao_id_from_message(None) is None
 
 
 def test_parse_meta_definition_accepts_multiple_items() -> None:

@@ -183,6 +183,15 @@ class YunoAPI:
             response.raise_for_status()
             return response.json()
 
+    async def get_record(self, *, module: str, record_id: int) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"{self.base_url}/systems/{module}/records/{record_id}",
+                headers=self.headers,
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def patch_record(self, *, module: str, record_id: int, status: str, reviewer_id: int, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.patch(

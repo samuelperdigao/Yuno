@@ -150,7 +150,7 @@ Ordem, do que ensina o padrão para o que exige mais cuidado:
 | 2 | ~~`anuncio`~~ | `cogs/anuncio.py` | 335 | **CONCLUÍDO.** Cargos anunciantes exercitam `command_permissions` |
 | 3 | ~~`hierarquia`~~ | `cogs/hierarquia.py` | 335 | **CONCLUÍDO.** Manipulação de cargo; exercita permissão do bot |
 | 4 | ~~`membros`~~ | `cogs/membros.py` | 190 | **CONCLUÍDO.** Primeiro módulo sem slash command (listeners) |
-| 5 | `acao` | `cogs/acao.py` + `acao_painel.py` | 1223 | Maior; padrão já consolidado |
+| 5 | ~~`acao`~~ | `cogs/acao.py` + `acao_painel.py` | 1223 | **CONCLUÍDO.** Maior; padrão já consolidado |
 | 6 | `mod` | `cogs/mod.py` | 252 | Trivial, fecha a fase |
 | 7 | `disparo` | `cogs/disparo.py` | 545 | Rate limit exige cuidado; por último |
 
@@ -203,6 +203,24 @@ Primeiro módulo do Yuno guiado por **listeners** (`on_member_join`, `on_member_
 **Dois canais de log, não um:** `membros_entrada` e `membros_saida` como `SetupChannel` separados — o registry só tem um slot de `log_channel` por módulo, e este precisa de dois.
 
 **Entregue:** `bot/yuno_bot/commands/membros/` (`embeds.py` com `format_delta` puro, `cog.py`), `release_member_folder` em `farm_tickets/helpers.py`. `membros` em `MODULES`, registry (`ordem=120`) e `_COMMAND_HINTS`. 88 testes passando.
+
+### `acao` — CONCLUÍDO
+
+O módulo maior e mais arriscado da fase, por dois motivos que só apareceram ao ler o código fonte de verdade em vez de confiar na contagem de linhas do mapa.
+
+**Achado 1 — código morto:** `cogs/acao.py` (1006 linhas) continha **duas implementações completas e paralelas** da mesma feature: uma versão antiga em memória (`self.inscritos`, perdia tudo num restart) nas primeiras ~500 linhas, e uma versão persistida em SQLite depois — a segunda redefine as mesmas classes e sombra a primeira por completo. Só a segunda é registrada em `setup()`. A primeira metade nunca roda; não foi portada.
+
+**Achado 2 — catálogo específico da facção:** `ACOES`, um dict Python com 16 missões do Morro do Mineiro (Banco Central, Joalheria, Merryweather...), cada uma com regras de armamento/negociação/reféns em texto livre. Isso é tão específico quanto os itens de farm (`folha`, `ópio`) já citados neste plano — um cliente diferente administra uma cidade diferente, com missões diferentes. Perguntado ao dono antes de implementar: virou `settings.acao.tipos`, uma lista de `{key, nome, emoji, max_participantes, regras}` cadastrável via `/acao tipo_criar` (campos estruturados + modal só para o texto de regras, que precisa suportar múltiplas linhas).
+
+**Persistência sem tabela nova:** cada ação em andamento é um `SystemRecord` (`status="open"`/`"done"`, `payload` com participantes/resultado/pagamento). O desafio era resolver "a que ação esta mensagem pertence" quando um botão persistente é clicado — a mesma pergunta que `farm_tickets` já respondeu: `ticket_id_from_message` lê o ID do rodapé do embed. `acao_id_from_message` reaproveita exatamente esse truque. Isso evitou criar uma tabela dedicada só para poder consultar por `message_id`.
+
+**Achado 3, no meio do caminho:** a rota `GET /systems/{module}/records/{record_id}` não existia — só `list_records` (exige admin token, o bot não tem) e `patch_record` (aceita bot token). Sem um jeito do bot buscar UM registro por ID, o botão "Entrar" não teria como ler o estado atual antes de decidir se há vaga. Adicionada em `backend/app/api/systems.py`, seguindo o mesmo padrão de autorização do patch.
+
+**Cuidado ao usar `patch_record`:** o campo `reviewer_id` do `SystemRecord` é sobrescrito em **todo** patch, sem exceção — usá-lo para "quem finalizou a ação" quebraria assim que alguém entrasse ou saísse depois (o join mais recente vira o "finalizador"). O campo `finalizado_por` mora dentro do `payload` especificamente por causa disso.
+
+**Divergências propositais do MDM:** bypass de `guild_permissions.administrator` não portado (mesma razão dos módulos anteriores). Pagamento continua 50% facção / 50% participantes com sobra de arredondamento pra facção — regra de negócio do MDM que decidi manter como está, por ser um padrão de RP genérico o suficiente (não é específico de nomes de cargo ou item).
+
+**Entregue:** `bot/yuno_bot/commands/acao/` completo (`helpers.py` puro — datas, dinheiro, catálogo —, `embeds.py`, `modals.py`, `views.py`, `cog.py`), `GET /systems/{module}/records/{record_id}` novo no backend + `YunoAPI.get_record`. `acao` em `MODULES`, registry (`ordem=130`, `plano_minimo="pro"`) e `_COMMAND_HINTS`. 92 testes passando (12 novos, cobrindo data/horário/resultado, cálculo de pagamento, catálogo e extração de ID do rodapé).
 
 ---
 
