@@ -147,7 +147,7 @@ Ordem, do que ensina o padrão para o que exige mais cuidado:
 | # | Módulo | Origem MDM | LOC origem | Por que nessa posição |
 |---|---|---|---|---|
 | 1 | ~~`adv`~~ | `cogs/adv.py` | 309 | **CONCLUÍDO.** Pequeno; exercita painel + modal + log ponta a ponta |
-| 2 | `anuncio` | `cogs/anuncio.py` | 335 | Cargos anunciantes exercitam `command_permissions` |
+| 2 | ~~`anuncio`~~ | `cogs/anuncio.py` | 335 | **CONCLUÍDO.** Cargos anunciantes exercitam `command_permissions` |
 | 3 | `hierarquia` | `cogs/hierarquia.py` | 335 | Manipulação de cargo; exercita permissão do bot |
 | 4 | `membros` | `cogs/membros.py` | 190 | Primeiro módulo sem slash command (listeners) |
 | 5 | `acao` | `cogs/acao.py` + `acao_painel.py` | 1223 | Maior; padrão já consolidado |
@@ -163,6 +163,16 @@ Portado sem tabela nova: cabe inteiro em `SystemRecord` (`module="adv"`, `payloa
 **Divergências propositais do MDM:** os comandos legados do MDM (`/setup-adv` configurando canal via parâmetro, `/adv` como atalho direto) não foram portados — o Yuno já resolve "onde fica o canal" via `setup_channels`/`/yuno configurar`, então existir um segundo jeito de configurar seria a mesma inconsistência que a Fase 1 encontrou em outros módulos. Permissão trocou de `manage_guild` hardcoded para `ensure_allowed("adv", "aplicar")` (módulo + `command_permissions`), consistente com todo o resto do Yuno em vez de um cargo fixo do Discord.
 
 **Entregue:** `bot/yuno_bot/commands/adv/` completo (`cog.py`, `embeds.py`, `modals.py`, `views.py`, `__init__.py`), `MODULE` registrado (`ordem=90`), `adv` em `_SIMPLE_MODULES`/`_COMMAND_HINTS` do dashboard (Fase 1). 84 testes passando.
+
+### `anuncio` — CONCLUÍDO
+
+Este era o módulo escolhido pelo plano justamente para exercitar `command_permissions` de verdade — e ao portar ficou claro por quê: é o **primeiro módulo do Yuno com um comando dedicado só para configurar cargo autorizado**, distinto do canal. `encomenda`/`producao`/`ticket`/`radio` nunca tiveram isso (débito técnico já registrado); `set`/`meta` configuram cargo mas dentro do próprio comando de painel, junto com outros campos. `anuncio` segue o mesmo padrão de `set painel`/`meta painel`: `/anuncio painel <canal> <cargos_anunciantes>` publica o painel (editando em vez de duplicar se já existir, igual aos outros) e grava `command_permissions["anuncio.publicar"]` — o guard genérico (`ensure_allowed`) passa a fazer todo o trabalho de "quem pode", sem checagem de cargo hardcoded no código do módulo.
+
+**Simplificação em relação ao MDM:** como `command_permissions["anuncio.publicar"].channel_ids` já restringe o comando/botão ao canal configurado, o próprio `interaction.channel` pode ser usado como destino do anúncio — não precisa resolver o canal de novo via `settings` em `views.py`. O MDM resolvia isso com uma função `db_get_anuncio_canal` chamada toda vez.
+
+**Divergência proposital:** o bypass de administrador do MDM (`if member.guild_permissions.administrator: return True`, ignorando a lista de cargos) não foi portado — o Yuno já tem seu próprio conceito de admin (`admin_role_ids` da guild config, checado dentro do `check_permission` do backend) e replicar o bypass do Discord aqui seria inconsistente com todo o resto do produto, que não faz essa checagem em nenhum outro módulo.
+
+**Entregue:** `bot/yuno_bot/commands/anuncio/` completo, incluindo o fluxo de anexo opcional (espera de 60s por mensagem com arquivo, igual ao original). `anuncio` em `MODULES`, registry (`ordem=100`) e `_COMMAND_HINTS` do dashboard. 85 testes passando.
 
 ---
 

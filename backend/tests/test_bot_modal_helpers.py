@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(ROOT / "bot"))
 
 from yuno_bot.commands.adv.embeds import adv_log_embed, adv_post_embed, build_adv_payload
+from yuno_bot.commands.anuncio.embeds import build_anuncio_panel_config, build_anuncio_payload
 from yuno_bot.commands.encomenda.embeds import build_encomenda_payload
 from app.services import check_permission
 from yuno_bot.commands.ausencia.embeds import (
@@ -135,6 +136,33 @@ def test_adv_embeds_show_membro_and_duracao() -> None:
 
     log_embed = adv_log_embed(interaction, record, membro, payload).to_dict()
     assert any(field["name"] == "Membro" and "42" in field["value"] for field in log_embed["fields"])
+
+
+def test_anuncio_payload_and_panel_config() -> None:
+    assert build_anuncio_payload("  Titulo  ", "  Conteudo  ", True) == {
+        "titulo": "Titulo",
+        "conteudo": "Conteudo",
+        "com_arquivo": True,
+    }
+
+    config = build_anuncio_panel_config(
+        {
+            "guild_name": "Cidade Setup",
+            "admin_role_ids": [],
+            "log_channel_id": "logs",
+            "modules": {"anuncio": True},
+            "command_permissions": {"anuncio.publicar": {"role_ids": ["old-role"]}},
+            "messages": {},
+            "settings": {},
+        },
+        panel_channel_id=11,
+        role_ids=[22, 33],
+        panel_message_id=44,
+    )
+    assert config["command_permissions"]["anuncio.publicar"]["role_ids"] == ["22", "33"]
+    assert config["command_permissions"]["anuncio.publicar"]["channel_ids"] == ["11"]
+    assert config["settings"]["anuncio"]["panel_channel_id"] == "11"
+    assert config["settings"]["anuncio"]["panel_message_id"] == "44"
 
 
 def test_parse_meta_definition_accepts_multiple_items() -> None:
