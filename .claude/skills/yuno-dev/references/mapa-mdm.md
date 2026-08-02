@@ -2,7 +2,7 @@
 
 Snapshot de 2026-07-29. ~22k LOC. **Fonte de features validadas, nunca destino de código novo.**
 
-Caminho: `C:\Users\sperd\OneDrive\Projetos\Morro do Mineiro Bot`
+Caminho: `C:\Projetos\Morro do Mineiro Bot`
 
 ## Arquitetura
 
