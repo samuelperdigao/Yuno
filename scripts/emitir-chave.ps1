@@ -32,7 +32,19 @@ $body = @{
 } | ConvertTo-Json -Compress
 $payloadBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($body))
 
-$remoteCommand = "cd /home/ubuntu/yuno && set -a && . ./.env && set +a && payload=`$(printf '%s' '$payloadBase64' | base64 -d) && curl -fsS -X POST http://127.0.0.1:8000/licenses/issue -H 'Content-Type: application/json' -H `"x-yuno-admin-token: `$ADMIN_TOKEN`" --data-binary `"`$payload`""
+$bashScript = @'
+set -e
+cd /home/ubuntu/yuno
+set -a
+. ./.env
+set +a
+printf '%s' '{0}' | base64 -d | curl -fsS -X POST http://127.0.0.1:8000/licenses/issue \
+  -H 'Content-Type: application/json' \
+  -H "x-yuno-admin-token: $ADMIN_TOKEN" \
+  --data-binary @-
+'@ -f $payloadBase64
+$scriptBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($bashScript))
+$remoteCommand = "echo $scriptBase64|base64 -d|bash"
 $raw = & ssh -i $sshKey -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new $remote $remoteCommand
 if ($LASTEXITCODE -ne 0) {
     throw "A API nao conseguiu emitir a chave. Confira a referencia e o status do servidor."
