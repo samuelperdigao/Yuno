@@ -323,6 +323,24 @@ def test_farm_ticket_config_goal_ticket_progress_and_finalize(client: TestClient
     assert entry.json()["progress"]["items"]["Item"]["delivered"] == 5
     assert entry.json()["progress"]["percent"] == 50
 
+    ranking = client.get(
+        "/internal/farm-tickets/guilds/farm-a/ranking/2026-W30",
+        headers={"x-yuno-bot-token": "bot-test"},
+    )
+    assert ranking.status_code == 200
+    assert ranking.json()["participants"] == 1
+    assert ranking.json()["ranking"] == [
+        {
+            "position": 1,
+            "user_id": "42",
+            "member_name": "Ana",
+            "delivered_total": 5,
+            "completion_percent": 50,
+            "entry_count": 1,
+            "items": {"Item": 5},
+        }
+    ]
+
     finalize = client.post(
         f"/internal/farm-tickets/tickets/{ticket_id}/finalize",
         headers={"x-yuno-bot-token": "bot-test"},

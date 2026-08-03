@@ -2,14 +2,20 @@ $ErrorActionPreference = "Stop"
 
 $Branch = "main"
 $Remote = "ubuntu@163.176.143.142"
-$SshKey = Join-Path $PSScriptRoot "..\Bot Discord\oracle.key"
+$UserProfileDir = [Environment]::GetFolderPath("UserProfile")
+$SshKeyCandidates = @(
+    (Join-Path $PSScriptRoot "..\Morro do Mineiro Bot\oracle.key"),
+    (Join-Path $UserProfileDir ".ssh\yuno_oracle_ed25519"),
+    (Join-Path $PSScriptRoot "..\Bot Discord\oracle.key")
+)
+$SshKey = $SshKeyCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 $RemoteDir = "/home/ubuntu/yuno"
 $DeployKey = "/home/ubuntu/.ssh/yuno_github_deploy_ed25519"
 
 Write-Host "== Yuno deploy =="
 
-if (-not (Test-Path $SshKey)) {
-    throw "Chave SSH nao encontrada: $SshKey"
+if (-not $SshKey) {
+    throw "Chave SSH do Yuno nao encontrada nos caminhos conhecidos."
 }
 
 $dirty = git status --short
@@ -27,6 +33,40 @@ if ($LASTEXITCODE -ne 0) {
 $remoteCommand = @"
 set -euo pipefail
 cd $RemoteDir
+
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && docker compose ps --status running postgres | grep -q postgres; then
+  stamp=`$(date +%Y%m%d-%H%M%S)
+  mkdir -p backups
+  docker compose exec -T postgres pg_dump -U yuno -d yuno > "backups/yuno-predeploy-`$stamp.sql"
+  test -s "backups/yuno-predeploy-`$stamp.sql"
+  echo "Backup pre-deploy criado: backups/yuno-predeploy-`$stamp.sql"
+elif test -f .env; then
+  db_url=`$(grep -m1 '^DATABASE_URL=' .env | cut -d= -f2- || true)
+  case "`$db_url" in
+    sqlite+aiosqlite:///*|sqlite:///*)
+      db_path="`${db_url#*///}"
+      case "`$db_path" in
+        /*) ;;
+        *) db_path="$RemoteDir/`$db_path" ;;
+      esac
+      if test -f "`$db_path"; then
+        stamp=`$(date +%Y%m%d-%H%M%S)
+        backup_path="$RemoteDir/backups/yuno-predeploy-`$stamp.db"
+        mkdir -p "$RemoteDir/backups"
+        .venv/bin/python - "`$db_path" "`$backup_path" <<'PY'
+import sqlite3
+import sys
+
+with sqlite3.connect(sys.argv[1]) as source, sqlite3.connect(sys.argv[2]) as target:
+    source.backup(target)
+PY
+        test -s "`$backup_path"
+        echo "Backup pre-deploy criado: `$backup_path"
+      fi
+      ;;
+  esac
+fi
+
 GIT_SSH_COMMAND='ssh -i $DeployKey -o StrictHostKeyChecking=accept-new' git pull --ff-only origin $Branch
 
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then

@@ -1,5 +1,19 @@
 # Handoff — continuar o Yuno no Claude Code
 
+## Atualização Codex — 2026-08-02
+
+A retomada avançou além do ponto descrito abaixo:
+
+- Fase 3 concluída no escopo aprovado: ranking semanal agregado no backend, `/farm ranking` e botão no painel de farm.
+- Painéis fixos adicionados a ticket, encomenda, produção e advertência.
+- Publicação de painéis padronizada e idempotente, com canal/mensagem persistidos e limpeza segura do painel antigo ao mover de canal.
+- Painel geral paginado para os 16 módulos e com ativação/desativação administrativa dentro do Discord.
+- Título, descrição e cor dos painéis consumidos de `messages` e editáveis no dashboard web.
+- Rádio deixou de depender de nome de cargo; permissões de cargo/canal ficam em `command_permissions`.
+- Validação local desta atualização: **99 testes passando**, dashboard Vite compilado e `compileall` do backend/bot verde. Docker não está instalado no workstation atual, então Discord real e PostgreSQL real continuam como gates externos.
+
+As seções históricas abaixo explicam como o projeto chegou até este ponto.
+
 Documento de retomada. Cole isto (ou peça para ler `docs/HANDOFF.md`) ao abrir o Claude Code no repositório `Yuno`.
 
 Data: 2026-08-02 · Branch `main` · Último commit: `0656ff5`

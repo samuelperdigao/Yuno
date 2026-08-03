@@ -38,6 +38,7 @@ export default function App() {
   const [config, setConfig] = useState(defaultConfig);
   const [products, setProducts] = useState([]);
   const [productDraft, setProductDraft] = useState({ name: "", unit: "unidade" });
+  const [selectedPanelModule, setSelectedPanelModule] = useState("set");
   const [status, setStatus] = useState("Pronto para configurar.");
   const [busy, setBusy] = useState(false);
 
@@ -63,6 +64,22 @@ export default function App() {
     setConfig((current) => ({
       ...current,
       modules: { ...current.modules, [moduleId]: !current.modules?.[moduleId] },
+    }));
+  }
+
+  function updatePanelMessage(field, value) {
+    setConfig((current) => ({
+      ...current,
+      messages: {
+        ...(current.messages || {}),
+        [selectedPanelModule]: {
+          ...(current.messages?.[selectedPanelModule] || {}),
+          panel: {
+            ...(current.messages?.[selectedPanelModule]?.panel || {}),
+            [field]: value,
+          },
+        },
+      },
     }));
   }
 
@@ -204,6 +221,46 @@ export default function App() {
                 </button>
               );
             })}
+          </div>
+        </section>
+
+        <section className="panel">
+          <h2>Personalizacao dos paineis</h2>
+          <p>Campos vazios usam o visual profissional padrao do Yuno. Depois de salvar, rode o comando de painel do modulo para atualizar a mensagem fixa.</p>
+          <div className="form-grid">
+            <label>
+              Modulo
+              <select value={selectedPanelModule} onChange={(event) => setSelectedPanelModule(event.target.value)}>
+                {modules.map((module) => <option key={module.id} value={module.id}>{module.label}</option>)}
+              </select>
+            </label>
+            <label>
+              Titulo do painel
+              <input
+                value={config.messages?.[selectedPanelModule]?.panel?.title || ""}
+                onChange={(event) => updatePanelMessage("title", event.target.value)}
+                placeholder="Use o titulo padrao"
+                maxLength={256}
+              />
+            </label>
+            <label>
+              Cor (hexadecimal)
+              <input
+                value={config.messages?.[selectedPanelModule]?.panel?.color || ""}
+                onChange={(event) => updatePanelMessage("color", event.target.value)}
+                placeholder="#FFC72C"
+                maxLength={9}
+              />
+            </label>
+            <label>
+              Descricao do painel
+              <textarea
+                value={config.messages?.[selectedPanelModule]?.panel?.description || ""}
+                onChange={(event) => updatePanelMessage("description", event.target.value)}
+                placeholder="Use a descricao padrao do Yuno"
+                maxLength={4096}
+              />
+            </label>
           </div>
         </section>
 

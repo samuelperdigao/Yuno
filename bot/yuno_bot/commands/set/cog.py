@@ -6,6 +6,7 @@ from discord.ext import commands
 from yuno_bot.commands.set.embeds import build_set_panel_config, panel_embed
 from yuno_bot.commands.set.modals import SetAprovarModal, SetReprovarModal, SetSolicitarModal
 from yuno_bot.commands.set.views import SetPanelView
+from yuno_bot.commands.panels import customize_panel_embed, remove_previous_panel, rollback_unsaved_panel
 from yuno_bot.guards import deny, ensure_allowed
 
 
@@ -67,7 +68,7 @@ class SetCog(commands.Cog):
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         try:
-            current_config = await self.bot.api.get_guild_config(interaction.guild.id)
+            current_config = await self.bot.api.get_guild_config(interaction.guild.id, force=True)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 403:
                 await interaction.followup.send("Este servidor ainda nao possui licenca ativa.", ephemeral=True)
@@ -100,8 +101,13 @@ class SetCog(commands.Cog):
         try:
             await self.bot.api.save_guild_config(interaction.guild.id, updated_config)
         except httpx.HTTPError:
+            await rollback_unsaved_panel(current_config, panel_message, module_key="set")
             await interaction.followup.send("Painel publicado, mas nao consegui salvar a configuracao.", ephemeral=True)
             return
+
+        await remove_previous_panel(
+            current_config, canal_solicitacao, module_key="set", message_id=panel_message.id
+        )
 
         await interaction.followup.send(
             "\n".join(
@@ -127,7 +133,9 @@ class SetCog(commands.Cog):
         set_settings = (current_config.get("settings") or {}).get("set") or {}
         previous_channel_id = set_settings.get("panel_channel_id")
         previous_message_id = set_settings.get("panel_message_id")
-        embed = panel_embed(interaction.guild.name if interaction.guild else None)
+        embed = customize_panel_embed(
+            panel_embed(interaction.guild.name if interaction.guild else None), current_config, "set"
+        )
         view = SetPanelView(self.bot.api)
 
         if str(previous_channel_id) == str(panel_channel.id) and previous_message_id:
@@ -155,10 +163,14 @@ class SetCog(commands.Cog):
         default_role = guild.default_role
 
         for category in guild.categories:
+            overwrite = category.overwrites_for(default_role)
+            if overwrite.view_channel is False:
+                continue
+            overwrite.view_channel = False
             try:
                 await category.set_permissions(
                     default_role,
-                    overwrite=discord.PermissionOverwrite(view_channel=False),
+                    overwrite=overwrite,
                     reason="Yuno painel de set: restringir entrada de membros",
                 )
             except discord.HTTPException:
@@ -166,26 +178,48 @@ class SetCog(commands.Cog):
 
         channels = self._resolve_member_gate_channels(guild, panel_channel, approval_channel)
         for channel in channels:
+            overwrite = channel.overwrites_for(default_role)
             try:
                 if channel.id == panel_channel.id:
+                    if (
+                        overwrite.view_channel is True
+                        and overwrite.send_messages is False
+                        and overwrite.read_message_history is True
+                    ):
+                        continue
+                    overwrite.view_channel = True
+                    overwrite.send_messages = False
+                    overwrite.read_message_history = True
                     await channel.set_permissions(
                         default_role,
-                        overwrite=discord.PermissionOverwrite(view_channel=True, send_messages=False, read_message_history=True),
+                        overwrite=overwrite,
                         reason="Yuno painel de set: liberar solicitacao para membros",
                     )
                     continue
+                # Canais filhos herdam o bloqueio da categoria. So precisam de
+                # chamada propria quando estao sem categoria ou possuem uma
+                # liberacao explicita de @everyone que venceria a heranca.
+                if channel.category is not None and overwrite.view_channel is not True:
+                    continue
+                if overwrite.view_channel is False:
+                    continue
+                overwrite.view_channel = False
                 await channel.set_permissions(
                     default_role,
-                    overwrite=discord.PermissionOverwrite(view_channel=False),
+                    overwrite=overwrite,
                     reason="Yuno painel de set: restringir entrada de membros",
                 )
             except discord.HTTPException:
                 warnings.append(f"Aviso: nao consegui ajustar permissoes em {channel.name}.")
 
         try:
+            approval_overwrite = approval_channel.overwrites_for(approval_role)
+            approval_overwrite.view_channel = True
+            approval_overwrite.send_messages = True
+            approval_overwrite.read_message_history = True
             await approval_channel.set_permissions(
                 approval_role,
-                overwrite=discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+                overwrite=approval_overwrite,
                 reason="Yuno painel de set: liberar aprovadores",
             )
         except discord.HTTPException:

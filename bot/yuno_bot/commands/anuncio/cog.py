@@ -6,6 +6,7 @@ from discord.ext import commands
 from yuno_bot.commands.anuncio.embeds import anuncio_panel_embed, build_anuncio_panel_config
 from yuno_bot.commands.anuncio.modals import AnuncioModal
 from yuno_bot.commands.anuncio.views import AnuncioPanelView
+from yuno_bot.commands.panels import customize_panel_embed, remove_previous_panel, rollback_unsaved_panel
 from yuno_bot.commands.farm_tickets.helpers import parse_discord_ids
 from yuno_bot.guards import deny, ensure_allowed
 
@@ -49,7 +50,7 @@ class AnuncioCog(commands.Cog):
 
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            current_config = await self.bot.api.get_guild_config(interaction.guild.id)
+            current_config = await self.bot.api.get_guild_config(interaction.guild.id, force=True)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 403:
                 await interaction.followup.send("Este servidor ainda nao possui licenca ativa.", ephemeral=True)
@@ -71,8 +72,13 @@ class AnuncioCog(commands.Cog):
         try:
             await self.bot.api.save_guild_config(interaction.guild.id, updated_config)
         except httpx.HTTPError:
+            await rollback_unsaved_panel(current_config, panel_message, module_key="anuncio")
             await interaction.followup.send("Painel publicado, mas nao consegui salvar a configuracao.", ephemeral=True)
             return
+
+        await remove_previous_panel(
+            current_config, canal, module_key="anuncio", message_id=panel_message.id
+        )
 
         cargos_txt = " ".join(role.mention for role in roles)
         await interaction.followup.send(
@@ -83,7 +89,7 @@ class AnuncioCog(commands.Cog):
         anuncio_settings = (current_config.get("settings") or {}).get("anuncio") or {}
         previous_channel_id = anuncio_settings.get("panel_channel_id")
         previous_message_id = anuncio_settings.get("panel_message_id")
-        embed = anuncio_panel_embed()
+        embed = customize_panel_embed(anuncio_panel_embed(), current_config, "anuncio")
         view = AnuncioPanelView(self.bot.api)
 
         if str(previous_channel_id) == str(canal.id) and previous_message_id:

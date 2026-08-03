@@ -3,6 +3,21 @@ import discord
 from yuno_bot.commands.shared import YUNO_ORANGE, make_log_embed
 
 
+def ticket_panel_embed(guild_name: str | None = None) -> discord.Embed:
+    embed = discord.Embed(
+        title="📨 Central de Atendimento",
+        description=(
+            "Precisa falar com a equipe? Clique no botão abaixo e descreva sua solicitação.\n\n"
+            "• Informe o tipo e o assunto com clareza\n"
+            "• Explique os detalhes no formulário\n"
+            "• Guarde o protocolo recebido"
+        ),
+        color=YUNO_ORANGE,
+    )
+    embed.set_footer(text=f"Yuno • Tickets{f' • {guild_name}' if guild_name else ''}")
+    return embed
+
+
 def build_ticket_payload(tipo: str, assunto: str, descricao: str) -> dict[str, str]:
     return {
         "tipo": tipo.strip(),

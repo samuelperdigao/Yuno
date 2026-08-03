@@ -1,4 +1,5 @@
 import discord
+import httpx
 from discord import app_commands
 from discord.ext import commands
 
@@ -7,6 +8,7 @@ from yuno_bot.commands.parceria.modals import ParceriaCadastrarModal
 from yuno_bot.commands.parceria.permissions import role_name_matches
 from yuno_bot.commands.parceria.repository import ParceriasRepository
 from yuno_bot.commands.parceria.views import ParceriaPanelView
+from yuno_bot.commands.panels import customize_panel_embed
 from yuno_bot.guards import deny, ensure_allowed
 
 
@@ -47,19 +49,40 @@ class ParceriaCog(commands.Cog):
 
         await interaction.response.defer(ephemeral=True, thinking=True)
 
+        try:
+            guild_config = await self.bot.api.get_guild_config(interaction.guild.id, force=True)
+        except httpx.HTTPError:
+            await interaction.followup.send("Nao consegui carregar a configuracao do servidor.", ephemeral=True)
+            return
         current_config = await self.repository.get_config(interaction.guild.id)
-        panel_message = await self._publish_or_update_panel(canal_registro, current_config)
+        panel_message = await self._publish_or_update_panel(canal_registro, current_config, guild_config)
         if not panel_message:
             await interaction.followup.send("Canal de registro de parcerias não encontrado.", ephemeral=True)
             return
 
-        await self.repository.upsert_config(
-            guild_id=interaction.guild.id,
-            category_id=categoria.id if categoria else None,
-            registrar_channel_id=canal_registro.id,
-            ativas_channel_id=canal_ativas.id,
-            panel_message_id=panel_message.id,
-        )
+        try:
+            await self.repository.upsert_config(
+                guild_id=interaction.guild.id,
+                category_id=categoria.id if categoria else None,
+                registrar_channel_id=canal_registro.id,
+                ativas_channel_id=canal_ativas.id,
+                panel_message_id=panel_message.id,
+            )
+        except httpx.HTTPError:
+            if not (
+                current_config
+                and current_config.parceria_registrar_channel_id == canal_registro.id
+                and current_config.parceria_panel_message_id == panel_message.id
+            ):
+                try:
+                    await panel_message.delete()
+                except discord.HTTPException:
+                    pass
+            await interaction.followup.send(
+                "Painel publicado, mas nao consegui salvar a configuracao de parcerias.", ephemeral=True
+            )
+            return
+        await self._remove_previous_panel(canal_registro, panel_message.id, current_config)
 
         warnings = await self._apply_gerente_permissions(
             interaction.guild,
@@ -80,8 +103,9 @@ class ParceriaCog(commands.Cog):
         self,
         panel_channel: discord.TextChannel,
         current_config,
+        guild_config: dict,
     ) -> discord.Message | None:
-        embed = parcerias_panel_embed()
+        embed = customize_panel_embed(parcerias_panel_embed(), guild_config, "parceria")
         view = ParceriaPanelView(self.bot.api, self.repository)
 
         if (
@@ -100,6 +124,30 @@ class ParceriaCog(commands.Cog):
             return await panel_channel.send(embed=embed, view=view, allowed_mentions=discord.AllowedMentions.none())
         except discord.HTTPException:
             return None
+
+    async def _remove_previous_panel(
+        self,
+        panel_channel: discord.TextChannel,
+        panel_message_id: int,
+        current_config,
+    ) -> None:
+        if not current_config or not current_config.parceria_panel_message_id:
+            return
+        if (
+            current_config.parceria_registrar_channel_id == panel_channel.id
+            and current_config.parceria_panel_message_id == panel_message_id
+        ):
+            return
+        old_channel = panel_channel.guild.get_channel(current_config.parceria_registrar_channel_id)
+        if not isinstance(old_channel, discord.TextChannel):
+            return
+        try:
+            old_message = await old_channel.fetch_message(current_config.parceria_panel_message_id)
+            bot_member = panel_channel.guild.me
+            if bot_member and old_message.author.id == bot_member.id:
+                await old_message.delete()
+        except discord.HTTPException:
+            pass
 
     async def _apply_gerente_permissions(
         self,

@@ -52,24 +52,33 @@ A logo oficial do Yuno fica em `Yuno.png` na raiz do projeto e tambem em `dashbo
 
 - `/yuno status`
 - `/yuno configurar`
-- `/set solicitar`, `/set aprovar`, `/set reprovar`
-- `/meta registrar`
-- `/ticket abrir`
-- `/parceria cadastrar`
-- `/encomenda criar`
+- `/yuno painel`, `/yuno diagnostico`
+- `/set solicitar`, `/set aprovar`, `/set reprovar`, `/set painel`
+- `/meta registrar`, `/meta painel`
+- `/farm ranking`, `/setup_farm_tickets`, `/setup_farm_meta`, `/setup_farm_painel`
+- `/ticket abrir`, `/ticket painel`
+- `/parceria cadastrar`, `/setup_parcerias`
+- `/encomenda criar`, `/encomenda painel`
 - `/setup_ausencia`, `/painel_ausencia`, `/ausencias`
-- `/radio alterar`
-- `/producao registrar`
+- `/radio alterar`, `/radio painel`
+- `/producao registrar`, `/producao painel`
+- `/adv aplicar`, `/adv painel`
+- `/anuncio publicar`, `/anuncio painel`
+- `/hierarquia painel`, `/acao painel`, `/disparo painel`
 
 Os comandos operacionais abrem modais personalizados no Discord. O preenchimento do formulario gera registro no backend, resposta privada para o usuario e log no canal do sistema.
 
-## Status do produto
+Veja o fluxo completo de publicação e personalização em [docs/paineis.md](docs/paineis.md).
+
+## Operação antes da venda
 
 Depois de ativar a licenca do servidor, use `/yuno configurar` dentro do Discord para o bot criar as categorias/canais padrao, os canais de log por sistema e salvar as permissoes iniciais de cada comando no backend. O usuario precisa ter permissao de gerenciar servidor e o bot precisa ter permissao de gerenciar canais.
 
-Esta e uma implementacao inicial de produto, pronta para evoluir. Os fluxos principais ja existem, mas antes de venda real devem ser configurados:
+Os fluxos do produto e os painéis fixos estão implementados. Antes de liberar uma instalação para cliente, valide no ambiente real:
 
 - Aplicacao Discord OAuth e bot token.
 - Credenciais Mercado Pago e validacao final de webhook.
 - Dominio, HTTPS e backups na VPS.
 - Politica comercial de troca manual de servidor.
+- Migrações em uma cópia do PostgreSQL de produção.
+- Fluxo `/yuno configurar` → painéis → `/yuno diagnostico` em um servidor Discord limpo.

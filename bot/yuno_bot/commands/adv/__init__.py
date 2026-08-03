@@ -14,5 +14,8 @@ MODULE = ModuleSpec(
     views=(lambda ctx: AdvPanelView(ctx.api),),
     setup_channels=(SetupChannel("adv", "advertencias", "operacao", ("adv.aplicar",)),),
     log_channel="logs-adv",
-    dashboard_fields=(DashboardField("panel_channel_id", "Canal de advertencias", "channel"),),
+    dashboard_fields=(
+        DashboardField("panel_channel_id", "Canal de advertencias", "channel"),
+        DashboardField("role_ids", "Cargo responsavel", "roles", obrigatorio=False),
+    ),
 )

@@ -14,6 +14,7 @@ from yuno_bot.commands.ausencia.embeds import (
     panel_embed,
 )
 from yuno_bot.commands.ausencia.views import AusenciaPanelView
+from yuno_bot.commands.panels import publish_panel_command
 from yuno_bot.commands.shared import resolve_text_channel, send_module_log
 
 
@@ -95,32 +96,16 @@ class AusenciaCog(commands.Cog):
     @app_commands.command(name="painel_ausencia", description="Publica o painel de registro de ausências")
     @app_commands.default_permissions(manage_guild=True)
     async def painel_ausencia(self, interaction: discord.Interaction) -> None:
-        if not has_manage_guild(interaction):
-            await interaction.response.send_message(PERMISSION_ERROR, ephemeral=True)
-            return
-        if not interaction.guild or not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.response.send_message(NOT_CONFIGURED_ERROR, ephemeral=True)
-            return
-
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            config = await self.bot.api.get_guild_config(interaction.guild.id)
-        except httpx.HTTPError:
-            await interaction.followup.send("❌ Erro interno. Tente novamente.", ephemeral=True)
-            return
-
-        channel = await resolve_text_channel(interaction.guild, ausencia_channel_id(config))
-        if not channel:
-            await interaction.followup.send(NOT_CONFIGURED_ERROR, ephemeral=True)
-            return
-
-        try:
-            await interaction.channel.send(embed=panel_embed(), view=AusenciaPanelView(self.bot.api), allowed_mentions=discord.AllowedMentions.none())
-        except discord.HTTPException:
-            await interaction.followup.send("❌ Erro interno. Tente novamente.", ephemeral=True)
-            return
-
-        await interaction.followup.send("✅ Painel de ausências publicado.", ephemeral=True)
+        await publish_panel_command(
+            interaction,
+            self.bot.api,
+            module_key="ausencia",
+            setup_channel_key="ausencias",
+            embed=panel_embed(),
+            view=AusenciaPanelView(self.bot.api),
+            command_names=("registrar",),
+            label="Painel de ausências",
+        )
 
     @app_commands.command(name="ausencias", description="Lista os membros com ausência ativa")
     async def ausencias(self, interaction: discord.Interaction) -> None:

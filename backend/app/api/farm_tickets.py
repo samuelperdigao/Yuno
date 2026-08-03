@@ -17,6 +17,7 @@ from app.farm_tickets import (
     has_pending_review,
     refresh_ticket_progress,
     reserve_ticket,
+    weekly_ranking,
     upsert_config,
     upsert_goal,
 )
@@ -35,6 +36,7 @@ from app.schemas import (
     FarmTicketReserveIn,
     FarmTicketReserveOut,
     FarmTicketReviewIn,
+    FarmRankingOut,
     FarmWeeklyGoalIn,
     FarmWeeklyGoalOut,
 )
@@ -159,6 +161,33 @@ async def save_goal(guild_id: str, data: FarmWeeklyGoalIn, session: AsyncSession
 async def read_goal(guild_id: str, week_id: str, session: AsyncSession = Depends(get_session)) -> FarmWeeklyGoalOut:
     await assert_license(session, guild_id)
     return goal_out(await active_goal(session, guild_id, week_id))
+
+
+@router.get("/guilds/{guild_id}/ranking/{week_id}", response_model=FarmRankingOut)
+async def read_ranking(
+    guild_id: str,
+    week_id: str,
+    limit: int = 10,
+    session: AsyncSession = Depends(get_session),
+) -> FarmRankingOut:
+    await assert_license(session, guild_id)
+    safe_limit = max(1, min(limit, 25))
+    result = await session.execute(
+        select(FarmTicket)
+        .where(
+            FarmTicket.guild_id == guild_id,
+            FarmTicket.week_id == week_id,
+            FarmTicket.deleted_at.is_(None),
+        )
+        .options(selectinload(FarmTicket.entries))
+    )
+    tickets = list(result.scalars().unique())
+    return FarmRankingOut(
+        guild_id=guild_id,
+        week_id=week_id,
+        participants=len({ticket.user_id for ticket in tickets}),
+        ranking=weekly_ranking(tickets, limit=safe_limit),
+    )
 
 
 @router.post("/guilds/{guild_id}/tickets/reserve", response_model=FarmTicketReserveOut)

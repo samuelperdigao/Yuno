@@ -433,6 +433,7 @@ def test_set_panel_config_saves_channels_roles_and_message() -> None:
     assert config["command_permissions"]["set.aprovar"]["role_ids"] == ["99"]
     assert config["command_permissions"]["set.reprovar"]["channel_ids"] == ["12"]
     assert config["command_permissions"]["set.reprovar"]["role_ids"] == ["99"]
+    assert config["settings"]["set"]["approval_channel_id"] == "12"
     assert config["settings"]["set"]["approved_role_id"] == "100"
     assert config["settings"]["set"]["panel_message_id"] == "1234"
 

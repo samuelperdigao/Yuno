@@ -50,6 +50,7 @@ def build_ausencia_setup_config(current_config: dict[str, Any], *, channel_id: i
     settings = dict(current_config.get("settings") or {})
     ausencia_settings = dict(settings.get("ausencia") or {})
     ausencia_settings["canal_ausencias_id"] = str(channel_id)
+    ausencia_settings["panel_channel_id"] = str(channel_id)
     settings["ausencia"] = ausencia_settings
 
     discord_setup = dict(settings.get("discord_setup") or {})

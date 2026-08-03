@@ -20,10 +20,18 @@ export async function api(path, { method = "GET", adminToken, body } = {}) {
 export const modules = [
   { id: "set", label: "Set" },
   { id: "meta", label: "Metas semanais" },
+  { id: "farm_tickets", label: "Tickets de Farm" },
   { id: "ticket", label: "Tickets" },
   { id: "parceria", label: "Parcerias" },
   { id: "encomenda", label: "Encomendas" },
   { id: "ausencia", label: "Ausencia" },
   { id: "radio", label: "Radio" },
   { id: "producao", label: "Producao" },
+  { id: "adv", label: "Advertencias" },
+  { id: "anuncio", label: "Anuncios" },
+  { id: "hierarquia", label: "Hierarquia" },
+  { id: "membros", label: "Membros" },
+  { id: "acao", label: "Acoes" },
+  { id: "mod", label: "Moderacao" },
+  { id: "disparo", label: "Disparo" },
 ];

@@ -39,6 +39,20 @@ class FarmPanelView(discord.ui.View):
         link = channel.mention if isinstance(channel, discord.TextChannel) else "canal indisponivel"
         await interaction.followup.send(f"Seu ticket atual: {link}\nProgresso: `{(ticket.get('progress') or {}).get('percent', 0)}%`.", ephemeral=True)
 
+    @discord.ui.button(
+        label="Ranking Semanal",
+        emoji="🏆",
+        style=discord.ButtonStyle.secondary,
+        custom_id="yuno:farm:panel:ranking",
+    )
+    @requires_module("farm_tickets", "ranking")
+    async def ranking(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not interaction.guild:
+            await interaction.response.send_message("Use este painel dentro de um servidor.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await self.controller.show_weekly_ranking(interaction)
+
     @discord.ui.button(label="Excluir Ticket", style=discord.ButtonStyle.danger, custom_id="yuno:farm:panel:delete")
     @requires_module("farm_tickets", "excluir")
     async def delete_ticket(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:

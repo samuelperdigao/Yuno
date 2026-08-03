@@ -7,6 +7,7 @@ from yuno_bot.commands.acao.embeds import catalogo_listagem_embed, painel_fixo_e
 from yuno_bot.commands.acao.helpers import remove_tipo
 from yuno_bot.commands.acao.modals import TipoRegrasModal
 from yuno_bot.commands.acao.views import AcaoPainelView, AcaoTipoView
+from yuno_bot.commands.panels import publish_or_update_panel, remove_previous_panel, rollback_unsaved_panel, with_panel_config
 from yuno_bot.guards import deny, ensure_allowed
 
 
@@ -149,7 +150,7 @@ class AcaoCog(commands.Cog):
 
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            current_config = await self.bot.api.get_guild_config(interaction.guild.id)
+            current_config = await self.bot.api.get_guild_config(interaction.guild.id, force=True)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 403:
                 await interaction.followup.send("Este servidor ainda nao possui licenca ativa.", ephemeral=True)
@@ -160,30 +161,44 @@ class AcaoCog(commands.Cog):
             await interaction.followup.send("Nao consegui falar com a API do Yuno.", ephemeral=True)
             return
 
-        try:
-            await canal.send(embed=painel_fixo_embed(), view=AcaoPainelView(self.bot.api))
-        except discord.HTTPException:
+        panel_message = await publish_or_update_panel(
+            canal,
+            current_config,
+            module_key="acao",
+            embed=painel_fixo_embed(),
+            view=AcaoPainelView(self.bot.api),
+        )
+        if panel_message is None:
             await interaction.followup.send("Nao consegui publicar o painel no canal informado.", ephemeral=True)
             return
 
-        command_permissions = dict(current_config.get("command_permissions") or {})
+        updated_config = with_panel_config(
+            current_config,
+            module_key="acao",
+            channel_id=canal.id,
+            message_id=panel_message.id,
+            command_names=("gerenciar",),
+        )
+        command_permissions = dict(updated_config.get("command_permissions") or {})
         rule = dict(command_permissions.get("acao.gerenciar") or {})
         rule["role_ids"] = [str(role_id) for role_id in role_ids]
         command_permissions["acao.gerenciar"] = rule
-        updated_config = {
-            "guild_name": current_config.get("guild_name"),
-            "admin_role_ids": current_config.get("admin_role_ids") or [],
-            "log_channel_id": current_config.get("log_channel_id"),
-            "modules": current_config.get("modules") or {},
-            "command_permissions": command_permissions,
-            "messages": current_config.get("messages") or {},
-            "settings": current_config.get("settings") or {},
-        }
+        updated_config["command_permissions"] = command_permissions
+        acao_settings = dict(updated_config["settings"].get("acao") or {})
+        acao_settings["manager_role_ids"] = [str(role_id) for role_id in role_ids]
+        updated_config["settings"]["acao"] = acao_settings
         try:
             await self.bot.api.save_guild_config(interaction.guild.id, updated_config)
         except httpx.HTTPError:
+            await rollback_unsaved_panel(current_config, panel_message, module_key="acao")
             await interaction.followup.send("Painel publicado, mas nao consegui salvar os cargos gerentes.", ephemeral=True)
             return
 
+        await remove_previous_panel(
+            current_config,
+            canal,
+            module_key="acao",
+            message_id=panel_message.id,
+        )
         cargos_txt = " ".join(role.mention for role in roles)
         await interaction.followup.send(f"Painel de ação publicado em {canal.mention}.\nGerentes: {cargos_txt}", ephemeral=True)

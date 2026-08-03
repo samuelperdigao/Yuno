@@ -2,7 +2,7 @@
 
 from yuno_bot.commands.acao.cog import AcaoCog
 from yuno_bot.commands.acao.views import AcaoPainelView, AcaoParticipantesView
-from yuno_bot.modules import ModuleSpec, SetupChannel
+from yuno_bot.modules import DashboardField, ModuleSpec, SetupChannel
 
 MODULE = ModuleSpec(
     key="acao",
@@ -22,5 +22,8 @@ MODULE = ModuleSpec(
         SetupChannel("acao_perdidas", "logs-acao-perdidas", "logs", ()),
         SetupChannel("acao_pagamento", "logs-acao-pagamento", "logs", ()),
     ),
-    dashboard_fields=(),
+    dashboard_fields=(
+        DashboardField("panel_channel_id", "Canal do painel", "channel"),
+        DashboardField("manager_role_ids", "Cargos gerentes", "roles"),
+    ),
 )

@@ -118,11 +118,12 @@ class YunoAdminCog(commands.Cog):
         if resultado.adopted:
             linhas.append(f"Adotei os que ja existiam: {', '.join(resultado.adopted)}")
         linhas.append("Pode rodar este comando quantas vezes quiser: nada e duplicado.")
+        linhas.append("Próximo passo: rode `/yuno painel` para configurar e publicar os painéis dos módulos.")
         linhas.append("Use `/yuno diagnostico` a qualquer momento para conferir o estado.")
 
         await interaction.followup.send("\n".join(linhas), ephemeral=True)
 
-    @yuno.command(name="painel", description="Publica ou atualiza o painel de status dos modulos")
+    @yuno.command(name="painel", description="Publica ou atualiza o painel administrativo dos modulos")
     @app_commands.default_permissions(manage_guild=True)
     async def yuno_painel(self, interaction: discord.Interaction) -> None:
         if not await self._exigir_admin(interaction):

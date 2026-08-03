@@ -3,6 +3,19 @@ import discord
 from yuno_bot.commands.shared import YUNO_GREEN, make_log_embed
 
 
+def producao_panel_embed(guild_name: str | None = None) -> discord.Embed:
+    embed = discord.Embed(
+        title="🏭 Controle de Produção",
+        description=(
+            "Registre sua produção de forma rápida e padronizada.\n\n"
+            "Clique no botão, informe o produto, a quantidade e uma observação quando necessário."
+        ),
+        color=YUNO_GREEN,
+    )
+    embed.set_footer(text=f"Yuno • Produção{f' • {guild_name}' if guild_name else ''}")
+    return embed
+
+
 def build_producao_payload(produto: str, quantidade: int, observacao: str) -> dict:
     return {
         "produto": produto.strip(),

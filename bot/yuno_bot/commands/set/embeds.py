@@ -33,6 +33,7 @@ def build_set_panel_config(
     settings["discord_setup"] = discord_setup
 
     set_settings = dict(settings.get("set") or {})
+    set_settings["approval_channel_id"] = str(approval_channel_id)
     set_settings["approval_role_id"] = str(approval_role_id)
     set_settings["approved_role_id"] = str(approved_role_id)
     set_settings["panel_channel_id"] = str(panel_channel_id)

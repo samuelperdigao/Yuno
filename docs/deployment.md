@@ -67,6 +67,16 @@ docker compose up -d --build
 docker compose ps
 ```
 
+O script `deploy.yuno.ps1` cria e valida um dump `yuno-predeploy-*.sql` antes do `git pull` sempre que o PostgreSQL Docker estiver em execução. No modo legado com `systemd` e SQLite, ele usa a API de backup do próprio SQLite para gerar `yuno-predeploy-*.db` de forma consistente. Se o backup falhar ou ficar vazio, o deploy é interrompido.
+
 ## 5. Backups
 
 Use os scripts em `scripts/` para backup e restauracao do PostgreSQL. Salve os backups fora da instancia sempre que possivel.
+
+Exemplo de agendamento diário no `crontab` do usuário de deploy:
+
+```cron
+15 3 * * * cd /home/ubuntu/yuno && ./scripts/backup-postgres.sh >> /home/ubuntu/yuno/backups/backup.log 2>&1
+```
+
+Teste a restauração em um banco separado antes de considerar o backup validado.

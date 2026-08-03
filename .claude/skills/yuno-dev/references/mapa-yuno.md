@@ -1,6 +1,6 @@
 # Mapa do Yuno
 
-Snapshot de 2026-07-29. ~8.5k LOC. Atualize ao mudar estrutura.
+Snapshot atualizado em 2026-08-02. Atualize ao mudar estrutura.
 
 ## Backend — FastAPI + SQLAlchemy async
 
@@ -63,6 +63,7 @@ Lido por `commands/shared.py` via `channel_id_from_setup` e `log_channel_id_from
 | `server_setup.py` | ~230 | `SETUP_CATEGORIES`, `CORE_CHANNELS`, `PERMISSOES_NECESSARIAS`; derivadas `setup_channels()`, `log_channels()`, `module_keys()`; leitura `saved_channel_id()`/`saved_log_channel_id()`; `ensure_setup_channels(guild, config)` → `SetupResult`; `build_setup_config` |
 | `diagnostics.py` | ~180 | `diagnose(guild, config, licenca_ativa)` puro → `Diagnostico`; `diagnostic_embed()` |
 | `commands/shared.py` | 142 | Cores, `clean_text`, `parse_positive_int`, `make_success_embed`, `make_log_embed`, `get_guild_config`, `resolve_text_channel`, `send_module_log`, `send_to_setup_channel`, `create_record` |
+| `commands/panels.py` | compartilhado | Publicação idempotente, persistência de canal/mensagem, sincronização de permissões e personalização visual dos painéis fixos |
 
 ### Módulos existentes
 
@@ -74,13 +75,13 @@ Ordem canônica: set(10), meta(20), farm_tickets(25), ticket(30), parceria(40), 
 |---|---|---|
 | `set` | `/set solicitar|aprovar|reprovar|painel` | **validado** |
 | `meta` | `/meta registrar` + painel | **validado** |
-| `farm_tickets` | painel + controle de ticket | maior módulo (364 LOC no cog) |
-| `parceria` | `/parceria cadastrar` | usa SQLite local — débito #4 |
+| `farm_tickets` | painel + controle de ticket + `/farm ranking` | ranking agregado no backend |
+| `parceria` | `/parceria cadastrar` + painel | persistência no backend |
 | `ausencia` | `/setup_ausencia`, `/painel_ausencia`, `/ausencias` | |
-| `ticket` | `/ticket abrir` | |
-| `encomenda` | `/encomenda criar` | |
+| `ticket` | `/ticket abrir|painel` | painel persistente |
+| `encomenda` | `/encomenda criar|painel` | painel persistente |
 | `radio` | `/radio alterar` | |
-| `producao` | `/producao registrar` | |
+| `producao` | `/producao registrar|painel` | painel persistente |
 
 ### Estrutura criada por `/yuno configurar`
 
@@ -96,7 +97,7 @@ Canais de log: `logs-<modulo>` para cada um dos 9 módulos.
 
 ## Infra
 
-`docker-compose.yml` (postgres, redis, api, bot, dashboard, caddy), `infra/Caddyfile`, `deploy.yuno.cmd` / `.ps1` (push main → Oracle → restart `yuno-api` e `yuno-bot`), `scripts/backup-postgres.sh`.
+`docker-compose.yml` (postgres, redis, api, bot, dashboard, caddy), `infra/Caddyfile`, `deploy.yuno.cmd` / `.ps1` (push main → backup PostgreSQL Docker ou SQLite legado → Oracle → restart da stack), `scripts/backup-postgres.sh`.
 
 ## Testes
 

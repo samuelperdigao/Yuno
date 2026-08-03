@@ -244,6 +244,16 @@ class YunoAPI:
             response.raise_for_status()
             return response.json()
 
+    async def get_farm_weekly_ranking(self, guild_id: int, week_id: str, *, limit: int = 10) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"{self.base_url}/internal/farm-tickets/guilds/{guild_id}/ranking/{week_id}",
+                headers=self.headers,
+                params={"limit": limit},
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def reserve_farm_ticket(self, guild_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.post(

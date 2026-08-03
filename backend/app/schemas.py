@@ -341,3 +341,20 @@ class FarmTicketActionOut(BaseModel):
     log_sent_at: datetime | None = None
     log_message_id: str | None = None
     log_attempts: int
+
+
+class FarmRankingItemOut(BaseModel):
+    position: int
+    user_id: str
+    member_name: str
+    delivered_total: int
+    completion_percent: int
+    entry_count: int
+    items: dict[str, int] = Field(default_factory=dict)
+
+
+class FarmRankingOut(BaseModel):
+    guild_id: str
+    week_id: str
+    participants: int
+    ranking: list[FarmRankingItemOut] = Field(default_factory=list)

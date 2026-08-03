@@ -3,6 +3,19 @@ import discord
 from yuno_bot.commands.shared import YUNO_ORANGE, clean_text, make_log_embed
 
 
+def encomenda_panel_embed(guild_name: str | None = None) -> discord.Embed:
+    embed = discord.Embed(
+        title="📦 Central de Encomendas",
+        description=(
+            "Registre uma nova encomenda pelo botão abaixo.\n\n"
+            "Tenha em mãos o item, a quantidade, o prazo e a identificação do cliente ou família."
+        ),
+        color=YUNO_ORANGE,
+    )
+    embed.set_footer(text=f"Yuno • Encomendas{f' • {guild_name}' if guild_name else ''}")
+    return embed
+
+
 def build_encomenda_payload(item: str, quantidade: int, prazo: str, cliente_familia: str, valor_observacao: str) -> dict:
     return {
         "item": item.strip(),

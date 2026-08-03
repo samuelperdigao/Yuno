@@ -252,7 +252,9 @@ O módulo que o plano avisou para deixar por último por causa de rate limit —
 
 O farm do MDM (`farm.py` 1707 + `farm_painel` + `farm_relatorio` + `farm_advertencias` = ~4000 LOC) é a feature mais completa e mais difícil de generalizar: os itens (`folha`, `opio`, `seringa`, `agulha`) são **colunas literais** nas tabelas `metas`, `progresso` e `eventos`.
 
-Generalização: catálogo de itens por servidor (`Product` já existe), meta como lista de `{item_id, quantidade}` (já é assim em `FarmWeeklyGoal.items`), progresso como JSON. O Yuno já tem o modelo certo — falta portar a lógica de ranking, relatório e advertência automática.
+Generalização: catálogo de itens por servidor (`Product` já existe), meta como lista de `{item_id, quantidade}` (já é assim em `FarmWeeklyGoal.items`), progresso como JSON.
+
+**Entregue no escopo aprovado:** ranking semanal agregado por servidor no backend, `/farm ranking` e botão no painel fixo. Relatório de pendentes e punição automática não fazem parte deste port: dependem de um futuro modelo de quota obrigatória, tiers e isenções configuráveis.
 
 Justifica ser plano premium.
 
@@ -260,7 +262,7 @@ Justifica ser plano premium.
 
 ## Fase 4 — Acabamento comercial
 
-- `messages` consumido de fato: cliente edita textos e cores dos embeds
+- `messages` consumido nos painéis fixos: cliente edita título, descrição e cor (entregue); respostas e embeds de registros ainda usam fallback do código
 - Validação de licença com cache curto em todos os comandos (revogação com efeito em ≤5min)
 - Onboarding guiado: ao entrar no servidor, o bot manda DM ao dono com os 3 passos
 - Página de status e changelog público
@@ -274,7 +276,7 @@ Fase 0 é bloqueante — cada módulo portado antes dela carrega o setup frágil
 
 Fase 1 pode começar assim que 0.1 (registry) estiver de pé, porque o dashboard consome o registry.
 
-**Ordem de execução: ~~0.1~~ ~~0.2~~ ~~0.3~~ ~~0.4~~ ~~0.5~~ ~~0.6~~ ~~Fase 1~~ ~~Fase 2~~ (feitos) → Fase 3 → Fase 4.**
+**Ordem de execução: ~~0.1~~ ~~0.2~~ ~~0.3~~ ~~0.4~~ ~~0.5~~ ~~0.6~~ ~~Fase 1~~ ~~Fase 2~~ ~~Fase 3 (ranking)~~ (feitos) → Fase 4.**
 
 ---
 

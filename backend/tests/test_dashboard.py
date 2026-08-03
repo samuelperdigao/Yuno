@@ -8,6 +8,7 @@ porque isso e o unico "codigo novo" real; o resto e so payload.
 
 import os
 import sys
+import asyncio
 from pathlib import Path
 
 os.environ.setdefault("DISCORD_BOT_TOKEN", "test-token")
@@ -17,6 +18,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(ROOT / "bot"))
 
 from yuno_bot import dashboard
+from yuno_bot.commands.panels import customize_panel_embed, with_panel_config
 from yuno_bot.modules import DashboardField, ModuleSpec
 
 SPEC_UM_CAMPO = ModuleSpec(
@@ -106,19 +108,31 @@ def test_module_info_embed_incompleto_mostra_comando_de_como_resolver() -> None:
     assert "/set painel" in campo_resolver.value
 
 
-def test_build_payload_gera_um_botao_por_modulo_do_registry() -> None:
+def test_build_payload_pagina_todos_os_modulos_do_registry() -> None:
     from yuno_bot.modules import discover_modules
 
     config = {"modules": {key: True for key in discover_modules()}, "settings": {}}
-    payload = dashboard.build_payload(config)
+    payloads = [dashboard.build_payload(config, page) for page in range(dashboard._page_count())]
 
-    assert payload["flags"] == dashboard._FLAG_V2
-    container = payload["components"][0]
-    custom_ids = {
-        component["accessory"]["custom_id"]
-        for component in container["components"]
-        if component.get("type") == dashboard._SECTION
-    }
+    assert all(payload["flags"] == dashboard._FLAG_V2 for payload in payloads)
+    custom_ids = set()
+    for payload in payloads:
+        def component_count(component: dict) -> int:
+            children = component.get("components") or []
+            accessory = component.get("accessory")
+            return 1 + sum(component_count(child) for child in children) + (
+                component_count(accessory) if accessory else 0
+            )
+
+        assert sum(component_count(component) for component in payload["components"]) <= 30
+        container = payload["components"][0]
+        sections = [
+            component
+            for component in container["components"]
+            if component.get("type") == dashboard._SECTION
+        ]
+        assert len(sections) <= dashboard._PAGE_SIZE
+        custom_ids.update(component["accessory"]["custom_id"] for component in sections)
     assert custom_ids == {f"yuno:painel:info:{key}" for key in discover_modules()}
 
 
@@ -127,3 +141,51 @@ def test_dashboard_message_ref_and_with_dashboard_ref_roundtrip() -> None:
     updated = dashboard.with_dashboard_ref(config, channel_id=111, message_id=222)
     assert dashboard.dashboard_message_ref(updated) == (111, 222)
     assert dashboard.dashboard_message_ref({"settings": {}}) == (None, None)
+
+
+def test_dispatcher_do_painel_e_persistente_e_cobre_paginas() -> None:
+    async def build():
+        return dashboard.PainelDispatcherView(object())
+
+    view = asyncio.run(build())
+    assert view.is_persistent()
+    assert len(view.children) == len(dashboard.discover_modules()) + dashboard._page_count()
+
+
+def test_personalizacao_do_painel_consume_messages_da_guild() -> None:
+    import discord
+
+    embed = discord.Embed(title="Padrao", description="Padrao", color=0)
+    config = {
+        "messages": {
+            "ticket": {
+                "panel": {"title": "Central da Cidade", "description": "Abra seu chamado.", "color": "#123ABC"}
+            }
+        }
+    }
+
+    customized = customize_panel_embed(embed, config, "ticket")
+    assert customized.title == "Central da Cidade"
+    assert customized.description == "Abra seu chamado."
+    assert customized.color.value == 0x123ABC
+
+
+def test_with_panel_config_salva_referencia_e_restringe_comando() -> None:
+    updated = with_panel_config(
+        {"modules": {"ticket": True}, "settings": {}, "command_permissions": {}},
+        module_key="ticket",
+        channel_id=10,
+        message_id=20,
+        command_names=("abrir",),
+        role_ids=(30,),
+    )
+
+    assert updated["settings"]["ticket"] == {
+        "panel_channel_id": "10",
+        "panel_message_id": "20",
+        "role_ids": ["30"],
+    }
+    assert updated["command_permissions"]["ticket.abrir"] == {
+        "channel_ids": ["10"],
+        "role_ids": ["30"],
+    }

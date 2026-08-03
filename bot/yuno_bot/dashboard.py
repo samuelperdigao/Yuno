@@ -37,6 +37,9 @@ _TEXT = 10
 _SEPARATOR = 14
 _CONTAINER = 17
 _FLAG_V2 = 1 << 15  # IS_COMPONENTS_V2
+# Sete secoes mantem cada payload abaixo de 30 componentes totais, inclusive
+# em clientes/rotas que ainda aplicam o limite original de Components V2.
+_PAGE_SIZE = 7
 
 _STATUS_BADGE = {"configurado": "✅", "incompleto": "⚠️", "desligado": "⛔"}
 _STATUS_LABEL = {"configurado": "Configurado", "incompleto": "Incompleto", "desligado": "Desligado"}
@@ -46,8 +49,8 @@ _STATUS_COLOR = {"configurado": 0x2ECC71, "incompleto": 0xF1C40F, "desligado": 0
 # a maioria em settings.<modulo>, populado pelo proprio comando de painel do
 # modulo; farm_tickets e parceria tem tabela dedicada no backend mas espelham
 # um resumo em settings.<modulo> pelo mesmo motivo (ver app/farm_tickets.py e
-# app/parceria.py); encomenda/producao/ticket nao tem comando de painel
-# proprio -- o unico dado e o canal que `/yuno configurar` ja cria.
+# app/parceria.py). Modulos simples usam o canal criado por `/yuno configurar`
+# como fallback e passam a salvar a referencia assim que o painel e publicado.
 _SIMPLE_MODULES: dict[str, str] = {
     "encomenda": "encomendas",
     "producao": "producao",
@@ -60,12 +63,12 @@ _COMMAND_HINTS: dict[str, str] = {
     "meta": "/meta painel",
     "ausencia": "/setup_ausencia",
     "radio": "/radio painel",
-    "parceria": "/parceria setup_parcerias",
+    "parceria": "/setup_parcerias",
     "farm_tickets": "/setup_farm_tickets",
-    "encomenda": "/yuno configurar",
-    "producao": "/yuno configurar",
-    "ticket": "/yuno configurar",
-    "adv": "/yuno configurar",
+    "encomenda": "/encomenda painel",
+    "producao": "/producao painel",
+    "ticket": "/ticket painel",
+    "adv": "/adv painel",
     "anuncio": "/anuncio painel",
     "hierarquia": "/hierarquia painel",
     "membros": "/membros configurar",
@@ -87,7 +90,10 @@ def _discord_setup_channel_value(config: dict, setup_key: str) -> dict[str, Any]
 def module_values(module_key: str, config: dict) -> dict[str, Any]:
     setup_key = _SIMPLE_MODULES.get(module_key)
     if setup_key:
-        return _discord_setup_channel_value(config, setup_key)
+        return {
+            **_discord_setup_channel_value(config, setup_key),
+            **_settings_values(config, module_key),
+        }
     return _settings_values(config, module_key)
 
 
@@ -140,19 +146,28 @@ def module_info_embed(spec: ModuleSpec, config: dict) -> discord.Embed:
     return embed
 
 
-def build_payload(config: dict) -> dict[str, Any]:
+def _page_count() -> int:
+    return max(1, (len(discover_modules()) + _PAGE_SIZE - 1) // _PAGE_SIZE)
+
+
+def build_payload(config: dict, page: int = 0) -> dict[str, Any]:
+    specs = list(discover_modules().values())
+    pages = _page_count()
+    page = max(0, min(page, pages - 1))
+    visible_specs = specs[page * _PAGE_SIZE : (page + 1) * _PAGE_SIZE]
     inner: list[dict[str, Any]] = [
         {
             "type": _TEXT,
             "content": (
                 "# Painel do Yuno\n"
-                "Estado de cada módulo. Clique em **≡** para ver o que falta e qual comando resolve."
+                "Estado de cada módulo. Clique em **≡** para configurar, ativar ou ver o que falta.\n"
+                f"Página **{page + 1}/{pages}**"
             ),
         },
         {"type": _SEPARATOR, "divider": True, "spacing": 1},
     ]
 
-    for spec in discover_modules().values():
+    for spec in visible_specs:
         status = compute_status(spec, config)
         inner.append(
             {
@@ -173,6 +188,27 @@ def build_payload(config: dict) -> dict[str, Any]:
         )
 
     inner.append({"type": _SEPARATOR, "divider": True, "spacing": 1})
+    inner.append(
+        {
+            "type": _ACTION_ROW,
+            "components": [
+                {
+                    "type": _BUTTON,
+                    "label": "← Anterior",
+                    "style": 2,
+                    "custom_id": f"yuno:painel:page:{page - 1}",
+                    "disabled": page == 0,
+                },
+                {
+                    "type": _BUTTON,
+                    "label": "Próxima →",
+                    "style": 2,
+                    "custom_id": f"yuno:painel:page:{page + 1}",
+                    "disabled": page >= pages - 1,
+                },
+            ],
+        }
+    )
     inner.append({"type": _TEXT, "content": "✅ configurado · ⚠️ incompleto · ⛔ desligado"})
 
     return {"flags": _FLAG_V2, "components": [{"type": _CONTAINER, "components": inner}]}
@@ -236,12 +272,93 @@ class PainelDispatcherView(discord.ui.View):
             )
             button.callback = self._make_callback(spec.key)
             self.add_item(button)
+        for page in range(_page_count()):
+            button = discord.ui.Button(
+                custom_id=f"yuno:painel:page:{page}",
+                style=discord.ButtonStyle.secondary,
+                label=f"Página {page + 1}",
+            )
+            button.callback = self._make_page_callback(page)
+            self.add_item(button)
 
     def _make_callback(self, module_key: str) -> Callable[[discord.Interaction], Any]:
         async def callback(interaction: discord.Interaction) -> None:
             await show_module_info(interaction, self.api, module_key)
 
         return callback
+
+    def _make_page_callback(self, page: int) -> Callable[[discord.Interaction], Any]:
+        async def callback(interaction: discord.Interaction) -> None:
+            if not interaction.guild or not interaction.message or not interaction.channel_id:
+                await interaction.response.send_message("Painel indisponível.", ephemeral=True)
+                return
+            await interaction.response.defer()
+            try:
+                config = await self.api.get_guild_config(interaction.guild.id)
+                await _edit_v2(
+                    interaction.client,
+                    interaction.channel_id,
+                    interaction.message.id,
+                    build_payload(config, page),
+                )
+            except (httpx.HTTPError, discord.HTTPException):
+                await interaction.followup.send("Não consegui trocar a página do painel.", ephemeral=True)
+
+        return callback
+
+
+class ModuleInfoView(discord.ui.View):
+    """Controles administrativos exibidos ao abrir um modulo no painel geral."""
+
+    def __init__(self, api: YunoAPI, spec: ModuleSpec, config: dict) -> None:
+        super().__init__(timeout=180)
+        self.api = api
+        self.spec = spec
+        enabled = bool((config.get("modules") or {}).get(spec.key, False))
+        toggle = discord.ui.Button(
+            label="Desativar módulo" if enabled else "Ativar módulo",
+            emoji="⏸️" if enabled else "▶️",
+            style=discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success,
+            custom_id=f"yuno:painel:toggle:{spec.key}",
+        )
+        toggle.callback = self.toggle_module
+        self.add_item(toggle)
+
+    async def toggle_module(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Use dentro de um servidor.", ephemeral=True)
+            return
+        if not (
+            interaction.user.guild_permissions.manage_guild
+            or interaction.user.guild_permissions.administrator
+            or interaction.guild.owner_id == interaction.user.id
+        ):
+            await interaction.response.send_message(
+                "Você precisa ter permissão de gerenciar servidor.", ephemeral=True
+            )
+            return
+        try:
+            config = await self.api.get_guild_config(interaction.guild.id, force=True)
+            modules = dict(config.get("modules") or {})
+            modules[self.spec.key] = not bool(modules.get(self.spec.key, False))
+            updated = {
+                "guild_name": config.get("guild_name"),
+                "admin_role_ids": config.get("admin_role_ids") or [],
+                "log_channel_id": config.get("log_channel_id"),
+                "modules": modules,
+                "command_permissions": config.get("command_permissions") or {},
+                "messages": config.get("messages") or {},
+                "settings": config.get("settings") or {},
+            }
+            saved = await self.api.save_guild_config(interaction.guild.id, updated)
+        except httpx.HTTPError:
+            await interaction.response.send_message("Não consegui salvar a configuração.", ephemeral=True)
+            return
+
+        await interaction.response.edit_message(
+            embed=module_info_embed(self.spec, saved),
+            view=ModuleInfoView(self.api, self.spec, saved),
+        )
 
 
 async def show_module_info(interaction: discord.Interaction, api: YunoAPI, module_key: str) -> None:
@@ -264,4 +381,8 @@ async def show_module_info(interaction: discord.Interaction, api: YunoAPI, modul
         await interaction.response.send_message("Não consegui falar com a API do Yuno.", ephemeral=True)
         return
 
-    await interaction.response.send_message(embed=module_info_embed(spec, config), ephemeral=True)
+    await interaction.response.send_message(
+        embed=module_info_embed(spec, config),
+        view=ModuleInfoView(api, spec, config),
+        ephemeral=True,
+    )

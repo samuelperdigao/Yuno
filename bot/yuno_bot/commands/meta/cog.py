@@ -6,6 +6,7 @@ from discord.ext import commands
 from yuno_bot.commands.meta.embeds import build_meta_panel_config, meta_panel_embed
 from yuno_bot.commands.meta.modals import MetaRegistrarModal
 from yuno_bot.commands.meta.views import MetaPanelView
+from yuno_bot.commands.panels import customize_panel_embed, remove_previous_panel, rollback_unsaved_panel
 from yuno_bot.guards import deny, ensure_allowed
 
 
@@ -46,7 +47,7 @@ class MetaCog(commands.Cog):
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         try:
-            current_config = await self.bot.api.get_guild_config(interaction.guild.id)
+            current_config = await self.bot.api.get_guild_config(interaction.guild.id, force=True)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 403:
                 await interaction.followup.send("Este servidor ainda nao possui licenca ativa.", ephemeral=True)
@@ -72,8 +73,13 @@ class MetaCog(commands.Cog):
         try:
             await self.bot.api.save_guild_config(interaction.guild.id, updated_config)
         except httpx.HTTPError:
+            await rollback_unsaved_panel(current_config, panel_message, module_key="meta")
             await interaction.followup.send("Painel publicado, mas nao consegui salvar a configuracao.", ephemeral=True)
             return
+
+        await remove_previous_panel(
+            current_config, canal_painel, module_key="meta", message_id=panel_message.id
+        )
 
         await interaction.followup.send(
             "\n".join(
@@ -96,7 +102,9 @@ class MetaCog(commands.Cog):
         meta_settings = (current_config.get("settings") or {}).get("meta") or {}
         previous_channel_id = meta_settings.get("panel_channel_id")
         previous_message_id = meta_settings.get("panel_message_id")
-        embed = meta_panel_embed(interaction.guild.name if interaction.guild else None)
+        embed = customize_panel_embed(
+            meta_panel_embed(interaction.guild.name if interaction.guild else None), current_config, "meta"
+        )
         view = MetaPanelView(self.bot.api)
 
         if str(previous_channel_id) == str(panel_channel.id) and previous_message_id:

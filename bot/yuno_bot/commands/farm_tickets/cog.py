@@ -3,11 +3,12 @@ import httpx
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from yuno_bot.commands.farm_tickets.embeds import farm_goal_embed, farm_log_embed, farm_panel_embed, farm_ticket_embed
+from yuno_bot.commands.farm_tickets.embeds import farm_goal_embed, farm_log_embed, farm_panel_embed, farm_ranking_embed, farm_ticket_embed
 from yuno_bot.commands.farm_tickets.helpers import MemberFolderError, current_week_id, member_has_any_role, parse_discord_ids, resolve_or_create_member_folder
 from yuno_bot.commands.farm_tickets.views import FarmPanelView, FarmTicketControlView, create_private_ticket_channel, ticket_id_from_message
 from yuno_bot.commands.meta.embeds import parse_meta_definition
-from yuno_bot.guards import deny
+from yuno_bot.commands.panels import publish_or_update_panel, remove_previous_panel, rollback_unsaved_panel, with_panel_config
+from yuno_bot.guards import deny, ensure_allowed
 
 
 class FarmTicketsCog(commands.Cog):
@@ -19,6 +20,17 @@ class FarmTicketsCog(commands.Cog):
     def cog_unload(self) -> None:
         self.auto_finalize_old_tickets.cancel()
         self.replay_logs_and_cleanup.cancel()
+
+    farm = app_commands.Group(name="farm", description="Sistema semanal de farm")
+
+    @farm.command(name="ranking", description="Mostra quem mais entregou farm na semana atual")
+    async def ranking(self, interaction: discord.Interaction) -> None:
+        allowed, reason = await ensure_allowed(interaction, self.bot.api, "farm_tickets", "ranking")
+        if not allowed:
+            await deny(interaction, reason)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await self.show_weekly_ranking(interaction)
 
     @app_commands.command(name="setup_farm_tickets", description="Configura o sistema semanal de tickets de farm")
     @app_commands.default_permissions(manage_guild=True)
@@ -109,6 +121,7 @@ class FarmTicketsCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         try:
             config = await self.bot.api.get_farm_ticket_config(interaction.guild.id)
+            guild_config = await self.bot.api.get_guild_config(interaction.guild.id, force=True)
         except httpx.HTTPError:
             await interaction.followup.send("Configure primeiro com `/setup_farm_tickets`.", ephemeral=True)
             return
@@ -116,12 +129,59 @@ class FarmTicketsCog(commands.Cog):
         if not isinstance(channel, discord.TextChannel):
             await interaction.followup.send("Canal do painel configurado nao esta acessivel.", ephemeral=True)
             return
-        try:
-            await channel.send(embed=farm_panel_embed(interaction.guild.name), view=FarmPanelView(self))
-        except discord.HTTPException:
+        message = await publish_or_update_panel(
+            channel,
+            guild_config,
+            module_key="farm_tickets",
+            embed=farm_panel_embed(interaction.guild.name),
+            view=FarmPanelView(self),
+        )
+        if message is None:
             await interaction.followup.send("Nao consegui publicar o painel de farm.", ephemeral=True)
             return
-        await interaction.followup.send(f"Painel de farm publicado em {channel.mention}.", ephemeral=True)
+        updated_config = with_panel_config(
+            guild_config,
+            module_key="farm_tickets",
+            channel_id=channel.id,
+            message_id=message.id,
+            command_names=("abrir", "ver", "ranking", "excluir"),
+        )
+        try:
+            await self.bot.api.save_guild_config(interaction.guild.id, updated_config)
+        except httpx.HTTPError:
+            await rollback_unsaved_panel(guild_config, message, module_key="farm_tickets")
+            await interaction.followup.send(
+                "Painel publicado, mas nao consegui salvar a referencia da mensagem.", ephemeral=True
+            )
+            return
+        await remove_previous_panel(
+            guild_config,
+            channel,
+            module_key="farm_tickets",
+            message_id=message.id,
+        )
+        await interaction.followup.send(f"Painel de farm publicado e fixado em {channel.mention}.", ephemeral=True)
+
+    async def show_weekly_ranking(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            await interaction.followup.send("Use dentro de um servidor.", ephemeral=True)
+            return
+        try:
+            data = await self.bot.api.get_farm_weekly_ranking(
+                interaction.guild.id,
+                current_week_id(),
+                limit=10,
+            )
+        except httpx.HTTPStatusError as exc:
+            await interaction.followup.send(_detail(exc), ephemeral=True)
+            return
+        except httpx.HTTPError:
+            await interaction.followup.send("Nao consegui carregar o ranking agora.", ephemeral=True)
+            return
+        await interaction.followup.send(
+            embed=farm_ranking_embed(data, interaction.guild.name),
+            ephemeral=True,
+        )
 
     async def open_weekly_ticket(self, interaction: discord.Interaction) -> None:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):

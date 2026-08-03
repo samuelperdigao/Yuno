@@ -7,9 +7,11 @@ from discord.ext import commands
 
 from yuno_bot.commands.radio.embeds import criar_embed_painel_radio
 from yuno_bot.commands.radio.modals import RadioModal
-from yuno_bot.commands.radio.permissions import configurar_permissoes_radio, pode_alterar_radio, resolver_canal_radio
+from yuno_bot.commands.radio.permissions import configurar_permissoes_radio, resolver_canal_radio
+from yuno_bot.commands.farm_tickets.helpers import parse_discord_ids
 from yuno_bot.commands.radio.views import RadioPainelView
-from yuno_bot.guards import deny
+from yuno_bot.commands.panels import customize_panel_embed, remove_previous_panel, rollback_unsaved_panel
+from yuno_bot.guards import deny, ensure_allowed
 
 
 LOGGER = logging.getLogger(__name__)
@@ -40,17 +42,19 @@ class RadioCog(commands.Cog):
 
     @radio.command(name="alterar", description="Abre o formulário de alteração de rádio")
     async def alterar(self, interaction: discord.Interaction) -> None:
+        allowed, reason = await ensure_allowed(interaction, self.bot.api, "radio", "alterar")
+        if not allowed:
+            await deny(interaction, reason)
+            return
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             await deny(interaction, "use dentro de um servidor.")
-            return
-        if not pode_alterar_radio(interaction.user):
-            await interaction.response.send_message("❌ Apenas gerentes e administradores podem alterar a rádio.", ephemeral=True)
             return
         await interaction.response.send_modal(RadioModal(self.bot.api))
 
     @radio.command(name="painel", description="Publica ou atualiza o painel fixo de rádio")
     @app_commands.default_permissions(manage_guild=True)
-    async def painel(self, interaction: discord.Interaction) -> None:
+    @app_commands.describe(cargos_autorizados="IDs ou menções dos cargos que podem alterar a rádio")
+    async def painel(self, interaction: discord.Interaction, cargos_autorizados: str) -> None:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             await deny(interaction, "use dentro de um servidor.")
             return
@@ -62,10 +66,16 @@ class RadioCog(commands.Cog):
             await deny(interaction, "voce precisa ter permissao de gerenciar servidor.")
             return
 
+        role_ids = parse_discord_ids(cargos_autorizados)
+        roles = [interaction.guild.get_role(role_id) for role_id in role_ids]
+        if not role_ids or any(role is None for role in roles):
+            await interaction.response.send_message("Informe cargos autorizados válidos.", ephemeral=True)
+            return
+
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         try:
-            current_config = await self.bot.api.get_guild_config(interaction.guild.id)
+            current_config = await self.bot.api.get_guild_config(interaction.guild.id, force=True)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 403:
                 await interaction.followup.send("Este servidor ainda nao possui licenca ativa.", ephemeral=True)
@@ -97,19 +107,34 @@ class RadioCog(commands.Cog):
             return
 
         updated_config = _build_radio_panel_config(current_config, panel_channel_id=canal.id, panel_message_id=panel_message.id)
+        command_permissions = dict(updated_config.get("command_permissions") or {})
+        rule = dict(command_permissions.get("radio.alterar") or {})
+        rule["role_ids"] = [str(role_id) for role_id in role_ids]
+        rule["channel_ids"] = [str(canal.id)]
+        command_permissions["radio.alterar"] = rule
+        updated_config["command_permissions"] = command_permissions
+        updated_config["settings"]["radio"]["role_ids"] = [str(role_id) for role_id in role_ids]
         try:
             await self.bot.api.save_guild_config(interaction.guild.id, updated_config)
         except httpx.HTTPError:
+            await rollback_unsaved_panel(current_config, panel_message, module_key="radio")
             await interaction.followup.send("Painel publicado, mas não consegui salvar a configuração.", ephemeral=True)
             return
 
-        await interaction.followup.send(f"✅ Painel de rádio postado em {canal.mention}!", ephemeral=True)
+        await remove_previous_panel(
+            current_config, canal, module_key="radio", message_id=panel_message.id
+        )
+
+        cargos = " ".join(role.mention for role in roles if role)
+        await interaction.followup.send(
+            f"✅ Painel de rádio postado em {canal.mention}!\nPodem alterar: {cargos}", ephemeral=True
+        )
 
     async def _publish_or_update_panel(self, current_config: dict, canal: discord.TextChannel) -> discord.Message | None:
         radio_settings = (current_config.get("settings") or {}).get("radio") or {}
         previous_channel_id = radio_settings.get("panel_channel_id")
         previous_message_id = radio_settings.get("panel_message_id")
-        embed = criar_embed_painel_radio()
+        embed = customize_panel_embed(criar_embed_painel_radio(), current_config, "radio")
         view = RadioPainelView(self.bot.api)
 
         if str(previous_channel_id) == str(canal.id) and previous_message_id:

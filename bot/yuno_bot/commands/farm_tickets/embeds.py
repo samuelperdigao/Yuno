@@ -38,6 +38,36 @@ def farm_goal_embed(week_id: str, items: list[dict], guild_name: str | None = No
     return embed
 
 
+def farm_ranking_embed(data: dict, guild_name: str | None = None) -> discord.Embed:
+    ranking = data.get("ranking") or []
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    lines: list[str] = []
+    for item in ranking:
+        position = int(item.get("position") or len(lines) + 1)
+        marker = medals.get(position, f"`#{position:02d}`")
+        item_summary = " • ".join(
+            f"{name}: **{int(quantity):,}**".replace(",", ".")
+            for name, quantity in (item.get("items") or {}).items()
+        )
+        total = f"{int(item.get('delivered_total') or 0):,}".replace(",", ".")
+        lines.append(
+            f"{marker} <@{item['user_id']}> — **{total}** entregues "
+            f"• {int(item.get('completion_percent') or 0)}% da meta\n"
+            f"> {item_summary or 'Sem itens contabilizados'}"
+        )
+
+    embed = discord.Embed(
+        title="🏆 Ranking Semanal de Farm",
+        description="\n\n".join(lines) if lines else "Ainda não há entregas contabilizadas nesta semana.",
+        color=YUNO_GOLD,
+        timestamp=discord.utils.utcnow(),
+    )
+    embed.add_field(name="Semana", value=f"`{data.get('week_id')}`", inline=True)
+    embed.add_field(name="Participantes", value=f"`{int(data.get('participants') or 0)}`", inline=True)
+    embed.set_footer(text=f"Yuno • Farm{f' • {guild_name}' if guild_name else ''}")
+    return embed
+
+
 def farm_ticket_embed(ticket: dict, member: discord.Member | None = None) -> discord.Embed:
     status = ticket.get("status") or "aberto"
     color = YUNO_GREEN if status == "aprovado_total" else YUNO_ORANGE if status in {"revisao", "aprovado_parcial"} else YUNO_RED if status == "sem_entrega" else YUNO_BLUE
