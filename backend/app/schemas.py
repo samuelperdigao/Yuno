@@ -37,12 +37,26 @@ class LicenseActivateIn(BaseModel):
     owner_discord_id: str
 
 
+class LicenseIssueIn(BaseModel):
+    reference: str | None = Field(default=None, max_length=120)
+    customer_name: str | None = Field(default=None, max_length=120)
+    customer_email: str | None = Field(default=None, max_length=255)
+    customer_discord_user_id: str | None = Field(default=None, max_length=32)
+
+
 class LicenseOut(BaseModel):
     key: str
     status: LicenseStatus
     guild_id: str | None = None
     guild_name: str | None = None
     activated_at: datetime | None = None
+
+
+class LicenseAdminOut(LicenseOut):
+    owner_discord_id: str | None = None
+    payment_provider: str | None = None
+    payment_reference: str | None = None
+    created_at: datetime
 
 
 class LicenseValidateIn(BaseModel):

@@ -233,6 +233,34 @@ h2 {
   gap: 8px;
 }
 
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.panel button.secondary {
+  background: #edf3f1;
+  color: #26343b;
+  border: 1px solid #d4e0dc;
+}
+
+.license-list .row > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.license-list small {
+  display: block;
+}
+
+.panel button.icon-button {
+  min-height: 36px;
+  padding: 0 10px;
+  flex: 0 0 auto;
+}
+
 .row {
   min-height: 44px;
   display: flex;

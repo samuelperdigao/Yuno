@@ -18,7 +18,7 @@ Republicar um painel atualiza a mensagem existente. Se o canal for alterado, o Y
 | Metas | `/meta painel` |
 | Farm | `/setup_farm_tickets`, `/setup_farm_meta`, `/setup_farm_painel` |
 | Tickets | `/ticket painel` |
-| Parcerias | `/setup_parcerias` |
+| Parcerias | `/setup_parcerias` (inclui os cargos gerentes autorizados) |
 | Encomendas | `/encomenda painel` |
 | Ausências | `/setup_ausencia`, `/painel_ausencia` |
 | Rádio | `/radio painel` |

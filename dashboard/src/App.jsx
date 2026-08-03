@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Activity, Box, CheckCircle2, ClipboardList, KeyRound, Save, ShieldCheck, Ticket, ToggleLeft, UserCheck } from "lucide-react";
+import { Activity, Box, CheckCircle2, ClipboardCopy, ClipboardList, KeyRound, Plus, Save, ShieldCheck, Ticket, ToggleLeft, UserCheck } from "lucide-react";
 import { api, modules } from "./api";
 
 const defaultConfig = {
@@ -34,6 +34,8 @@ export default function App() {
   const [adminToken, setAdminToken] = useState("");
   const [guildId, setGuildId] = useState("");
   const [licenseKey, setLicenseKey] = useState("");
+  const [issuedLicenses, setIssuedLicenses] = useState([]);
+  const [licenseDraft, setLicenseDraft] = useState({ reference: "", customer_name: "", customer_email: "", customer_discord_user_id: "" });
   const [ownerId, setOwnerId] = useState("");
   const [config, setConfig] = useState(defaultConfig);
   const [products, setProducts] = useState([]);
@@ -117,6 +119,36 @@ export default function App() {
     }, "Licenca ativada.");
   }
 
+  async function loadLicenses() {
+    await run(async () => {
+      const data = await api("/licenses", { adminToken });
+      setIssuedLicenses(data);
+    }, "Chaves carregadas.");
+  }
+
+  async function issueLicense() {
+    await run(async () => {
+      const data = await api("/licenses/issue", {
+        method: "POST",
+        adminToken,
+        body: Object.fromEntries(Object.entries(licenseDraft).map(([key, value]) => [key, value.trim() || null])),
+      });
+      setIssuedLicenses((current) => [data, ...current.filter((item) => item.key !== data.key)]);
+      setLicenseKey(data.key);
+      setLicenseDraft({ reference: "", customer_name: "", customer_email: "", customer_discord_user_id: "" });
+    }, "Chave lifetime emitida e pronta para copiar.");
+  }
+
+  async function copyLicense(key) {
+    try {
+      await navigator.clipboard.writeText(key);
+      setStatus("Chave copiada. Envie somente a chave ao cliente; nunca envie o token admin.");
+    } catch {
+      setLicenseKey(key);
+      setStatus("Nao consegui acessar a area de transferencia. A chave foi colocada no campo de ativacao.");
+    }
+  }
+
   async function createProduct() {
     await run(async () => {
       const product = await api(`/guilds/${guildId}/products`, {
@@ -168,6 +200,50 @@ export default function App() {
 
         <section className="grid two">
           <div className="panel">
+            <h2>Emitir chave de produto</h2>
+            <p>Fluxo administrativo manual e seguro para vendas. O token admin nunca deve ser entregue ao comprador.</p>
+            <div className="form-grid">
+              <label>
+                Referencia da venda
+                <input value={licenseDraft.reference} onChange={(event) => setLicenseDraft((current) => ({ ...current, reference: event.target.value }))} placeholder="Ex: MP-12345 ou PEDIDO-001" />
+              </label>
+              <label>
+                Nome do cliente
+                <input value={licenseDraft.customer_name} onChange={(event) => setLicenseDraft((current) => ({ ...current, customer_name: event.target.value }))} placeholder="Nome ou empresa" />
+              </label>
+              <label>
+                E-mail do cliente
+                <input value={licenseDraft.customer_email} onChange={(event) => setLicenseDraft((current) => ({ ...current, customer_email: event.target.value }))} type="email" placeholder="cliente@exemplo.com" />
+              </label>
+              <label>
+                Discord do cliente
+                <input value={licenseDraft.customer_discord_user_id} onChange={(event) => setLicenseDraft((current) => ({ ...current, customer_discord_user_id: event.target.value }))} placeholder="User ID" />
+              </label>
+            </div>
+            <div className="panel-actions">
+              <button onClick={issueLicense} disabled={busy || !adminToken || !licenseDraft.reference}>
+                <Plus size={18} /> Emitir chave
+              </button>
+              <button className="secondary" onClick={loadLicenses} disabled={busy || !adminToken}>
+                <Activity size={18} /> Atualizar lista
+              </button>
+            </div>
+            <div className="list license-list">
+              {issuedLicenses.slice(0, 20).map((item) => (
+                <div className="row" key={item.key}>
+                  <div>
+                    <strong>{item.payment_reference || "Sem referencia"}</strong>
+                    <small>{item.status} · {item.guild_name || item.guild_id || "ainda nao ativada"}</small>
+                  </div>
+                  <button className="icon-button" onClick={() => copyLicense(item.key)} title="Copiar chave">
+                    <ClipboardCopy size={17} /> Copiar
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel">
             <h2>Ativacao</h2>
             <div className="form-grid">
               <label>
@@ -187,23 +263,23 @@ export default function App() {
               </button>
             </div>
           </div>
+        </section>
 
-          <div className="panel">
-            <h2>Permissoes base</h2>
-            <div className="form-grid">
-              <label>
-                Cargos administradores
-                <input
-                  value={(config.admin_role_ids || []).join(", ")}
-                  onChange={(event) => updateConfig({ admin_role_ids: asList(event.target.value) })}
-                  placeholder="IDs separados por virgula"
-                />
-              </label>
-              <label>
-                Canal de logs
-                <input value={config.log_channel_id || ""} onChange={(event) => updateConfig({ log_channel_id: event.target.value })} placeholder="Channel ID" />
-              </label>
-            </div>
+        <section className="panel">
+          <h2>Permissoes base</h2>
+          <div className="form-grid">
+            <label>
+              Cargos administradores
+              <input
+                value={(config.admin_role_ids || []).join(", ")}
+                onChange={(event) => updateConfig({ admin_role_ids: asList(event.target.value) })}
+                placeholder="IDs separados por virgula"
+              />
+            </label>
+            <label>
+              Canal de logs
+              <input value={config.log_channel_id || ""} onChange={(event) => updateConfig({ log_channel_id: event.target.value })} placeholder="Channel ID" />
+            </label>
           </div>
         </section>
 

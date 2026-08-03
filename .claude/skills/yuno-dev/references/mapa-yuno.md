@@ -18,11 +18,11 @@ Snapshot atualizado em 2026-08-02. Atualize ao mudar estrutura.
 | `core/security.py` | 46 | `require_admin_token`, sessão assinada |
 | `api/auth.py` | 67 | Discord OAuth do dashboard |
 | `api/config.py` | 41 | `GET/PUT /guilds/{id}/config` |
-| `api/licenses.py` | 30 | Ativação de licença |
+| `api/licenses.py` | ~80 | Ativação e emissão/listagem administrativa de licenças |
 | `api/systems.py` | 95 | `SystemRecord` genérico (create/patch) |
 | `api/farm_tickets.py` | 380 | Rotas do farm ticket |
 | `api/internal.py` | 173 | Endpoints consumidos pelo bot (validate, check_permission) |
-| `api/webhooks.py` | 32 | Webhook Mercado Pago |
+| `api/webhooks.py` | ~35 | Webhook Mercado Pago; falha fechado sem segredo configurado |
 | `api/products.py` | 40 | Catálogo de produtos por guild |
 
 ### Tabelas (`models.py`)
@@ -93,11 +93,11 @@ Canais de log: `logs-<modulo>` para cada um dos 9 módulos.
 
 ## Dashboard
 
-`dashboard/src/` — `App.jsx` (246), `api.js` (29), `styles.css`. Vite + React. `dist/` é build, ignore.
+`dashboard/src/` — `App.jsx`, `api.js`, `styles.css`. Vite + React. Inclui emissão/listagem administrativa de chaves e ativação. `dist/` é build, ignore.
 
 ## Infra
 
-`docker-compose.yml` (postgres, redis, api, bot, dashboard, caddy), `infra/Caddyfile`, `deploy.yuno.cmd` / `.ps1` (push main → backup PostgreSQL Docker ou SQLite legado → Oracle → restart da stack), `scripts/backup-postgres.sh`.
+`docker-compose.yml` (postgres, redis, api, bot, dashboard, caddy), `infra/Caddyfile`, `deploy.yuno.cmd` / `.ps1` (push main → backup PostgreSQL Docker ou SQLite legado → Oracle → restart da stack), `scripts/backup-postgres.sh`, `scripts/emitir-chave.ps1` (emissão manual segura na API de produção via SSH).
 
 ## Testes
 

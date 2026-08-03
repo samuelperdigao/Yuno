@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AuditLog, GuildConfig, License, LicenseStatus, PaymentEvent, Product, RecordStatus, SystemRecord
+from app.models import AuditLog, Customer, GuildConfig, License, LicenseStatus, PaymentEvent, Product, RecordStatus, SystemRecord
 from app.schemas import MODULES, GuildConfigIn
 
 
@@ -85,6 +85,53 @@ async def activate_license(
         guild_id=guild_id,
         actor_id=owner_discord_id,
         payload={"guild_name": guild_name},
+    )
+    return license_record
+
+
+async def issue_manual_license(
+    session: AsyncSession,
+    *,
+    reference: str | None = None,
+    customer_name: str | None = None,
+    customer_email: str | None = None,
+    customer_discord_user_id: str | None = None,
+) -> License:
+    normalized_reference = reference.strip() if reference and reference.strip() else None
+    if normalized_reference:
+        existing = await session.execute(select(License).where(License.payment_reference == normalized_reference))
+        if existing.scalar_one_or_none():
+            raise ValueError("Ja existe uma licenca com esta referencia de venda.")
+
+    customer = None
+    if customer_name or customer_email or customer_discord_user_id:
+        customer = Customer(
+            name=customer_name.strip() if customer_name else None,
+            email=customer_email.strip().lower() if customer_email else None,
+            discord_user_id=customer_discord_user_id.strip() if customer_discord_user_id else None,
+        )
+        session.add(customer)
+        await session.flush()
+
+    license_record = License(
+        status=LicenseStatus.pending,
+        payment_provider="manual",
+        payment_reference=normalized_reference,
+        customer_id=customer.id if customer else None,
+    )
+    session.add(license_record)
+    await session.flush()
+    await audit(
+        session,
+        action="license.issued",
+        entity_type="license",
+        entity_id=license_record.key,
+        payload={
+            "reference": normalized_reference,
+            "provider": "manual",
+            "customer_email": customer.email if customer else None,
+            "customer_discord_user_id": customer.discord_user_id if customer else None,
+        },
     )
     return license_record
 

@@ -20,5 +20,6 @@ MODULE = ModuleSpec(
         DashboardField("registrar_channel_id", "Canal do painel de parcerias", "channel"),
         DashboardField("ativas_channel_id", "Canal das parcerias ativas", "channel"),
         DashboardField("category_id", "Categoria das parcerias", "category", obrigatorio=False),
+        DashboardField("manager_role_ids", "Cargos gerentes", "roles"),
     ),
 )

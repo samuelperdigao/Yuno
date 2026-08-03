@@ -1,3 +1,5 @@
+from secrets import compare_digest
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +18,9 @@ async def mercado_pago_webhook(
     session: AsyncSession = Depends(get_session),
 ) -> MercadoPagoWebhookOut:
     settings = get_settings()
-    if settings.mercado_pago_webhook_secret and x_yuno_webhook_secret != settings.mercado_pago_webhook_secret:
+    if not settings.mercado_pago_webhook_secret:
+        raise HTTPException(status_code=503, detail="Webhook Mercado Pago nao configurado.")
+    if not x_yuno_webhook_secret or not compare_digest(x_yuno_webhook_secret, settings.mercado_pago_webhook_secret):
         raise HTTPException(status_code=401, detail="Webhook nao autorizado.")
 
     payload = await request.json()

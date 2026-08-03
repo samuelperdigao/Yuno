@@ -4,10 +4,9 @@ from discord import app_commands
 from discord.ext import commands
 
 from yuno_bot.commands.parceria.embeds import parcerias_panel_embed
-from yuno_bot.commands.parceria.modals import ParceriaCadastrarModal
-from yuno_bot.commands.parceria.permissions import role_name_matches
+from yuno_bot.commands.farm_tickets.helpers import parse_discord_ids
 from yuno_bot.commands.parceria.repository import ParceriasRepository
-from yuno_bot.commands.parceria.views import ParceriaPanelView
+from yuno_bot.commands.parceria.views import ParceriaPanelView, ParceriaRegisterModal
 from yuno_bot.commands.panels import customize_panel_embed
 from yuno_bot.guards import deny, ensure_allowed
 
@@ -25,7 +24,7 @@ class ParceriaCog(commands.Cog):
         if not allowed:
             await deny(interaction, reason)
             return
-        await interaction.response.send_modal(ParceriaCadastrarModal(self.bot.api))
+        await interaction.response.send_modal(ParceriaRegisterModal(self.repository))
 
     @app_commands.command(name="setup_parcerias", description="Configura o painel fixo de parcerias")
     @app_commands.default_permissions(manage_guild=True)
@@ -34,6 +33,7 @@ class ParceriaCog(commands.Cog):
         interaction: discord.Interaction,
         canal_registro: discord.TextChannel,
         canal_ativas: discord.TextChannel,
+        cargos_gerentes: str,
         categoria: discord.CategoryChannel | None = None,
     ) -> None:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
@@ -45,6 +45,12 @@ class ParceriaCog(commands.Cog):
             or interaction.user.guild_permissions.manage_guild
         ):
             await deny(interaction, "voce precisa ter permissao de gerenciar servidor.")
+            return
+
+        role_ids = parse_discord_ids(cargos_gerentes)
+        roles = [interaction.guild.get_role(role_id) for role_id in role_ids]
+        if not role_ids or any(role is None for role in roles):
+            await interaction.response.send_message("Informe cargos gerentes validos.", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -84,8 +90,22 @@ class ParceriaCog(commands.Cog):
             return
         await self._remove_previous_panel(canal_registro, panel_message.id, current_config)
 
+        updated_guild_config = self._with_manager_permissions(
+            guild_config,
+            role_ids=role_ids,
+            registrar_channel_id=canal_registro.id,
+        )
+        try:
+            await self.bot.api.save_guild_config(interaction.guild.id, updated_guild_config)
+        except httpx.HTTPError:
+            await interaction.followup.send(
+                "Painel publicado, mas nao consegui salvar os cargos gerentes. Rode o setup novamente.",
+                ephemeral=True,
+            )
+            return
+
         warnings = await self._apply_gerente_permissions(
-            interaction.guild,
+            roles=[role for role in roles if role],
             channels=[canal_registro, canal_ativas],
             category=categoria,
         )
@@ -96,8 +116,31 @@ class ParceriaCog(commands.Cog):
         ]
         if categoria:
             response_lines.append(f"Categoria: {categoria.name}")
+        response_lines.append(f"Gerentes: {' '.join(role.mention for role in roles if role)}")
         response_lines.extend(warnings)
         await interaction.followup.send("\n".join(response_lines), ephemeral=True)
+
+    @staticmethod
+    def _with_manager_permissions(config: dict, *, role_ids: list[int], registrar_channel_id: int) -> dict:
+        updated = {
+            "guild_name": config.get("guild_name"),
+            "admin_role_ids": config.get("admin_role_ids") or [],
+            "log_channel_id": config.get("log_channel_id"),
+            "modules": config.get("modules") or {},
+            "command_permissions": dict(config.get("command_permissions") or {}),
+            "messages": config.get("messages") or {},
+            "settings": dict(config.get("settings") or {}),
+        }
+        role_values = [str(role_id) for role_id in role_ids]
+        for command in ("cadastrar", "registrar", "editar", "remover", "gerenciar"):
+            rule = dict(updated["command_permissions"].get(f"parceria.{command}") or {})
+            rule["role_ids"] = role_values
+            rule["channel_ids"] = [str(registrar_channel_id)]
+            updated["command_permissions"][f"parceria.{command}"] = rule
+        parceria_settings = dict(updated["settings"].get("parceria") or {})
+        parceria_settings["manager_role_ids"] = role_values
+        updated["settings"]["parceria"] = parceria_settings
+        return updated
 
     async def _publish_or_update_panel(
         self,
@@ -151,13 +194,12 @@ class ParceriaCog(commands.Cog):
 
     async def _apply_gerente_permissions(
         self,
-        guild: discord.Guild,
         *,
+        roles: list[discord.Role],
         channels: list[discord.TextChannel],
         category: discord.CategoryChannel | None,
     ) -> list[str]:
         warnings: list[str] = []
-        gerente_roles = [role for role in guild.roles if role_name_matches(role.name, ("gerente",))]
         overwrite = discord.PermissionOverwrite(
             view_channel=True,
             send_messages=True,
@@ -170,7 +212,7 @@ class ParceriaCog(commands.Cog):
         if category:
             targets.append(category)
 
-        for role in gerente_roles:
+        for role in roles:
             for target in targets:
                 try:
                     await target.set_permissions(role, overwrite=overwrite, reason="Yuno parcerias: liberar gerentes")

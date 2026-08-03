@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-08-03
+
+### Adicionado
+
+- Emissão e listagem administrativa de licenças, com referência de venda e dados opcionais do comprador.
+- Área de emissão/cópia de chaves no dashboard e script PowerShell para emitir diretamente na produção via SSH.
+- Manual comercial completo de ativação, configuração dos comandos, validação e entrega da chave.
+
+### Corrigido
+
+- Webhook Mercado Pago agora falha fechado quando o segredo não está configurado e compara o segredo de forma segura.
+- Cadastro por `/parceria cadastrar` e pelo painel passa a usar o mesmo repositório de parcerias ativas.
+- Permissões de parcerias deixam de depender do nome do cargo; `/setup_parcerias` exige cargos gerentes configurados por ID.
+
 ## 2026-08-02
 
 ### Adicionado

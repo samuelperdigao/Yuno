@@ -4,23 +4,17 @@ import httpx
 from yuno_bot.api_client import YunoAPI
 
 
-MANAGER_ROLE_KEYWORDS = (
-    "liderança",
-    "lideranca",
-    "aprovação",
-    "aprovacao",
-    "equipe",
-    "editor",
-    "gerente",
-)
+MANAGER_ROLE_KEYWORDS = ("lideranca", "liderança", "aprovacao", "aprovação", "equipe", "editor", "gerente")
 
 
 def role_name_matches(name: str, keywords: tuple[str, ...] = MANAGER_ROLE_KEYWORDS) -> bool:
+    """Compatibilidade para testes legados; autorizacao real usa IDs configurados."""
     normalized = name.casefold()
     return any(keyword.casefold() in normalized for keyword in keywords)
 
 
 def member_has_named_management_role(member: discord.Member) -> bool:
+    """Compatibilidade; nao e chamada pelo fluxo de autorizacao."""
     return any(role_name_matches(role.name) for role in member.roles)
 
 
@@ -41,26 +35,23 @@ async def can_manage_parcerias(
     if not interaction.guild or not isinstance(interaction.user, discord.Member):
         return False
 
+    try:
+        config = await api.get_guild_config(interaction.guild.id)
+    except httpx.HTTPError:
+        return False
+    if not (config.get("modules") or {}).get("parceria", False):
+        return False
+
     member = interaction.user
-    if member_has_direct_management(member) or member_has_named_management_role(member):
+    if member_has_direct_management(member):
         return True
 
-    category_id = None
-    if isinstance(interaction.channel, discord.TextChannel) and interaction.channel.category:
-        category_id = interaction.channel.category.id
+    permissions = config.get("command_permissions") or {}
+    rule = permissions.get(f"parceria.{command}") or permissions.get("parceria.gerenciar") or {}
+    allowed_roles = {str(role_id) for role_id in rule.get("role_ids") or []}
+    member_roles = {str(role.id) for role in member.roles}
+    if not allowed_roles or not member_roles.intersection(allowed_roles):
+        return False
 
-    for api_command in (command, "gerenciar", "cadastrar"):
-        try:
-            allowed, _reason = await api.check_permission(
-                guild_id=interaction.guild.id,
-                module="parceria",
-                command=api_command,
-                role_ids=[role.id for role in member.roles],
-                channel_id=interaction.channel_id,
-                category_id=category_id,
-            )
-        except httpx.HTTPError:
-            continue
-        if allowed:
-            return True
-    return False
+    allowed_channels = {str(channel_id) for channel_id in rule.get("channel_ids") or []}
+    return not allowed_channels or str(interaction.channel_id) in allowed_channels

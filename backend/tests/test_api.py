@@ -19,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.core.config import get_settings
 
 
 @pytest.fixture()
@@ -61,6 +62,59 @@ def test_payment_license_activation_and_validation(client: TestClient) -> None:
     )
     assert validation.status_code == 200
     assert validation.json()["allowed"] is True
+
+
+def test_admin_can_issue_list_and_activate_manual_license(client: TestClient) -> None:
+    denied = client.post("/licenses/issue", json={"reference": "sale-denied"})
+    assert denied.status_code == 401
+
+    issued = client.post(
+        "/licenses/issue",
+        headers={"x-yuno-admin-token": "admin-test"},
+        json={
+            "reference": "sale-manual-1",
+            "customer_name": "Cliente Teste",
+            "customer_email": "CLIENTE@example.com",
+            "customer_discord_user_id": "456",
+        },
+    )
+    assert issued.status_code == 200
+    assert issued.json()["status"] == "pending"
+    assert issued.json()["payment_provider"] == "manual"
+
+    duplicate = client.post(
+        "/licenses/issue",
+        headers={"x-yuno-admin-token": "admin-test"},
+        json={"reference": "sale-manual-1"},
+    )
+    assert duplicate.status_code == 409
+
+    listed = client.get("/licenses", headers={"x-yuno-admin-token": "admin-test"})
+    assert listed.status_code == 200
+    assert issued.json()["key"] in {item["key"] for item in listed.json()}
+
+    activation = client.post(
+        "/licenses/activate",
+        json={
+            "license_key": issued.json()["key"],
+            "guild_id": "manual-guild",
+            "guild_name": "Cidade Manual",
+            "owner_discord_id": "456",
+        },
+    )
+    assert activation.status_code == 200
+    assert activation.json()["status"] == "active"
+
+
+def test_mercado_pago_webhook_fails_closed_without_secret(client: TestClient) -> None:
+    settings = get_settings()
+    original = settings.mercado_pago_webhook_secret
+    settings.mercado_pago_webhook_secret = ""
+    try:
+        response = client.post("/webhooks/mercadopago", json={"id": "pay-open", "status": "approved"})
+    finally:
+        settings.mercado_pago_webhook_secret = original
+    assert response.status_code == 503
 
 
 def test_permission_blocks_unlicensed_guild(client: TestClient) -> None:
