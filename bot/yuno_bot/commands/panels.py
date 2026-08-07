@@ -133,7 +133,11 @@ async def remove_previous_panel(
         return
     if str(previous_channel_id) == str(channel.id) and str(previous_message_id) == str(message_id):
         return
-    old_channel = channel.guild.get_channel(int(previous_channel_id))
+    try:
+        old_channel_id = int(previous_channel_id)
+    except (TypeError, ValueError):
+        return
+    old_channel = channel.guild.get_channel(old_channel_id)
     if not isinstance(old_channel, discord.TextChannel):
         return
     try:

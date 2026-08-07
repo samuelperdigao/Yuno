@@ -1,13 +1,9 @@
-"""Painel de status dos modulos, publicado dentro do Discord (`/yuno painel`).
+"""Central de Gestão persistente do Yuno dentro do Discord.
 
-Nao e um editor de configuracao: cada modulo ja tem seu proprio comando com
-seletor nativo do Discord (`/set painel`, `/meta painel`, etc.), e alguns tem
-efeito colateral alem de salvar dado (o `/set painel` tambem tranca
-visibilidade de canal). Reimplementar isso de forma generica duplicaria ou
-perderia esses efeitos, sem meio de testar contra um Discord real. Em vez
-disso, o painel mostra o estado de cada modulo (configurado / incompleto /
-desligado) e aponta o comando certo -- resolve o problema real, que e nao ter
-um lugar unico pra ver e alcancar cada modulo sem sair do Discord.
+Modulos que implementam ``ControlPlaneSpec`` oferecem editor, previa,
+publicacao e diagnostico. Os demais continuam com views/listeners carregados,
+mas sao identificados honestamente como pendentes de migracao e nunca apontam
+para comandos slash legados.
 
 Publicado como payload cru de Components V2 (a versao de discord.py deste
 projeto nao tem wrapper nativo para isso -- ver `discord.ui.LayoutView` em
@@ -27,7 +23,9 @@ import discord
 import httpx
 from discord.ext import commands
 
+from yuno_bot import diagnostics
 from yuno_bot.api_client import YunoAPI
+from yuno_bot.control_plane import is_control_plane_admin, pending_changes
 from yuno_bot.modules import DashboardField, ModuleSpec, discover_modules, get_module
 
 _ACTION_ROW = 1
@@ -37,9 +35,9 @@ _TEXT = 10
 _SEPARATOR = 14
 _CONTAINER = 17
 _FLAG_V2 = 1 << 15  # IS_COMPONENTS_V2
-# Sete secoes mantem cada payload abaixo de 30 componentes totais, inclusive
+# Seis secoes mantem cada payload abaixo de 30 componentes totais, inclusive
 # em clientes/rotas que ainda aplicam o limite original de Components V2.
-_PAGE_SIZE = 7
+_PAGE_SIZE = 6
 
 _STATUS_BADGE = {"configurado": "✅", "incompleto": "⚠️", "desligado": "⛔"}
 _STATUS_LABEL = {"configurado": "Configurado", "incompleto": "Incompleto", "desligado": "Desligado"}
@@ -57,25 +55,6 @@ _SIMPLE_MODULES: dict[str, str] = {
     "ticket": "tickets",
     "adv": "adv",
 }
-
-_COMMAND_HINTS: dict[str, str] = {
-    "set": "/set painel",
-    "meta": "/meta painel",
-    "ausencia": "/setup_ausencia",
-    "radio": "/radio painel",
-    "parceria": "/setup_parcerias",
-    "farm_tickets": "/setup_farm_tickets",
-    "encomenda": "/encomenda painel",
-    "producao": "/producao painel",
-    "ticket": "/ticket painel",
-    "adv": "/adv painel",
-    "anuncio": "/anuncio painel",
-    "hierarquia": "/hierarquia painel",
-    "membros": "/membros configurar",
-    "acao": "/acao painel",
-    "disparo": "/disparo painel",
-}
-
 
 def _settings_values(config: dict, key: str) -> dict[str, Any]:
     return dict((config.get("settings") or {}).get(key) or {})
@@ -125,7 +104,7 @@ def _format_value(campo: DashboardField, valor: Any) -> str:
     return _mention(campo.tipo, valor)
 
 
-def module_info_embed(spec: ModuleSpec, config: dict) -> discord.Embed:
+def module_info_embed(spec: ModuleSpec, config: dict, state: dict | None = None) -> discord.Embed:
     status = compute_status(spec, config)
     values = module_values(spec.key, config)
     embed = discord.Embed(title=f"{spec.icon} {spec.nome}", description=spec.descricao, color=_STATUS_COLOR[status])
@@ -133,16 +112,24 @@ def module_info_embed(spec: ModuleSpec, config: dict) -> discord.Embed:
     for campo in spec.dashboard_fields:
         rotulo = campo.label if campo.obrigatorio else f"{campo.label} (opcional)"
         embed.add_field(name=rotulo, value=_format_value(campo, values.get(campo.key)), inline=False)
-    if status == "desligado":
+    if spec.control_plane is None:
         embed.add_field(
-            name="Como resolver",
-            value="Módulo desligado para este servidor. Ative-o no painel web ou fale com o suporte.",
+            name="Central de Gestão",
+            value="Migração para a Central pendente.",
             inline=False,
         )
-    elif status == "incompleto":
-        hint = _COMMAND_HINTS.get(spec.key)
-        if hint:
-            embed.add_field(name="Como resolver", value=f"Rode `{hint}` para completar a configuração.", inline=False)
+    else:
+        state = state or {}
+        embed.add_field(
+            name="Versão publicada",
+            value=str(state.get("published_revision", 0) or "Nenhuma"),
+            inline=True,
+        )
+        embed.add_field(
+            name="Alterações pendentes",
+            value="Sim" if pending_changes(state) else "Não",
+            inline=True,
+        )
     return embed
 
 
@@ -150,17 +137,26 @@ def _page_count() -> int:
     return max(1, (len(discover_modules()) + _PAGE_SIZE - 1) // _PAGE_SIZE)
 
 
-def build_payload(config: dict, page: int = 0) -> dict[str, Any]:
+def build_payload(
+    config: dict,
+    page: int = 0,
+    *,
+    control_states: dict[str, dict[str, Any]] | None = None,
+    license_active: bool = True,
+) -> dict[str, Any]:
     specs = list(discover_modules().values())
     pages = _page_count()
     page = max(0, min(page, pages - 1))
     visible_specs = specs[page * _PAGE_SIZE : (page + 1) * _PAGE_SIZE]
+    states = control_states or {}
+    active_count = sum(bool(value) for value in (config.get("modules") or {}).values())
     inner: list[dict[str, Any]] = [
         {
             "type": _TEXT,
             "content": (
-                "# Painel do Yuno\n"
-                "Estado de cada módulo. Clique em **≡** para configurar, ativar ou ver o que falta.\n"
+                "# Central de Gestão do Yuno\n"
+                f"Licença: **{'ativa' if license_active else 'inativa'}** · Módulos ativos: **{active_count}**\n"
+                "Clique em **Abrir** para administrar ou diagnosticar um módulo.\n"
                 f"Página **{page + 1}/{pages}**"
             ),
         },
@@ -169,18 +165,24 @@ def build_payload(config: dict, page: int = 0) -> dict[str, Any]:
 
     for spec in visible_specs:
         status = compute_status(spec, config)
+        state = states.get(spec.key) or {}
+        if spec.control_plane is None:
+            detail = "Migração para a Central pendente"
+        else:
+            version = state.get("published_revision", 0)
+            detail = f"Versão publicada: {version or 'nenhuma'} · Alterações pendentes: {'sim' if pending_changes(state) else 'não'}"
         inner.append(
             {
                 "type": _SECTION,
                 "components": [
                     {
                         "type": _TEXT,
-                        "content": f"{_STATUS_BADGE[status]} {spec.icon} **{spec.nome}**\n{spec.descricao}",
+                        "content": f"{_STATUS_BADGE[status]} {spec.icon} **{spec.nome}**\n{spec.descricao}\n_{detail}_",
                     }
                 ],
                 "accessory": {
                     "type": _BUTTON,
-                    "label": "≡",
+                    "label": "Abrir",
                     "style": 2,
                     "custom_id": f"yuno:painel:info:{spec.key}",
                 },
@@ -188,6 +190,25 @@ def build_payload(config: dict, page: int = 0) -> dict[str, Any]:
         )
 
     inner.append({"type": _SEPARATOR, "divider": True, "spacing": 1})
+    inner.append(
+        {
+            "type": _ACTION_ROW,
+            "components": [
+                {
+                    "type": _BUTTON,
+                    "label": "Status",
+                    "style": 2,
+                    "custom_id": "yuno:painel:status",
+                },
+                {
+                    "type": _BUTTON,
+                    "label": "Diagnóstico",
+                    "style": 2,
+                    "custom_id": "yuno:painel:diagnostico",
+                },
+            ],
+        }
+    )
     inner.append(
         {
             "type": _ACTION_ROW,
@@ -231,7 +252,15 @@ def dashboard_message_ref(config: dict) -> tuple[int | None, int | None]:
     settings = (config.get("settings") or {}).get("dashboard") or {}
     channel_id = settings.get("panel_channel_id")
     message_id = settings.get("panel_message_id")
-    return (int(channel_id) if channel_id else None, int(message_id) if message_id else None)
+    try:
+        normalized_channel_id = int(channel_id) if channel_id else None
+    except (TypeError, ValueError):
+        normalized_channel_id = None
+    try:
+        normalized_message_id = int(message_id) if message_id else None
+    except (TypeError, ValueError):
+        normalized_message_id = None
+    return normalized_channel_id, normalized_message_id
 
 
 def with_dashboard_ref(config: dict, *, channel_id: int, message_id: int) -> dict:
@@ -240,17 +269,63 @@ def with_dashboard_ref(config: dict, *, channel_id: int, message_id: int) -> dic
     return {**config, "settings": settings}
 
 
-async def publish_or_update(bot: commands.Bot, channel: discord.TextChannel, config: dict) -> int:
+async def publish_or_update(
+    bot: commands.Bot,
+    channel: discord.TextChannel,
+    config: dict,
+    *,
+    control_states: dict[str, dict[str, Any]] | None = None,
+) -> int:
     """Publica o painel, ou atualiza a mensagem existente se ainda estiver no mesmo canal."""
-    payload = build_payload(config)
+    payload = build_payload(config, control_states=control_states)
     previous_channel_id, previous_message_id = dashboard_message_ref(config)
     if previous_message_id and previous_channel_id == channel.id:
         try:
+            known_message = await channel.fetch_message(previous_message_id)
+            if channel.guild.me and known_message.author.id != channel.guild.me.id:
+                return await _send_v2(bot, channel.id, payload)
             await _edit_v2(bot, channel.id, previous_message_id, payload)
             return previous_message_id
         except discord.HTTPException:
             pass
     return await _send_v2(bot, channel.id, payload)
+
+
+async def rollback_unsaved_dashboard(
+    config: dict,
+    channel: discord.TextChannel,
+    message_id: int,
+) -> None:
+    previous_channel_id, previous_message_id = dashboard_message_ref(config)
+    if previous_channel_id == channel.id and previous_message_id == message_id:
+        return
+    try:
+        message = await channel.fetch_message(message_id)
+        if channel.guild.me and message.author.id == channel.guild.me.id:
+            await message.delete()
+    except discord.HTTPException:
+        pass
+
+
+async def remove_previous_dashboard(
+    config: dict,
+    channel: discord.TextChannel,
+    message_id: int,
+) -> None:
+    previous_channel_id, previous_message_id = dashboard_message_ref(config)
+    if not previous_channel_id or not previous_message_id:
+        return
+    if previous_channel_id == channel.id and previous_message_id == message_id:
+        return
+    old_channel = channel.guild.get_channel(previous_channel_id)
+    if not isinstance(old_channel, discord.TextChannel):
+        return
+    try:
+        message = await old_channel.fetch_message(previous_message_id)
+        if channel.guild.me and message.author.id == channel.guild.me.id:
+            await message.delete()
+    except discord.HTTPException:
+        pass
 
 
 class PainelDispatcherView(discord.ui.View):
@@ -272,6 +347,20 @@ class PainelDispatcherView(discord.ui.View):
             )
             button.callback = self._make_callback(spec.key)
             self.add_item(button)
+        status_button = discord.ui.Button(
+            custom_id="yuno:painel:status",
+            style=discord.ButtonStyle.secondary,
+            label="Status",
+        )
+        status_button.callback = self._status
+        self.add_item(status_button)
+        diagnostic_button = discord.ui.Button(
+            custom_id="yuno:painel:diagnostico",
+            style=discord.ButtonStyle.secondary,
+            label="Diagnóstico",
+        )
+        diagnostic_button.callback = self._diagnostic
+        self.add_item(diagnostic_button)
         for page in range(_page_count()):
             button = discord.ui.Button(
                 custom_id=f"yuno:painel:page:{page}",
@@ -295,25 +384,97 @@ class PainelDispatcherView(discord.ui.View):
             await interaction.response.defer()
             try:
                 config = await self.api.get_guild_config(interaction.guild.id)
+                if not isinstance(interaction.user, discord.Member) or not is_control_plane_admin(
+                    interaction.guild, interaction.user, config
+                ):
+                    await interaction.followup.send(
+                        "Você não possui permissão para administrar a Central.", ephemeral=True
+                    )
+                    return
+                states = await fetch_control_states(self.api, interaction.guild.id, interaction.user.id)
                 await _edit_v2(
                     interaction.client,
                     interaction.channel_id,
                     interaction.message.id,
-                    build_payload(config, page),
+                    build_payload(config, page, control_states=states),
                 )
             except (httpx.HTTPError, discord.HTTPException):
                 await interaction.followup.send("Não consegui trocar a página do painel.", ephemeral=True)
 
         return callback
 
+    async def _status(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            await interaction.response.send_message("Use dentro de um servidor.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            license_data = await self.api.validate_license(interaction.guild.id)
+            config = (
+                await self.api.get_guild_config(interaction.guild.id)
+                if license_data.get("allowed")
+                else {}
+            )
+        except httpx.HTTPError:
+            await interaction.followup.send("Não consegui consultar a licença.", ephemeral=True)
+            return
+        if not isinstance(interaction.user, discord.Member) or not is_control_plane_admin(
+            interaction.guild, interaction.user, config
+        ):
+            await interaction.followup.send(
+                "Você não possui permissão para administrar a Central.", ephemeral=True
+            )
+            return
+        status_text = "ativa" if license_data.get("allowed") else "inativa"
+        await interaction.followup.send(f"Licença {status_text}.", ephemeral=True)
+
+    async def _diagnostic(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            await interaction.response.send_message("Use dentro de um servidor.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            license_data = await self.api.validate_license(interaction.guild.id)
+            config = (
+                await self.api.get_guild_config(interaction.guild.id, force=True)
+                if license_data.get("allowed")
+                else {}
+            )
+        except httpx.HTTPError:
+            await interaction.followup.send("Não consegui executar o diagnóstico.", ephemeral=True)
+            return
+        if not isinstance(interaction.user, discord.Member) or not is_control_plane_admin(
+            interaction.guild, interaction.user, config
+        ):
+            await interaction.followup.send(
+                "Você não possui permissão para administrar a Central.", ephemeral=True
+            )
+            return
+        report = diagnostics.diagnose(
+            interaction.guild, config, licenca_ativa=bool(license_data.get("allowed"))
+        )
+        await interaction.followup.send(
+            embed=diagnostics.diagnostic_embed(report, interaction.guild.name), ephemeral=True
+        )
+
 
 class ModuleInfoView(discord.ui.View):
     """Controles administrativos exibidos ao abrir um modulo no painel geral."""
 
-    def __init__(self, api: YunoAPI, spec: ModuleSpec, config: dict) -> None:
+    def __init__(
+        self,
+        api: YunoAPI,
+        spec: ModuleSpec,
+        config: dict,
+        state: dict | None = None,
+        *,
+        user_id: int | None = None,
+    ) -> None:
         super().__init__(timeout=180)
         self.api = api
         self.spec = spec
+        self.state = state or {}
+        self.user_id = user_id
         enabled = bool((config.get("modules") or {}).get(spec.key, False))
         toggle = discord.ui.Button(
             label="Desativar módulo" if enabled else "Ativar módulo",
@@ -323,22 +484,88 @@ class ModuleInfoView(discord.ui.View):
         )
         toggle.callback = self.toggle_module
         self.add_item(toggle)
+        if spec.control_plane is not None:
+            for label, emoji, callback in (
+                ("Configurar", "⚙️", self.configure),
+                ("Prévia", "🔎", self.preview),
+                ("Publicar", "🚀", self.publish),
+            ):
+                button = discord.ui.Button(label=label, emoji=emoji, style=discord.ButtonStyle.secondary)
+                button.callback = callback
+                self.add_item(button)
+        diagnose_button = discord.ui.Button(label="Diagnóstico", emoji="🩺", style=discord.ButtonStyle.secondary)
+        diagnose_button.callback = self.diagnose
+        self.add_item(diagnose_button)
 
-    async def toggle_module(self, interaction: discord.Interaction) -> None:
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if self.user_id is None or interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Esta sessão administrativa pertence a outro usuário.", ephemeral=True
+        )
+        return False
+
+    async def _load(self, interaction: discord.Interaction) -> tuple[dict, dict] | None:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message("Use dentro de um servidor.", ephemeral=True)
-            return
-        if not (
-            interaction.user.guild_permissions.manage_guild
-            or interaction.user.guild_permissions.administrator
-            or interaction.guild.owner_id == interaction.user.id
-        ):
-            await interaction.response.send_message(
-                "Você precisa ter permissão de gerenciar servidor.", ephemeral=True
-            )
-            return
+            return None
+        await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             config = await self.api.get_guild_config(interaction.guild.id, force=True)
+            if not is_control_plane_admin(interaction.guild, interaction.user, config):
+                await interaction.followup.send(
+                    "Você não possui permissão para administrar a Central.", ephemeral=True
+                )
+                return None
+            state = self.state
+            if self.spec.control_plane is not None:
+                state = await self.api.get_module_config_state(
+                    interaction.guild.id, self.spec.key, actor_id=interaction.user.id
+                )
+            return config, state
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 403:
+                await interaction.followup.send(
+                    "Este servidor não possui licença ativa.", ephemeral=True
+                )
+                return None
+            await interaction.followup.send("Não consegui carregar o módulo.", ephemeral=True)
+            return None
+        except httpx.HTTPError:
+            await interaction.followup.send("Não consegui carregar o módulo.", ephemeral=True)
+            return None
+
+    async def configure(self, interaction: discord.Interaction) -> None:
+        loaded = await self._load(interaction)
+        if loaded and self.spec.control_plane:
+            await self.spec.control_plane.build_editor(interaction, self.api, loaded[1], loaded[0])
+
+    async def preview(self, interaction: discord.Interaction) -> None:
+        loaded = await self._load(interaction)
+        if loaded and self.spec.control_plane:
+            await self.spec.control_plane.build_preview(interaction, self.api, loaded[1], loaded[0])
+
+    async def publish(self, interaction: discord.Interaction) -> None:
+        loaded = await self._load(interaction)
+        if loaded and self.spec.control_plane:
+            await self.spec.control_plane.publish_panel(interaction, self.api, loaded[1], loaded[0])
+
+    async def diagnose(self, interaction: discord.Interaction) -> None:
+        loaded = await self._load(interaction)
+        if not loaded:
+            return
+        if self.spec.control_plane is None:
+            text = "⚠️ Migração para a Central pendente. Views e listeners existentes continuam ativos."
+            await interaction.followup.send(text, ephemeral=True)
+        else:
+            await self.spec.control_plane.diagnose(interaction, self.api, loaded[1], loaded[0])
+
+    async def toggle_module(self, interaction: discord.Interaction) -> None:
+        loaded = await self._load(interaction)
+        if not loaded:
+            return
+        config, state = loaded
+        try:
             modules = dict(config.get("modules") or {})
             modules[self.spec.key] = not bool(modules.get(self.spec.key, False))
             updated = {
@@ -350,14 +577,16 @@ class ModuleInfoView(discord.ui.View):
                 "messages": config.get("messages") or {},
                 "settings": config.get("settings") or {},
             }
-            saved = await self.api.save_guild_config(interaction.guild.id, updated)
+            saved = await self.api.save_guild_config(
+                interaction.guild.id, updated, actor_id=interaction.user.id
+            )
         except httpx.HTTPError:
-            await interaction.response.send_message("Não consegui salvar a configuração.", ephemeral=True)
+            await interaction.followup.send("Não consegui salvar a configuração.", ephemeral=True)
             return
 
-        await interaction.response.edit_message(
-            embed=module_info_embed(self.spec, saved),
-            view=ModuleInfoView(self.api, self.spec, saved),
+        await interaction.edit_original_response(
+            embed=module_info_embed(self.spec, saved, state),
+            view=ModuleInfoView(self.api, self.spec, saved, state, user_id=self.user_id),
         )
 
 
@@ -369,20 +598,51 @@ async def show_module_info(interaction: discord.Interaction, api: YunoAPI, modul
     if not interaction.guild:
         await interaction.response.send_message("Use este painel dentro de um servidor.", ephemeral=True)
         return
+    await interaction.response.defer(ephemeral=True, thinking=True)
     try:
         config = await api.get_guild_config(interaction.guild.id)
+        if not isinstance(interaction.user, discord.Member) or not is_control_plane_admin(
+            interaction.guild, interaction.user, config
+        ):
+            await interaction.followup.send(
+                "Você não possui permissão para administrar a Central.", ephemeral=True
+            )
+            return
+        state = None
+        if spec.control_plane is not None:
+            state = await api.get_module_config_state(
+                interaction.guild.id, spec.key, actor_id=interaction.user.id
+            )
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 403:
-            await interaction.response.send_message("Este servidor ainda não possui licença ativa.", ephemeral=True)
+            await interaction.followup.send("Este servidor ainda não possui licença ativa.", ephemeral=True)
             return
-        await interaction.response.send_message("Não consegui carregar a configuração do servidor.", ephemeral=True)
+        await interaction.followup.send("Não consegui carregar a configuração do servidor.", ephemeral=True)
         return
     except httpx.HTTPError:
-        await interaction.response.send_message("Não consegui falar com a API do Yuno.", ephemeral=True)
+        await interaction.followup.send("Não consegui falar com a API do Yuno.", ephemeral=True)
         return
 
-    await interaction.response.send_message(
-        embed=module_info_embed(spec, config),
-        view=ModuleInfoView(api, spec, config),
+    await interaction.followup.send(
+        embed=module_info_embed(spec, config, state),
+        view=ModuleInfoView(api, spec, config, state, user_id=interaction.user.id),
         ephemeral=True,
     )
+
+
+async def fetch_control_states(
+    api: YunoAPI,
+    guild_id: int,
+    actor_id: int,
+) -> dict[str, dict[str, Any]]:
+    states: dict[str, dict[str, Any]] = {}
+    for spec in discover_modules().values():
+        if spec.control_plane is None:
+            continue
+        try:
+            states[spec.key] = await api.get_module_config_state(
+                guild_id, spec.key, actor_id=actor_id
+            )
+        except httpx.HTTPError:
+            continue
+    return states

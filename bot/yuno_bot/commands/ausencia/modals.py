@@ -6,6 +6,13 @@ import httpx
 from yuno_bot.api_client import YunoAPI
 from yuno_bot.commands.ausencia.embeds import ausencia_channel_id, normalize_motivo, parse_dias
 from yuno_bot.commands.shared import resolve_text_channel
+from yuno_bot.config import setup_required_message
+
+
+NOT_CONFIGURED_ERROR = setup_required_message(
+    "de Ausências",
+    "❌ O módulo de Ausências não está configurado. Um administrador deve usar /setup_ausencia.",
+)
 
 
 class AusenciaRegistroModal(discord.ui.Modal, title="📋 Registrar Ausência"):
@@ -29,7 +36,7 @@ class AusenciaRegistroModal(discord.ui.Modal, title="📋 Registrar Ausência"):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
-            await interaction.response.send_message("❌ O módulo de Ausências não está configurado. Um administrador deve usar /setup_ausencia.", ephemeral=True)
+            await interaction.response.send_message(NOT_CONFIGURED_ERROR, ephemeral=True)
             return
 
         try:
@@ -50,7 +57,7 @@ class AusenciaRegistroModal(discord.ui.Modal, title="📋 Registrar Ausência"):
 
         if not channel:
             await interaction.response.send_message(
-                "❌ O módulo de Ausências não está configurado. Um administrador deve usar /setup_ausencia.",
+                NOT_CONFIGURED_ERROR,
                 ephemeral=True,
             )
             return

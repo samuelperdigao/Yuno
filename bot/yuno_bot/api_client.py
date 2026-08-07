@@ -6,6 +6,12 @@ from yuno_bot.cache import TTLCache
 from yuno_bot.config import get_settings
 
 
+class ControlPlaneConflict(httpx.HTTPStatusError):
+    def __init__(self, message: str, *, request: httpx.Request, response: httpx.Response, current_revision: int):
+        super().__init__(message, request=request, response=response)
+        self.current_revision = current_revision
+
+
 class YunoAPI:
     def __init__(self) -> None:
         settings = get_settings()
@@ -50,11 +56,20 @@ class YunoAPI:
             response.raise_for_status()
             return response.json()
 
-    async def save_guild_config(self, guild_id: int, config: dict[str, Any]) -> dict[str, Any]:
+    async def save_guild_config(
+        self,
+        guild_id: int,
+        config: dict[str, Any],
+        *,
+        actor_id: int | str | None = None,
+    ) -> dict[str, Any]:
+        headers = dict(self.headers)
+        if actor_id is not None:
+            headers["x-yuno-actor-id"] = str(actor_id)
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.put(
                 f"{self.base_url}/internal/guilds/{guild_id}/config",
-                headers=self.headers,
+                headers=headers,
                 json=config,
             )
             response.raise_for_status()
@@ -65,6 +80,85 @@ class YunoAPI:
         # Se o PUT falhou, nada e tocado — o cache antigo continua correto.
         self._guild_config_cache.set(guild_id, data)
         return data
+
+    async def get_module_config_state(
+        self,
+        guild_id: int,
+        module_key: str,
+        *,
+        actor_id: int | str,
+    ) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"{self.base_url}/internal/control-plane/guilds/{guild_id}/modules/{module_key}",
+                headers={**self.headers, "x-yuno-actor-id": str(actor_id)},
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def save_module_config_draft(
+        self,
+        guild_id: int,
+        module_key: str,
+        *,
+        actor_id: int | str,
+        expected_revision: int,
+        schema_version: int,
+        draft_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.put(
+                f"{self.base_url}/internal/control-plane/guilds/{guild_id}/modules/{module_key}/draft",
+                headers={**self.headers, "x-yuno-actor-id": str(actor_id)},
+                json={
+                    "expected_revision": expected_revision,
+                    "schema_version": schema_version,
+                    "draft_data": draft_data,
+                },
+            )
+            self._raise_control_plane_status(response)
+            return response.json()
+
+    async def publish_module_config(
+        self,
+        guild_id: int,
+        module_key: str,
+        *,
+        actor_id: int | str,
+        expected_revision: int,
+        schema_version: int,
+        projection: dict[str, Any],
+        panel_refs: dict[str, Any],
+    ) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                f"{self.base_url}/internal/control-plane/guilds/{guild_id}/modules/{module_key}/publish",
+                headers={**self.headers, "x-yuno-actor-id": str(actor_id)},
+                json={
+                    "expected_revision": expected_revision,
+                    "schema_version": schema_version,
+                    "projection": projection,
+                    "panel_refs": panel_refs,
+                },
+            )
+            self._raise_control_plane_status(response)
+            data = response.json()
+        self._guild_config_cache.invalidate(guild_id)
+        return data
+
+    @staticmethod
+    def _raise_control_plane_status(response: httpx.Response) -> None:
+        if response.status_code != 409:
+            response.raise_for_status()
+            return
+        payload = response.json().get("detail") or {}
+        current_revision = int(payload.get("current_revision", 0))
+        raise ControlPlaneConflict(
+            "Conflito de revisao do Control Plane.",
+            request=response.request,
+            response=response,
+            current_revision=current_revision,
+        )
 
     def cache_stats(self) -> dict[str, Any]:
         return self._guild_config_cache.stats()

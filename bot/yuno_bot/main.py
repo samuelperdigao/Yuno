@@ -9,6 +9,7 @@ from yuno_bot import dashboard, diagnostics, server_setup
 from yuno_bot.api_client import YunoAPI
 from yuno_bot.commands.parceria.repository import ParceriasRepository
 from yuno_bot.config import get_settings
+from yuno_bot.control_plane import is_control_plane_admin
 from yuno_bot.guards import deny
 from yuno_bot.modules import ModuleContext, discover_modules, load_modules
 
@@ -39,6 +40,20 @@ class YunoBot(commands.Bot):
         self.log.info("Modulos carregados: %s", ", ".join(discover_modules()))
 
         settings = get_settings()
+        if settings.control_plane_enabled:
+            removed = apply_control_plane_command_policy(self.tree)
+            self.log.info(
+                "Control Plane ativo. Comandos removidos da arvore: %s",
+                ", ".join(removed) or "nenhum",
+            )
+            # O sync global e o do servidor de teste recebem exatamente a
+            # mesma arvore reduzida; isso tambem remove registros antigos.
+            await self.tree.sync()
+            if settings.discord_test_guild_id:
+                guild = discord.Object(id=settings.discord_test_guild_id)
+                self.tree.copy_global_to(guild=guild)
+                await self.tree.sync(guild=guild)
+            return
         if settings.discord_test_guild_id:
             guild = discord.Object(id=settings.discord_test_guild_id)
             self.tree.copy_global_to(guild=guild)
@@ -75,22 +90,27 @@ class YunoAdminCog(commands.Cog):
     @yuno.command(name="configurar", description="Cria ou reconcilia a estrutura do Yuno neste servidor")
     @app_commands.default_permissions(manage_guild=True)
     async def yuno_configurar(self, interaction: discord.Interaction) -> None:
-        if not await self._exigir_admin(interaction):
-            return
-
-        bot_member = interaction.guild.me
-        if not bot_member or not bot_member.guild_permissions.manage_channels:
-            await deny(
-                interaction,
-                "eu preciso da permissao Gerenciar Canais para criar a estrutura inicial. "
-                "Use `/yuno diagnostico` para ver tudo que falta.",
-            )
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await deny(interaction, "use dentro de um servidor.")
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         config = await self._carregar_config(interaction)
         if config is None:
+            return
+        if not is_control_plane_admin(interaction.guild, interaction.user, config):
+            await interaction.followup.send(
+                "Você não possui permissão para administrar a Central.", ephemeral=True
+            )
+            return
+
+        bot_member = interaction.guild.me
+        if not bot_member or not bot_member.guild_permissions.manage_channels:
+            await interaction.followup.send(
+                "Eu preciso da permissão Gerenciar Canais para reconciliar a estrutura inicial.",
+                ephemeral=True,
+            )
             return
 
         # A config atual entra como entrada: e dela que saem os IDs ja salvos, o
@@ -103,11 +123,67 @@ class YunoAdminCog(commands.Cog):
             channels=resultado.channels,
         )
         try:
-            await self.bot.api.save_guild_config(interaction.guild.id, setup_config)
+            saved_setup = await self.bot.api.save_guild_config(
+                interaction.guild.id,
+                setup_config,
+                actor_id=interaction.user.id,
+            )
         except httpx.HTTPError:
             await interaction.followup.send(
                 "Criei os canais, mas nao consegui salvar a configuracao. Rode o comando de novo "
                 "em alguns instantes — nada sera duplicado.",
+                ephemeral=True,
+            )
+            return
+
+        if get_settings().control_plane_enabled:
+            central_channel = resultado.channels.get("painel")
+            if not isinstance(central_channel, discord.TextChannel):
+                await interaction.followup.send(
+                    "A estrutura foi salva, mas o canal da Central não pôde ser resolvido.",
+                    ephemeral=True,
+                )
+                return
+            states = await dashboard.fetch_control_states(
+                self.bot.api, interaction.guild.id, interaction.user.id
+            )
+            try:
+                message_id = await dashboard.publish_or_update(
+                    self.bot,
+                    central_channel,
+                    saved_setup,
+                    control_states=states,
+                )
+            except discord.HTTPException:
+                await interaction.followup.send(
+                    "A estrutura foi salva, mas não consegui publicar a Central.", ephemeral=True
+                )
+                return
+            central_config = dashboard.with_dashboard_ref(
+                saved_setup,
+                channel_id=central_channel.id,
+                message_id=message_id,
+            )
+            try:
+                await self.bot.api.save_guild_config(
+                    interaction.guild.id,
+                    central_config,
+                    actor_id=interaction.user.id,
+                )
+            except httpx.HTTPError:
+                await dashboard.rollback_unsaved_dashboard(
+                    saved_setup, central_channel, message_id
+                )
+                await interaction.followup.send(
+                    "A Central foi publicada, mas a referência não pôde ser salva. Tente novamente.",
+                    ephemeral=True,
+                )
+                return
+            await dashboard.remove_previous_dashboard(
+                saved_setup, central_channel, message_id
+            )
+            await interaction.followup.send(
+                f"Central reconciliada e publicada em {central_channel.mention}. {resultado.resumo().capitalize()}.",
                 ephemeral=True,
             )
             return
@@ -222,6 +298,26 @@ class YunoAdminCog(commands.Cog):
                 ephemeral=True,
             )
             return None
+
+
+def apply_control_plane_command_policy(tree: app_commands.CommandTree) -> list[str]:
+    """Mantem exclusivamente ``/yuno configurar`` na arvore em memoria."""
+
+    removed: list[str] = []
+    for command in list(tree.get_commands()):
+        if command.name == "yuno":
+            continue
+        removed.append(f"/{command.name}")
+        tree.remove_command(command.name)
+
+    yuno = tree.get_command("yuno")
+    if isinstance(yuno, app_commands.Group):
+        for command in list(yuno.commands):
+            if command.name == "configurar":
+                continue
+            removed.append(f"/yuno {command.name}")
+            yuno.remove_command(command.name)
+    return sorted(removed)
 
 
 def main() -> None:

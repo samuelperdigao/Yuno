@@ -98,14 +98,15 @@ def test_module_info_embed_formata_lista_de_cargos_como_multiplas_mencoes() -> N
     assert campo_cargos.value == "<@&1> <@&2>"
 
 
-def test_module_info_embed_incompleto_mostra_comando_de_como_resolver() -> None:
+def test_module_info_embed_incompleto_nao_mostra_comando_legado() -> None:
     config = {"modules": {"set": True}, "settings": {}}
     from yuno_bot.modules import get_module
 
     spec = get_module("set")
     embed = dashboard.module_info_embed(spec, config)
-    campo_resolver = next(f for f in embed.fields if f.name == "Como resolver")
-    assert "/set painel" in campo_resolver.value
+    campo_central = next(f for f in embed.fields if f.name == "Central de Gestão")
+    assert campo_central.value == "Migração para a Central pendente."
+    assert "/set" not in str(embed.to_dict())
 
 
 def test_build_payload_pagina_todos_os_modulos_do_registry() -> None:
@@ -149,7 +150,7 @@ def test_dispatcher_do_painel_e_persistente_e_cobre_paginas() -> None:
 
     view = asyncio.run(build())
     assert view.is_persistent()
-    assert len(view.children) == len(dashboard.discover_modules()) + dashboard._page_count()
+    assert len(view.children) == len(dashboard.discover_modules()) + dashboard._page_count() + 2
 
 
 def test_personalizacao_do_painel_consume_messages_da_guild() -> None:

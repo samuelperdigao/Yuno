@@ -9,6 +9,7 @@ from yuno_bot.commands.farm_tickets.views import FarmPanelView, FarmTicketContro
 from yuno_bot.commands.meta.embeds import parse_meta_definition
 from yuno_bot.commands.panels import publish_or_update_panel, remove_previous_panel, rollback_unsaved_panel, with_panel_config
 from yuno_bot.guards import deny, ensure_allowed
+from yuno_bot.config import setup_required_message
 
 
 class FarmTicketsCog(commands.Cog):
@@ -123,7 +124,13 @@ class FarmTicketsCog(commands.Cog):
             config = await self.bot.api.get_farm_ticket_config(interaction.guild.id)
             guild_config = await self.bot.api.get_guild_config(interaction.guild.id, force=True)
         except httpx.HTTPError:
-            await interaction.followup.send("Configure primeiro com `/setup_farm_tickets`.", ephemeral=True)
+            await interaction.followup.send(
+                setup_required_message(
+                    "Farm Tickets",
+                    "Configure primeiro com `/setup_farm_tickets`.",
+                ),
+                ephemeral=True,
+            )
             return
         channel = interaction.guild.get_channel(int(config["panel_channel_id"]))
         if not isinstance(channel, discord.TextChannel):

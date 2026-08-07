@@ -564,3 +564,135 @@ def test_parceria_config_registration_edit_and_lifecycle(client: TestClient) -> 
     missing = client.get(f"/internal/parcerias/{parceria_id + 9999}", headers={"x-yuno-bot-token": "bot-test"})
     assert missing.status_code == 200
     assert missing.json() is None
+
+
+def test_control_plane_draft_publish_conflict_projection_and_audit(client: TestClient) -> None:
+    activate_test_guild(client, "cp-guild-a")
+    activate_test_guild(client, "cp-guild-b")
+    base_headers = {"x-yuno-bot-token": "bot-test", "x-yuno-actor-id": "1001"}
+    state_url = "/internal/control-plane/guilds/cp-guild-a/modules/meta"
+
+    assert client.get(state_url).status_code == 401
+    assert client.get(state_url, headers={"x-yuno-bot-token": "bot-test"}).status_code == 422
+    assert client.get(
+        "/internal/control-plane/guilds/missing/modules/meta", headers=base_headers
+    ).status_code == 403
+
+    initial = client.get(state_url, headers=base_headers)
+    assert initial.status_code == 200
+    assert initial.json()["draft_revision"] == 0
+    assert initial.json()["published_revision"] == 0
+
+    unsupported = client.put(
+        f"{state_url}/draft",
+        headers=base_headers,
+        json={"expected_revision": 0, "schema_version": 2, "draft_data": {}},
+    )
+    assert unsupported.status_code == 422
+
+    existing_config = client.put(
+        "/internal/guilds/cp-guild-a/config",
+        headers=base_headers,
+        json={
+            "guild_name": "Control Plane A",
+            "modules": {"meta": True, "ticket": False},
+            "command_permissions": {"ticket.abrir": {"role_ids": ["ticket-role"]}},
+            "messages": {"ticket": {"panel": {"title": "Tickets"}}},
+            "settings": {"ticket": {"panel_channel_id": "900"}, "discord_setup": {"x": 1}},
+        },
+    )
+    assert existing_config.status_code == 200
+
+    draft_data = {
+        "panel_channel_id": "101",
+        "result_channel_id": "102",
+        "allowed_role_id": "103",
+        "default_items": [{"name": "Kit Desmanche", "quantity": 50}],
+        "panel": {"title": "Metas Semanais", "description": "Defina suas metas.", "color": "#FFC72C"},
+    }
+    saved = client.put(
+        f"{state_url}/draft",
+        headers=base_headers,
+        json={"expected_revision": 0, "schema_version": 1, "draft_data": draft_data},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["draft_revision"] == 1
+    assert saved.json()["published_data"] == {}
+
+    runtime_before = client.get(
+        "/internal/guilds/cp-guild-a/config", headers={"x-yuno-bot-token": "bot-test"}
+    ).json()
+    assert "meta" not in runtime_before["settings"]
+
+    conflict = client.put(
+        f"{state_url}/draft",
+        headers=base_headers,
+        json={"expected_revision": 0, "schema_version": 1, "draft_data": draft_data},
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["current_revision"] == 1
+
+    isolated = client.get(
+        "/internal/control-plane/guilds/cp-guild-b/modules/meta",
+        headers={**base_headers, "x-yuno-actor-id": "1002"},
+    )
+    assert isolated.status_code == 200
+    assert isolated.json()["draft_revision"] == 0
+
+    published = client.post(
+        f"{state_url}/publish",
+        headers=base_headers,
+        json={
+            "expected_revision": 1,
+            "schema_version": 1,
+            "projection": {
+                "settings": {
+                    "panel_channel_id": "101",
+                    "result_channel_id": "102",
+                    "allowed_role_id": "103",
+                    "panel_message_id": "104",
+                    "default_items": draft_data["default_items"],
+                },
+                "messages": draft_data["panel"],
+                "command_permissions": {
+                    "meta.definir": {"channel_ids": ["101"], "role_ids": ["103"]}
+                },
+                "enabled": True,
+            },
+            "panel_refs": {"panel_channel_id": "101", "panel_message_id": "104"},
+        },
+    )
+    assert published.status_code == 200
+    assert published.json()["published_revision"] == 1
+    assert published.json()["published_data"] == draft_data
+
+    runtime_after = client.get(
+        "/internal/guilds/cp-guild-a/config", headers={"x-yuno-bot-token": "bot-test"}
+    ).json()
+    assert runtime_after["settings"]["meta"]["panel_message_id"] == "104"
+    assert runtime_after["settings"]["ticket"]["panel_channel_id"] == "900"
+    assert runtime_after["settings"]["discord_setup"] == {"x": 1}
+    assert runtime_after["messages"]["ticket"]["panel"]["title"] == "Tickets"
+    assert runtime_after["command_permissions"]["ticket.abrir"]["role_ids"] == ["ticket-role"]
+    assert runtime_after["modules"]["ticket"] is False
+
+    import asyncio
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.models import AuditLog
+
+    async def read_audit() -> list[AuditLog]:
+        async with SessionLocal() as session:
+            result = await session.execute(
+                select(AuditLog).where(
+                    AuditLog.guild_id == "cp-guild-a",
+                    AuditLog.action == "control_plane.published",
+                )
+            )
+            return list(result.scalars())
+
+    logs = asyncio.run(read_audit())
+    assert len(logs) == 1
+    assert logs[0].actor_id == "1001"
+    assert logs[0].payload["snapshot"] == draft_data

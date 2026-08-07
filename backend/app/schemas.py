@@ -98,6 +98,50 @@ class GuildConfigOut(GuildConfigIn):
     guild_id: str
 
 
+class ModuleConfigStateOut(BaseModel):
+    guild_id: str
+    module_key: str
+    schema_version: int
+    draft_data: dict[str, Any] = Field(default_factory=dict)
+    published_data: dict[str, Any] = Field(default_factory=dict)
+    draft_revision: int
+    published_revision: int
+    draft_updated_by: str | None = None
+    draft_updated_at: datetime | None = None
+    published_by: str | None = None
+    published_at: datetime | None = None
+
+
+class ModuleConfigDraftIn(BaseModel):
+    expected_revision: int = Field(ge=0)
+    schema_version: int = Field(ge=1)
+    draft_data: dict[str, Any]
+
+
+class ModuleConfigProjectionIn(BaseModel):
+    settings: dict[str, Any] = Field(default_factory=dict)
+    messages: dict[str, Any] = Field(default_factory=dict)
+    command_permissions: dict[str, Any] = Field(default_factory=dict)
+    enabled: bool | None = None
+
+
+class ModuleConfigPublishIn(BaseModel):
+    expected_revision: int = Field(ge=0)
+    schema_version: int = Field(ge=1)
+    projection: ModuleConfigProjectionIn
+    panel_refs: dict[str, Any] = Field(default_factory=dict)
+
+
+class RevisionConflictDetail(BaseModel):
+    detail: str
+    expected_revision: int
+    current_revision: int
+
+
+class RevisionConflictOut(BaseModel):
+    detail: RevisionConflictDetail
+
+
 class ProductIn(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     unit: str = Field(default="unidade", max_length=40)

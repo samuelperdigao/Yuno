@@ -1,3 +1,5 @@
+from collections.abc import Awaitable, Callable
+
 import discord
 import httpx
 
@@ -52,13 +54,25 @@ class MetaPanelView(discord.ui.View):
 
 
 class MetaDefinitionBuilderView(discord.ui.View):
-    def __init__(self, api: YunoAPI, config: dict, *, user_id: int, guild_name: str | None, items: list[dict]):
+    def __init__(
+        self,
+        api: YunoAPI,
+        config: dict,
+        *,
+        user_id: int,
+        guild_name: str | None,
+        items: list[dict],
+        on_submit: Callable[[discord.Interaction, list[dict]], Awaitable[None]] | None = None,
+        submit_label: str = "Enviar",
+    ):
         super().__init__(timeout=900)
         self.api = api
         self.config = config
         self.user_id = user_id
         self.guild_name = guild_name
         self.items = list(items)
+        self.on_submit = on_submit
+        self.submit_label = submit_label
         self.message: discord.WebhookMessage | None = None
         self.refresh_components()
 
@@ -78,7 +92,7 @@ class MetaDefinitionBuilderView(discord.ui.View):
             self.add_item(EditMetaItemSelect(self.items))
             self.add_item(RemoveLastMetaItemButton())
             self.add_item(ClearMetaItemsButton())
-            self.add_item(SubmitMetaDefinitionButton())
+            self.add_item(SubmitMetaDefinitionButton(self.submit_label))
 
     async def update_builder_message(self) -> None:
         self.refresh_components()
@@ -94,6 +108,12 @@ class MetaDefinitionBuilderView(discord.ui.View):
             return
 
         await interaction.response.defer(ephemeral=True)
+
+        if self.on_submit is not None:
+            await self.on_submit(interaction, list(self.items))
+            if self.message:
+                await self.message.edit(view=None)
+            return
 
         try:
             current_config = await self.api.get_guild_config(interaction.guild.id)
@@ -237,8 +257,8 @@ class ClearMetaItemsButton(discord.ui.Button):
 
 
 class SubmitMetaDefinitionButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="Enviar", emoji="📣", style=discord.ButtonStyle.success)
+    def __init__(self, label: str = "Enviar"):
+        super().__init__(label=label, emoji="📣", style=discord.ButtonStyle.success)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         view = self.view

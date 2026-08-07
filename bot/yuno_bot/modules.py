@@ -25,6 +25,7 @@ import discord
 from discord.ext import commands
 
 if TYPE_CHECKING:
+    from yuno_bot.control_plane import ControlPlaneSpec
     from yuno_bot.main import YunoBot
 
 
@@ -108,6 +109,7 @@ class ModuleSpec:
     setup_channels: tuple[SetupChannel, ...] = ()
     log_channel: str | None = None
     dashboard_fields: tuple[DashboardField, ...] = field(default_factory=tuple)
+    control_plane: "ControlPlaneSpec | None" = None
 
     def __post_init__(self) -> None:
         if not self.key or self.key != self.key.lower().replace(" ", "_"):

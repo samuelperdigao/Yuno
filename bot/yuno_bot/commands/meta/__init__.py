@@ -1,6 +1,7 @@
 """Modulo de Metas semanais."""
 
 from yuno_bot.commands.meta.cog import MetaCog
+from yuno_bot.commands.meta.control_plane import build_spec
 from yuno_bot.commands.meta.views import MetaPanelView
 from yuno_bot.modules import DashboardField, ModuleSpec, SetupChannel
 
@@ -18,4 +19,5 @@ MODULE = ModuleSpec(
         DashboardField("panel_channel_id", "Canal do painel de metas", "channel"),
         DashboardField("allowed_role_id", "Cargo que define meta", "role"),
     ),
+    control_plane=build_spec(),
 )

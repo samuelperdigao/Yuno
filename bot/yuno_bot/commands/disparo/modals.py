@@ -5,6 +5,7 @@ from yuno_bot.api_client import YunoAPI
 from yuno_bot.commands.disparo.embeds import EVERYONE_ALLOWED_MENTIONS
 from yuno_bot.commands.disparo.helpers import valid_member_channels
 from yuno_bot.commands.shared import create_record, get_guild_config
+from yuno_bot.config import setup_required_message
 
 
 class DisparoModal(discord.ui.Modal, title="Disparo de Mensagem"):
@@ -28,7 +29,11 @@ class DisparoModal(discord.ui.Modal, title="Disparo de Mensagem"):
         category_id = ((config.get("settings") or {}).get("farm_tickets") or {}).get("folders_category_id")
         if not category_id:
             await interaction.response.send_message(
-                "Categoria de pastas de membro não configurada. Rode `/setup_farm_tickets` primeiro.", ephemeral=True
+                setup_required_message(
+                    "Farm Tickets",
+                    "Categoria de pastas de membro não configurada. Rode `/setup_farm_tickets` primeiro.",
+                ),
+                ephemeral=True,
             )
             return
         category = interaction.guild.get_channel(int(category_id))

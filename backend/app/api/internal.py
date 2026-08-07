@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,10 +88,20 @@ async def get_internal_config(guild_id: str, session: AsyncSession = Depends(get
 
 
 @router.put("/guilds/{guild_id}/config", response_model=GuildConfigOut)
-async def save_internal_config(guild_id: str, data: GuildConfigIn, session: AsyncSession = Depends(get_session)) -> GuildConfigOut:
+async def save_internal_config(
+    guild_id: str,
+    data: GuildConfigIn,
+    x_yuno_actor_id: Annotated[str | None, Header()] = None,
+    session: AsyncSession = Depends(get_session),
+) -> GuildConfigOut:
     if not await active_license_for_guild(session, guild_id):
         raise HTTPException(status_code=403, detail="Servidor sem licenca ativa.")
-    config = await upsert_config(session, guild_id, data, actor_id="discord-bot")
+    config = await upsert_config(
+        session,
+        guild_id,
+        data,
+        actor_id=x_yuno_actor_id or "discord-bot",
+    )
     await session.commit()
     return config_out(config)
 

@@ -16,10 +16,14 @@ from yuno_bot.commands.ausencia.embeds import (
 from yuno_bot.commands.ausencia.views import AusenciaPanelView
 from yuno_bot.commands.panels import publish_panel_command
 from yuno_bot.commands.shared import resolve_text_channel, send_module_log
+from yuno_bot.config import setup_required_message
 
 
 PERMISSION_ERROR = "❌ Sem permissão para usar este comando."
-NOT_CONFIGURED_ERROR = "❌ O módulo de Ausências não está configurado. Um administrador deve usar /setup_ausencia."
+NOT_CONFIGURED_ERROR = setup_required_message(
+    "de Ausências",
+    "❌ O módulo de Ausências não está configurado. Um administrador deve usar /setup_ausencia.",
+)
 
 
 def has_manage_guild(interaction: discord.Interaction) -> bool:
