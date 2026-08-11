@@ -1,104 +1,113 @@
-# Mapa do Yuno
+# Mapa factual do Yuno
 
-Snapshot atualizado em 2026-08-02. Atualize ao mudar estrutura.
+Snapshot de 2026-08-07. Este arquivo localiza o código atual; não define sozinho a arquitetura futura.
 
-## Backend — FastAPI + SQLAlchemy async
+## Produto e processos
 
-`backend/app/`
+O Yuno é multi-tenant e vendido por licença. O bot Discord consome uma API FastAPI; o backend concentra persistência, licença, permissão e auditoria. A stack inclui PostgreSQL no desenho de produção, SQLite em desenvolvimento/instalação legada, Redis, dashboard React, Caddy e deploy no Oracle.
 
-| Arquivo | LOC | O que faz |
-|---|---|---|
-| `main.py` | 43 | App, CORS, inclusão de routers |
-| `db.py` | 48 | Engine async, `Base`, `get_session` |
-| `models.py` | 246 | Todas as tabelas |
-| `schemas.py` | 289 | Pydantic in/out + constante `MODULES` |
-| `services.py` | 159 | Regras de negócio, `check_permission`, `audit` |
-| `farm_tickets.py` | 218 | Serviço do domínio farm tickets |
-| `core/config.py` | 33 | Settings via pydantic-settings |
-| `core/security.py` | 46 | `require_admin_token`, sessão assinada |
-| `api/auth.py` | 67 | Discord OAuth do dashboard |
-| `api/config.py` | 41 | `GET/PUT /guilds/{id}/config` |
-| `api/licenses.py` | ~80 | Ativação e emissão/listagem administrativa de licenças |
-| `api/systems.py` | 95 | `SystemRecord` genérico (create/patch) |
-| `api/farm_tickets.py` | 380 | Rotas do farm ticket |
-| `api/internal.py` | 173 | Endpoints consumidos pelo bot (validate, check_permission) |
-| `api/webhooks.py` | ~35 | Webhook Mercado Pago; falha fechado sem segredo configurado |
-| `api/products.py` | 40 | Catálogo de produtos por guild |
-
-### Tabelas (`models.py`)
-
-- `Customer`, `License` (key uuid4, status pending/active/blocked/revoked, `guild_id` unique)
-- `GuildConfig` — **contrato central**. `admin_role_ids`, `log_channel_id`, e os JSON `modules`, `command_permissions`, `messages`, `settings`
-- `SystemRecord` — registro genérico: `module`, `status`, `title`, `requester_id`, `payload` JSON. Serve qualquer módulo simples sem tabela nova
-- `AuditLog`, `PaymentEvent`, `Product`
-- `Ausencia` — PK composta `(guild_id, user_id)`
-- `FarmTicketConfig`, `FarmWeeklyGoal`, `FarmTicket`, `FarmTicketEntry`, `FarmTicketAction`
-
-Sem Alembic. `Base.metadata.create_all` no boot.
-
-### Formato de `settings.discord_setup`
-
-```json
-{
-  "category_ids":    {"admin": "...", "operacao": "...", "logs": "..."},
-  "channel_ids":     {"set_solicitar": "...", "metas": "...", ...},
-  "log_channel_ids": {"set": "...", "meta": "...", ...}
-}
+```text
+Discord bot → API FastAPI → SQLAlchemy/Alembic → banco
+dashboard web ────────────→ API
 ```
 
-Lido por `commands/shared.py` via `channel_id_from_setup` e `log_channel_id_from_setup`.
+## Backend
 
-## Bot — discord.py 2.4
+Entradas principais:
 
-`bot/yuno_bot/`
-
-| Arquivo | LOC | O que faz |
+| Área | Local | Responsabilidade atual |
 |---|---|---|
-| `main.py` | ~185 | `YunoBot`, `setup_hook` (delega ao registry), `YunoAdminCog` (`/yuno status`, `/yuno configurar`, `/yuno diagnostico`) |
-| `modules.py` | ~230 | **Registry declarativo.** `ModuleSpec`, `SetupChannel`, `DashboardField`, `ModuleContext`, `discover_modules`, `load_modules` |
-| `api_client.py` | ~400 | `YunoAPI` httpx. 30+ métodos, maioria de farm tickets. **Cacheia guild config** (`get_guild_config(force=)`, `cache_stats()`) |
-| `cache.py` | ~100 | `TTLCache` genérico: TTL, lock por chave (anti-thundering-herd), `peek`/`set`/`invalidate`/`stats` |
-| `config.py` | ~25 | `BotSettings` pydantic-settings (inclui `guild_config_cache_ttl`, default 30s) |
-| `guards.py` | ~30 | `ensure_allowed(interaction, api, module, command)` → `(bool, str)`; `deny(interaction, reason)` |
-| `server_setup.py` | ~230 | `SETUP_CATEGORIES`, `CORE_CHANNELS`, `PERMISSOES_NECESSARIAS`; derivadas `setup_channels()`, `log_channels()`, `module_keys()`; leitura `saved_channel_id()`/`saved_log_channel_id()`; `ensure_setup_channels(guild, config)` → `SetupResult`; `build_setup_config` |
-| `diagnostics.py` | ~180 | `diagnose(guild, config, licenca_ativa)` puro → `Diagnostico`; `diagnostic_embed()` |
-| `commands/shared.py` | 142 | Cores, `clean_text`, `parse_positive_int`, `make_success_embed`, `make_log_embed`, `get_guild_config`, `resolve_text_channel`, `send_module_log`, `send_to_setup_channel`, `create_record` |
-| `commands/panels.py` | compartilhado | Publicação idempotente, persistência de canal/mensagem, sincronização de permissões e personalização visual dos painéis fixos |
+| App | `backend/app/main.py` | FastAPI, lifespan e routers |
+| Banco | `backend/app/db.py` | engine async, sessões e upgrade Alembic no boot |
+| Modelos | `backend/app/models.py` | licenças, configuração, auditoria e domínios |
+| Schemas | `backend/app/schemas.py` | contratos Pydantic e inventário de módulos |
+| Serviços gerais | `backend/app/services.py` | configuração, permissão, licença e auditoria |
+| Control Plane | `backend/app/control_plane.py` | rascunho, revisão, publicação e projeção transitória |
+| API interna | `backend/app/api/internal.py` | endpoints consumidos pelo bot |
+| API Control Plane | `backend/app/api/control_plane.py` | leitura, draft e publish por guild/módulo |
+| Farm atual | `backend/app/farm_tickets.py` e `api/farm_tickets.py` | tickets semanais e operações existentes |
+| Migrações | `backend/migrations/` | histórico Alembic versionado |
 
-### Módulos existentes
+### Persistência transversal
 
-`commands/<mod>/` com `__init__.py` (declara `MODULE = ModuleSpec(...)`), `cog.py`, `embeds.py`, `modals.py`, `views.py` (nem todos têm os quatro).
+- `License`: licença vinculada à guild.
+- `GuildConfig`: configuração legada/transversal em `modules`, `command_permissions`, `messages` e `settings`.
+- `ModuleConfigState`: estado atual do Control Plane com draft/publicado, revisions, atores e timestamps.
+- `AuditLog`: registro de operações sensíveis.
+- `SystemRecord`: registro genérico; não deve substituir domínio relacional complexo.
 
-Ordem canônica: set(10), meta(20), farm_tickets(25), ticket(30), parceria(40), encomenda(50), ausencia(60), radio(70), producao(80).
+### API atual do Control Plane
 
-| Módulo | Comandos | Status |
+```text
+GET  /internal/control-plane/guilds/{guild_id}/modules/{module_key}
+PUT  /internal/control-plane/guilds/{guild_id}/modules/{module_key}/draft
+POST /internal/control-plane/guilds/{guild_id}/modules/{module_key}/publish
+```
+
+Os endpoints exigem token interno, licença ativa e ator. O contrato atual suporta revisão otimista. Somente Metas possui schema de módulo integrado.
+
+## Bot
+
+| Área | Local | Responsabilidade atual |
 |---|---|---|
-| `set` | `/set solicitar|aprovar|reprovar|painel` | **validado** |
-| `meta` | `/meta registrar` + painel | **validado** |
-| `farm_tickets` | painel + controle de ticket + `/farm ranking` | ranking agregado no backend |
-| `parceria` | `/parceria cadastrar` + painel | persistência no backend |
-| `ausencia` | `/setup_ausencia`, `/painel_ausencia`, `/ausencias` | |
-| `ticket` | `/ticket abrir|painel` | painel persistente |
-| `encomenda` | `/encomenda criar|painel` | painel persistente |
-| `radio` | `/radio alterar` | |
-| `producao` | `/producao registrar|painel` | painel persistente |
+| Inicialização | `bot/yuno_bot/main.py` | carrega módulos/views e sincroniza command tree |
+| Central | `bot/yuno_bot/dashboard.py` | payload Components V2, dispatch e publicação |
+| Contrato transitório | `bot/yuno_bot/control_plane.py` | callbacks do módulo e autorização administrativa |
+| Registry | `bot/yuno_bot/modules.py` | descoberta de 16 módulos, cogs, views e setup |
+| API | `bot/yuno_bot/api_client.py` | transporte HTTP e cache de guild config |
+| Setup | `bot/yuno_bot/server_setup.py` | reconciliação por IDs |
+| Guardas | `bot/yuno_bot/guards.py` | licença, módulo e permissões |
+| Módulos | `bot/yuno_bot/commands/<modulo>/` | runtime e interfaces existentes |
 
-### Estrutura criada por `/yuno configurar`
+Com `CONTROL_PLANE_ENABLED=true`, a política de sync mantém somente `/yuno configurar` globalmente e no servidor de teste. Cogs antigos continuam carregados para preservar listeners e views, mas seus slash commands não são publicados.
 
-Categorias: `Yuno - Administracao`, `Yuno - Operacao`, `Yuno - Logs`.
-Canais de operação: `set-solicitar`, `set-aprovacao`, `metas-semanais`, `tickets`, `parcerias`, `encomendas`, `ausencias`, `radio`, `producao`, `yuno-logs`.
-Canais de log: `logs-<modulo>` para cada um dos 9 módulos.
+## Módulos registrados
 
-**Reconciliação por ID, idempotente.** Ordem: ID salvo em `settings.discord_setup` → canal de mesmo nome (adoção, migra quem configurou antes) → criação. Canal renomeado ou movido pelo cliente é respeitado: identidade é o ID.
+```text
+set, meta, farm_tickets, ticket, parceria, encomenda, ausencia, radio,
+producao, adv, anuncio, hierarquia, membros, acao, mod, disparo
+```
 
-## Dashboard
+Somente `meta` possui integração com o `ControlPlaneSpec` atual. Os outros módulos aparecem como migração pendente e dependem das interfaces operacionais já publicadas quando independentes de slash.
 
-`dashboard/src/` — `App.jsx`, `api.js`, `styles.css`. Vite + React. Inclui emissão/listagem administrativa de chaves e ativação. `dist/` é build, ignore.
+## Estado transitório que não deve ser replicado
 
-## Infra
+- `ModuleSpec.dashboard_fields` descreve valores espalhados em schemas legados.
+- `dashboard.module_values()` conhece formatos específicos de módulos.
+- Metas usa `seed_from_legacy()` e `project_to_legacy()`.
+- Publicação atual ainda projeta configuração em `GuildConfig` para o Runtime antigo.
+- Comandos antigos de configuração/publicação permanecem no código, embora ocultos pela árvore reduzida.
+- O setup inicial ainda parte de categorias e canais canônicos, enquanto a arquitetura nova deve permitir selecionar estrutura existente e criar nova estrutura opcionalmente.
 
-`docker-compose.yml` (postgres, redis, api, bot, dashboard, caddy), `infra/Caddyfile`, `deploy.yuno.cmd` / `.ps1` (push main → backup PostgreSQL Docker ou SQLite legado → Oracle → restart da stack), `scripts/backup-postgres.sh`, `scripts/emitir-chave.ps1` (emissão manual segura na API de produção via SSH).
+Esses pontos são candidatos a remoção por fatia de módulo após a nova arquitetura ser validada.
+
+## Farm atual
+
+O domínio existente possui configurações, metas semanais, tickets, entradas e ações. A API cliente concentra muitos métodos específicos. Use essa implementação para inventariar dados e casos de borda, nunca como limite para Farm v2.
+
+Arquivos de investigação:
+
+- `backend/app/models.py` nas classes `Farm*`;
+- `backend/app/farm_tickets.py`;
+- `backend/app/api/farm_tickets.py`;
+- `bot/yuno_bot/commands/farm_tickets/`;
+- testes de Farm em `backend/tests/`.
+
+## Dashboard web
+
+`dashboard/src/` cobre ativação/licenciamento e configuração web existente. A reconstrução inicial é Discord-first; integração futura deve consumir os mesmos contratos da Central, sem criar segunda fonte de verdade.
+
+## Infra e deploy
+
+- `docker-compose.yml`: stack containerizada prevista.
+- `deploy.yuno.ps1`: push, backup pré-deploy, atualização Oracle, restart e health.
+- `scripts/backup-postgres.sh` e `restore-postgres.sh`: operação PostgreSQL.
+- Ambiente Oracle atual pode operar via systemd; confirmar factual antes de qualquer deploy.
+
+Nunca registrar tokens, chaves, IDs de cliente ou dados do ambiente vivo nesta referência.
 
 ## Testes
 
-`backend/tests/` — `test_api.py` (386), `test_bot_modal_helpers.py` (446), `test_radio.py` (91), `test_module_registry.py` (paridade bot↔backend, colisão de canal, prefixo de `command_keys`, views persistentes), `test_setup_idempotente.py` (reconciliação por ID, rename, move, adoção, diagnóstico), `test_cache.py` (TTL, isolamento entre guilds, thundering herd, erro não cacheado). 64 testes, `python -m pytest backend/tests`. Os testes do bot moram aqui por convenção do repo e ajustam `sys.path` manualmente.
+A suíte fica em `backend/tests/` e também cobre o bot por ajuste de `sys.path`. No snapshot atual há 113 testes, incluindo Control Plane, command tree, publicação, registry, setup idempotente e guards.
+
+Ao alterar arquitetura, começar por `pytest -q`, depois executar testes específicos e voltar à suíte completa. Migrações devem ser exercitadas em banco vazio e em cópia representativa antes de produção.

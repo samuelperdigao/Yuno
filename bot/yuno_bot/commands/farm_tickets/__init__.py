@@ -6,8 +6,8 @@ from yuno_bot.modules import DashboardField, ModuleSpec
 
 MODULE = ModuleSpec(
     key="farm_tickets",
-    nome="Tickets de Farm",
-    descricao="Ticket semanal por membro, com lancamento, comprovante e aprovacao.",
+    nome="Tickets de Farm (legado)",
+    descricao="Runtime antigo preservado apenas para convivencia e rollback por guild.",
     icon="\U0001F3AB",
     ordem=25,
     plano_minimo="pro",

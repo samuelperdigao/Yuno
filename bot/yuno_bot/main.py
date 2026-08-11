@@ -12,6 +12,10 @@ from yuno_bot.config import get_settings
 from yuno_bot.control_plane import is_control_plane_admin
 from yuno_bot.guards import deny
 from yuno_bot.modules import ModuleContext, discover_modules, load_modules
+from yuno_bot.platform.api import PlatformAPIClient
+from yuno_bot.platform.coordinator import PlatformCoordinator
+from yuno_bot.platform.registry import discover_ui_modules, verify_backend_manifest
+from yuno_bot.platform.router import InteractionRouter, RoutedActionButton, RoutedActionSelect
 
 INTENTS = discord.Intents.default()
 INTENTS.guilds = True
@@ -24,6 +28,17 @@ class YunoBot(commands.Bot):
         super().__init__(command_prefix="y!", intents=INTENTS)
         self.log = logging.getLogger("yuno")
         self.api = YunoAPI()
+        self.platform_api = PlatformAPIClient(
+            base_url=self.api.base_url,
+            headers=self.api.headers,
+        )
+        self.platform_ui_registry = discover_ui_modules()
+        self.platform_interaction_router = InteractionRouter(
+            self.platform_api, self.platform_ui_registry
+        )
+        self.platform_coordinator = PlatformCoordinator(
+            self, self.platform_api, self.platform_ui_registry
+        )
         self.parcerias_repository = ParceriasRepository()
         self.module_context: ModuleContext | None = None
 
@@ -33,11 +48,31 @@ class YunoBot(commands.Bot):
         # cru (yuno_bot.dashboard.build_payload). Precisa ser registrada aqui
         # para os custom_id sobreviverem a um restart do bot.
         self.add_view(dashboard.PainelDispatcherView(self.api))
+        # Dispatcher generico somente para modulos domain-first. As views
+        # antigas continuam no loader legado e nao alimentam este registry.
+        self.add_dynamic_items(RoutedActionButton, RoutedActionSelect)
+
+        try:
+            platform_manifest = await self.platform_api.manifest()
+            contract_issues = verify_backend_manifest(
+                platform_manifest, self.platform_ui_registry
+            )
+            if contract_issues:
+                self.log.error(
+                    "Runtime domain-first degradado: %s", "; ".join(contract_issues)
+                )
+            else:
+                self.log.info("Contratos domain-first do bot e backend compativeis.")
+        except httpx.HTTPError:
+            # O legado continua disponivel; apenas o runtime novo fica
+            # degradado e o diagnostico explicara a incompatibilidade.
+            self.log.exception("Nao foi possivel validar contratos da Yuno Platform")
 
         # Cogs e views persistentes vem do registry. Adicionar um modulo novo e
         # criar a pasta com MODULE = ModuleSpec(...); este arquivo nao muda.
         self.module_context = await load_modules(self)
         self.log.info("Modulos carregados: %s", ", ".join(discover_modules()))
+        self.platform_coordinator.start()
 
         settings = get_settings()
         if settings.control_plane_enabled:
@@ -64,6 +99,10 @@ class YunoBot(commands.Bot):
     async def on_ready(self) -> None:
         guilds = ", ".join(f"{guild.name} ({guild.id})" for guild in self.guilds) or "nenhum servidor"
         self.log.info("Yuno conectado como %s. Servidores: %s", self.user, guilds)
+
+    async def close(self) -> None:
+        await self.platform_coordinator.stop()
+        await super().close()
 
 
 class YunoAdminCog(commands.Cog):
@@ -145,7 +184,10 @@ class YunoAdminCog(commands.Cog):
                 )
                 return
             states = await dashboard.fetch_control_states(
-                self.bot.api, interaction.guild.id, interaction.user.id
+                self.bot.api,
+                interaction.guild.id,
+                interaction.user.id,
+                platform_api=self.bot.platform_api,
             )
             try:
                 message_id = await dashboard.publish_or_update(

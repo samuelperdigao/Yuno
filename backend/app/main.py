@@ -4,11 +4,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import auth, config, control_plane, farm_tickets, health, internal, licenses, parceria, products, systems, webhooks
+from app.api.platform import router as platform_router
 from app.core.config import get_settings
 from app.db import create_database
+from app.platform.registry import discover_domain_modules
 
 
 settings = get_settings()
+discover_domain_modules()
 
 
 @asynccontextmanager
@@ -37,6 +40,7 @@ app.include_router(auth.router)
 app.include_router(licenses.router)
 app.include_router(internal.router)
 app.include_router(control_plane.router)
+app.include_router(platform_router)
 app.include_router(config.router)
 app.include_router(farm_tickets.router)
 app.include_router(parceria.router)

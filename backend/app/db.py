@@ -6,14 +6,19 @@ from alembic import command
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import inspect
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.types import JSON
 
 from app.core.config import get_settings
 
 
 class Base(DeclarativeBase):
     pass
+
+
+JsonType = JSON().with_variant(JSONB, "postgresql")
 
 
 settings = get_settings()

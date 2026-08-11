@@ -17,6 +17,7 @@ enviada via HTTP cru, nao pelo `View.send`.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Callable
 
 import discord
@@ -27,6 +28,39 @@ from yuno_bot import diagnostics
 from yuno_bot.api_client import YunoAPI
 from yuno_bot.control_plane import is_control_plane_admin, pending_changes
 from yuno_bot.modules import DashboardField, ModuleSpec, discover_modules, get_module
+from yuno_bot.platform.registry import ui_registry
+
+
+@dataclass(frozen=True)
+class DomainDashboardSpec:
+    key: str
+    nome: str
+    descricao: str
+    icon: str
+    ordem: int
+    plano_minimo: str
+    dashboard_fields: tuple = ()
+    control_plane: None = None
+    domain_first: bool = True
+
+
+def dashboard_specs() -> dict[str, ModuleSpec | DomainDashboardSpec]:
+    specs: list[ModuleSpec | DomainDashboardSpec] = list(discover_modules().values())
+    known = {item.key for item in specs}
+    for adapter in ui_registry.all():
+        if adapter.module_key in known:
+            continue
+        specs.append(
+            DomainDashboardSpec(
+                key=adapter.module_key,
+                nome=adapter.name or adapter.module_key.replace("_", " ").title(),
+                descricao=adapter.description or "Modulo domain-first do Yuno.",
+                icon=adapter.icon,
+                ordem=adapter.order,
+                plano_minimo=adapter.minimum_plan,
+            )
+        )
+    return {item.key: item for item in sorted(specs, key=lambda value: (value.ordem, value.key))}
 
 _ACTION_ROW = 1
 _BUTTON = 2
@@ -76,7 +110,12 @@ def module_values(module_key: str, config: dict) -> dict[str, Any]:
     return _settings_values(config, module_key)
 
 
-def compute_status(spec: ModuleSpec, config: dict) -> str:
+def compute_status(spec: ModuleSpec | DomainDashboardSpec, config: dict, state: dict | None = None) -> str:
+    if getattr(spec, "domain_first", False):
+        state = state or {}
+        if state.get("lifecycle") in {"inactive", "paused"}:
+            return "desligado"
+        return "configurado" if state.get("published_revision") else "incompleto"
     if not (config.get("modules") or {}).get(spec.key, False):
         return "desligado"
     if not spec.dashboard_fields:
@@ -104,15 +143,20 @@ def _format_value(campo: DashboardField, valor: Any) -> str:
     return _mention(campo.tipo, valor)
 
 
-def module_info_embed(spec: ModuleSpec, config: dict, state: dict | None = None) -> discord.Embed:
-    status = compute_status(spec, config)
+def module_info_embed(spec: ModuleSpec | DomainDashboardSpec, config: dict, state: dict | None = None) -> discord.Embed:
+    status = compute_status(spec, config, state)
     values = module_values(spec.key, config)
     embed = discord.Embed(title=f"{spec.icon} {spec.nome}", description=spec.descricao, color=_STATUS_COLOR[status])
     embed.add_field(name="Estado", value=f"{_STATUS_BADGE[status]} {_STATUS_LABEL[status]}", inline=False)
     for campo in spec.dashboard_fields:
         rotulo = campo.label if campo.obrigatorio else f"{campo.label} (opcional)"
         embed.add_field(name=rotulo, value=_format_value(campo, values.get(campo.key)), inline=False)
-    if spec.control_plane is None:
+    if getattr(spec, "domain_first", False):
+        state = state or {}
+        embed.add_field(name="Runtime", value=f"`{state.get('runtime_mode', 'legacy')}` · lifecycle `{state.get('lifecycle', 'inactive')}`", inline=False)
+        embed.add_field(name="Versao publicada", value=str(state.get("published_revision", 0) or "Nenhuma"), inline=True)
+        embed.add_field(name="Arquitetura", value="Domain-first", inline=True)
+    elif spec.control_plane is None:
         embed.add_field(
             name="Central de Gestão",
             value="Migração para a Central pendente.",
@@ -134,7 +178,7 @@ def module_info_embed(spec: ModuleSpec, config: dict, state: dict | None = None)
 
 
 def _page_count() -> int:
-    return max(1, (len(discover_modules()) + _PAGE_SIZE - 1) // _PAGE_SIZE)
+    return max(1, (len(dashboard_specs()) + _PAGE_SIZE - 1) // _PAGE_SIZE)
 
 
 def build_payload(
@@ -144,12 +188,12 @@ def build_payload(
     control_states: dict[str, dict[str, Any]] | None = None,
     license_active: bool = True,
 ) -> dict[str, Any]:
-    specs = list(discover_modules().values())
+    specs = list(dashboard_specs().values())
     pages = _page_count()
     page = max(0, min(page, pages - 1))
     visible_specs = specs[page * _PAGE_SIZE : (page + 1) * _PAGE_SIZE]
     states = control_states or {}
-    active_count = sum(bool(value) for value in (config.get("modules") or {}).values())
+    active_count = sum(bool(value) for value in (config.get("modules") or {}).values()) + sum(1 for key, state in states.items() if key in dashboard_specs() and state.get("lifecycle") == "active")
     inner: list[dict[str, Any]] = [
         {
             "type": _TEXT,
@@ -164,9 +208,11 @@ def build_payload(
     ]
 
     for spec in visible_specs:
-        status = compute_status(spec, config)
         state = states.get(spec.key) or {}
-        if spec.control_plane is None:
+        status = compute_status(spec, config, state)
+        if getattr(spec, "domain_first", False):
+            detail = f"Domain-first · runtime {state.get('runtime_mode', 'legacy')} · versao {state.get('published_revision') or 'nenhuma'}"
+        elif spec.control_plane is None:
             detail = "Migração para a Central pendente"
         else:
             version = state.get("published_revision", 0)
@@ -339,7 +385,7 @@ class PainelDispatcherView(discord.ui.View):
     def __init__(self, api: YunoAPI) -> None:
         super().__init__(timeout=None)
         self.api = api
-        for spec in discover_modules().values():
+        for spec in dashboard_specs().values():
             button: discord.ui.Button = discord.ui.Button(
                 custom_id=f"yuno:painel:info:{spec.key}",
                 style=discord.ButtonStyle.secondary,
@@ -391,7 +437,12 @@ class PainelDispatcherView(discord.ui.View):
                         "Você não possui permissão para administrar a Central.", ephemeral=True
                     )
                     return
-                states = await fetch_control_states(self.api, interaction.guild.id, interaction.user.id)
+                states = await fetch_control_states(
+                    self.api,
+                    interaction.guild.id,
+                    interaction.user.id,
+                    platform_api=getattr(interaction.client, "platform_api", None),
+                )
                 await _edit_v2(
                     interaction.client,
                     interaction.channel_id,
@@ -464,7 +515,7 @@ class ModuleInfoView(discord.ui.View):
     def __init__(
         self,
         api: YunoAPI,
-        spec: ModuleSpec,
+        spec: ModuleSpec | DomainDashboardSpec,
         config: dict,
         state: dict | None = None,
         *,
@@ -475,16 +526,24 @@ class ModuleInfoView(discord.ui.View):
         self.spec = spec
         self.state = state or {}
         self.user_id = user_id
+        is_domain = bool(getattr(spec, "domain_first", False))
         enabled = bool((config.get("modules") or {}).get(spec.key, False))
         toggle = discord.ui.Button(
             label="Desativar módulo" if enabled else "Ativar módulo",
             emoji="⏸️" if enabled else "▶️",
             style=discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success,
             custom_id=f"yuno:painel:toggle:{spec.key}",
+            disabled=is_domain,
         )
+        if is_domain:
+            toggle.label = "Runtime domain-first"
         toggle.callback = self.toggle_module
         self.add_item(toggle)
-        if spec.control_plane is not None:
+        if is_domain:
+            manage = discord.ui.Button(label="Administrar", emoji="🌾", style=discord.ButtonStyle.primary)
+            manage.callback = self.open_domain
+            self.add_item(manage)
+        if not is_domain and spec.control_plane is not None:
             for label, emoji, callback in (
                 ("Configurar", "⚙️", self.configure),
                 ("Prévia", "🔎", self.preview),
@@ -496,6 +555,14 @@ class ModuleInfoView(discord.ui.View):
         diagnose_button = discord.ui.Button(label="Diagnóstico", emoji="🩺", style=discord.ButtonStyle.secondary)
         diagnose_button.callback = self.diagnose
         self.add_item(diagnose_button)
+
+    async def open_domain(self, interaction: discord.Interaction) -> None:
+        registry = getattr(interaction.client, "platform_ui_registry", ui_registry)
+        adapter = registry.get(self.spec.key)
+        if adapter is None or not adapter.admin_pages:
+            await interaction.response.send_message("Interface administrativa indisponivel.", ephemeral=True)
+            return
+        await adapter.admin_pages[0].renderer(interaction, interaction.client.platform_api)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if self.user_id is None or interaction.user.id == self.user_id:
@@ -551,6 +618,9 @@ class ModuleInfoView(discord.ui.View):
             await self.spec.control_plane.publish_panel(interaction, self.api, loaded[1], loaded[0])
 
     async def diagnose(self, interaction: discord.Interaction) -> None:
+        if getattr(self.spec, "domain_first", False):
+            await self.open_domain(interaction)
+            return
         loaded = await self._load(interaction)
         if not loaded:
             return
@@ -591,7 +661,7 @@ class ModuleInfoView(discord.ui.View):
 
 
 async def show_module_info(interaction: discord.Interaction, api: YunoAPI, module_key: str) -> None:
-    spec = get_module(module_key)
+    spec = dashboard_specs().get(module_key)
     if not spec:
         await interaction.response.send_message("Módulo não encontrado.", ephemeral=True)
         return
@@ -609,7 +679,16 @@ async def show_module_info(interaction: discord.Interaction, api: YunoAPI, modul
             )
             return
         state = None
-        if spec.control_plane is not None:
+        if getattr(spec, "domain_first", False):
+            platform_api = interaction.client.platform_api
+            instance = await platform_api.module_instance(interaction.guild.id, spec.key)
+            draft = await platform_api.configuration_draft(interaction.guild.id, spec.key)
+            state = {
+                **instance,
+                "published_revision": draft.get("base_published_version", 0),
+                "draft_revision": draft.get("revision", 0),
+            }
+        elif spec.control_plane is not None:
             state = await api.get_module_config_state(
                 interaction.guild.id, spec.key, actor_id=interaction.user.id
             )
@@ -634,6 +713,8 @@ async def fetch_control_states(
     api: YunoAPI,
     guild_id: int,
     actor_id: int,
+    *,
+    platform_api: Any | None = None,
 ) -> dict[str, dict[str, Any]]:
     states: dict[str, dict[str, Any]] = {}
     for spec in discover_modules().values():
@@ -645,4 +726,16 @@ async def fetch_control_states(
             )
         except httpx.HTTPError:
             continue
+    if platform_api is not None:
+        for adapter in ui_registry.all():
+            try:
+                instance = await platform_api.module_instance(guild_id, adapter.module_key)
+                draft = await platform_api.configuration_draft(guild_id, adapter.module_key)
+                states[adapter.module_key] = {
+                    **instance,
+                    "published_revision": draft.get("base_published_version", 0),
+                    "draft_revision": draft.get("revision", 0),
+                }
+            except httpx.HTTPError:
+                continue
     return states

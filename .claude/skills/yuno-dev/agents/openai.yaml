@@ -1,0 +1,7 @@
+interface:
+  display_name: "Yuno Dev"
+  short_description: "Arquitetura e evolução limpa do Yuno"
+  default_prompt: "Use $yuno-dev para planejar ou implementar uma evolução do Yuno com domínio novo, legado apenas como evidência e validação proporcional."
+
+policy:
+  allow_implicit_invocation: true

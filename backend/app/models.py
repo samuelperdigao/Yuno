@@ -9,14 +9,9 @@ except ImportError:
 from uuid import uuid4
 
 from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, func, text
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.types import JSON
 
-from app.db import Base
-
-
-JsonType = JSON().with_variant(JSONB, "postgresql")
+from app.db import Base, JsonType
 
 
 class LicenseStatus(StrEnum):
@@ -299,3 +294,9 @@ class FarmTicketAction(Base):
     log_attempts: Mapped[int] = mapped_column(Integer, default=0)
 
     ticket: Mapped[FarmTicket | None] = relationship(back_populates="actions")
+
+
+# Registra as tabelas transversais novas no mesmo Base sem misturar seus
+# conceitos com os modelos legados deste arquivo.
+from app.platform import models as platform_models  # noqa: E402,F401
+from app.domain_modules.farm import models as farm_domain_models  # noqa: E402,F401
