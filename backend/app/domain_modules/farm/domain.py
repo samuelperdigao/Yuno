@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from enum import StrEnum
+try:
+    from enum import StrEnum
+except ImportError:  # Python 3.10 do servidor de teste
+    from enum import Enum
+
+    class StrEnum(str, Enum):
+        pass
 from typing import Iterable, Mapping
 import unicodedata
 
