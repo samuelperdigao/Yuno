@@ -3,6 +3,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -70,8 +71,10 @@ from app.platform.permissions import authorize  # noqa: E402
 from app.platform.registry import ModuleRegistry, discover_domain_modules, module_registry  # noqa: E402
 from app.platform.schemas import ActorContextIn, PermissionGrantIn  # noqa: E402
 from yuno_bot.platform.registry import UIRegistry, discover_ui_modules, verify_backend_manifest  # noqa: E402
-from yuno_bot.platform.contracts import ModuleUIAdapter  # noqa: E402
-from yuno_bot.platform.router import custom_id, parse_custom_id  # noqa: E402
+from yuno_bot.platform import coordinator as platform_coordinator  # noqa: E402
+from yuno_bot.platform.contracts import InteractionResult, ModuleUIAdapter  # noqa: E402
+from yuno_bot.platform.coordinator import PlatformCoordinator  # noqa: E402
+from yuno_bot.platform.router import InteractionRouter, custom_id, parse_custom_id  # noqa: E402
 from yuno_bot.domain_modules.farm import MODULE_UI as FARM_UI  # noqa: E402
 
 
@@ -633,3 +636,109 @@ def test_interaction_ids_are_versioned_restart_safe_and_resource_free() -> None:
     }
     assert "resource" not in value
     assert parse_custom_id("legacy:button") is None
+
+
+def test_coordinator_keeps_polling_with_python_310_asyncio_timeout(monkeypatch) -> None:
+    class LegacyAsyncioTimeoutError(Exception):
+        pass
+
+    class Bot:
+        async def wait_until_ready(self) -> None:
+            return None
+
+    class Registry:
+        def all(self) -> list[SimpleNamespace]:
+            return [SimpleNamespace(jobs=(object(),), deliveries=())]
+
+    coordinator = PlatformCoordinator(Bot(), object(), Registry())
+    calls: list[int] = []
+
+    async def run_once() -> None:
+        calls.append(len(calls) + 1)
+        if len(calls) == 2:
+            coordinator._stopping.set()
+
+    async def wait_for(awaitable, *, timeout: float) -> None:
+        del timeout
+        awaitable.close()
+        raise LegacyAsyncioTimeoutError
+
+    fake_asyncio = SimpleNamespace(
+        TimeoutError=LegacyAsyncioTimeoutError,
+        wait_for=wait_for,
+    )
+    monkeypatch.setattr(platform_coordinator, "asyncio", fake_asyncio)
+    monkeypatch.setattr(coordinator, "run_once", run_once)
+
+    asyncio.run(coordinator._run())
+
+    assert calls == [1, 2]
+
+
+def test_coordinator_keeps_polling_after_unexpected_cycle_failure(monkeypatch) -> None:
+    class LegacyAsyncioTimeoutError(Exception):
+        pass
+
+    errors: list[str] = []
+
+    class Log:
+        def exception(self, message: str) -> None:
+            errors.append(message)
+
+    class Bot:
+        log = Log()
+
+        async def wait_until_ready(self) -> None:
+            return None
+
+    class Registry:
+        def all(self) -> list[SimpleNamespace]:
+            return [SimpleNamespace(jobs=(object(),), deliveries=())]
+
+    coordinator = PlatformCoordinator(Bot(), object(), Registry())
+    calls: list[int] = []
+
+    async def run_once() -> None:
+        calls.append(len(calls) + 1)
+        if len(calls) == 1:
+            raise RuntimeError("falha dupla ao registrar uma entrega")
+        coordinator._stopping.set()
+
+    async def wait_for(awaitable, *, timeout: float) -> None:
+        del timeout
+        awaitable.close()
+        raise LegacyAsyncioTimeoutError
+
+    fake_asyncio = SimpleNamespace(
+        CancelledError=asyncio.CancelledError,
+        TimeoutError=LegacyAsyncioTimeoutError,
+        wait_for=wait_for,
+    )
+    monkeypatch.setattr(platform_coordinator, "asyncio", fake_asyncio)
+    monkeypatch.setattr(coordinator, "run_once", run_once)
+
+    asyncio.run(coordinator._run())
+
+    assert calls == [1, 2]
+    assert errors == [
+        "Falha inesperada no ciclo da Yuno Platform; o worker continuara ativo"
+    ]
+
+
+def test_router_omits_empty_discord_response_fields() -> None:
+    sent: list[dict] = []
+
+    class Response:
+        def is_done(self) -> bool:
+            return False
+
+        async def send_message(self, **kwargs) -> None:
+            sent.append(kwargs)
+
+    interaction = SimpleNamespace(response=Response())
+
+    asyncio.run(
+        InteractionRouter._render(interaction, InteractionResult(content="Tudo certo."))
+    )
+
+    assert sent == [{"content": "Tudo certo.", "ephemeral": True}]

@@ -188,7 +188,13 @@ class InteractionRouter:
                 raise RuntimeError("Modal nao pode ser aberto depois de responder/deferir.")
             await interaction.response.send_modal(result.modal)
             return
-        kwargs = {"content": result.content, "embed": result.embed, "view": result.view}
+        kwargs: dict = {}
+        if result.content is not None:
+            kwargs["content"] = result.content
+        if result.embed is not None:
+            kwargs["embed"] = result.embed
+        if result.view is not None:
+            kwargs["view"] = result.view
         if result.edit_message:
             if interaction.response.is_done():
                 await interaction.edit_original_response(**kwargs)

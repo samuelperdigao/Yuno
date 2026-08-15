@@ -40,10 +40,17 @@ class PlatformCoordinator:
     async def _run(self) -> None:
         await self.bot.wait_until_ready()
         while not self._stopping.is_set():
-            await self.run_once()
+            try:
+                await self.run_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self.bot.log.exception(
+                    "Falha inesperada no ciclo da Yuno Platform; o worker continuara ativo"
+                )
             try:
                 await asyncio.wait_for(self._stopping.wait(), timeout=5)
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 pass
 
     async def run_once(self) -> None:
