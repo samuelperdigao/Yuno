@@ -119,6 +119,35 @@ class YunoBot(commands.Bot):
         guilds = ", ".join(f"{guild.name} ({guild.id})" for guild in self.guilds) or "nenhum servidor"
         self.log.info("Yuno conectado como %s. Servidores: %s", self.user, guilds)
 
+    async def on_interaction(self, interaction: discord.Interaction) -> None:
+        if interaction.type is not discord.InteractionType.component:
+            return
+        custom_id = str((interaction.data or {}).get("custom_id") or "")
+        if not custom_id.startswith("yuno:"):
+            return
+        self.log.info(
+            "Components V2 recebido guild=%s interaction=%s custom_id=%s fase=dispatch",
+            interaction.guild_id,
+            interaction.id,
+            custom_id,
+        )
+        try:
+            if await dashboard.dispatch_components_v2(interaction):
+                return
+            await self.platform_interaction_router.dispatch_components_v2(interaction)
+        except Exception:
+            self.log.exception(
+                "Falha no dispatch Components V2 guild=%s interaction=%s custom_id=%s fase=dispatch",
+                interaction.guild_id,
+                interaction.id,
+                custom_id,
+            )
+            message = "Nao consegui concluir esta acao. Tente novamente."
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+
     async def on_member_remove(self, member: discord.Member) -> None:
         if self.platform_ui_registry.get("registration") is None or self.user is None:
             return

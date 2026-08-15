@@ -416,6 +416,18 @@ async def _replace_central(
     await interaction.edit_original_response(content=notice)
 
 
+async def _defer_if_needed(interaction: discord.Interaction) -> None:
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+
+async def _send_interaction_error(interaction: discord.Interaction, message: str) -> None:
+    if interaction.response.is_done():
+        await interaction.edit_original_response(content=message)
+    else:
+        await interaction.response.send_message(message, ephemeral=True)
+
+
 async def _admin_state(api: Any, guild_id: int) -> tuple[dict, dict]:
     return (
         await api.module_instance(guild_id, "registration"),
@@ -572,9 +584,9 @@ async def _save_patch(interaction: discord.Interaction, api: Any, patch: dict[st
 async def _set_selected(interaction: discord.Interaction, api: Any, field: str) -> None:
     values = _selected_ids(interaction)
     if not values:
-        await interaction.response.send_message("Selecione um valor.", ephemeral=True)
+        await _send_interaction_error(interaction, "Selecione um valor.")
         return
-    await interaction.response.defer(ephemeral=True, thinking=True)
+    await _defer_if_needed(interaction)
     await _save_patch(interaction, api, {field: values[0]})
     await _render_section(interaction, api, "system", notice="Destino atualizado.")
 
@@ -597,7 +609,7 @@ async def set_member_role(interaction, api):
 
 async def _change_approvers(interaction: discord.Interaction, api: Any, *, remove: bool) -> None:
     values = _selected_ids(interaction)
-    await interaction.response.defer(ephemeral=True, thinking=True)
+    await _defer_if_needed(interaction)
     draft = await api.configuration_draft(interaction.guild_id, "registration")
     current = list(draft["data"]["approver_role_ids"])
     if remove:
@@ -621,10 +633,10 @@ async def set_flags(interaction: discord.Interaction, api: Any) -> None:
     values = set(_selected_ids(interaction))
     patch: dict[str, Any] = {}
     if "numeric_on" in values and "numeric_off" in values:
-        await interaction.response.send_message("Escolha apenas um modo de ID.", ephemeral=True)
+        await _send_interaction_error(interaction, "Escolha apenas um modo de ID.")
         return
     if "resubmit_on" in values and "resubmit_off" in values:
-        await interaction.response.send_message("Escolha apenas uma regra de reenvio.", ephemeral=True)
+        await _send_interaction_error(interaction, "Escolha apenas uma regra de reenvio.")
         return
     if "numeric_on" in values:
         patch["player_id_numeric_only"] = True
@@ -634,7 +646,7 @@ async def set_flags(interaction: discord.Interaction, api: Any) -> None:
         patch["allow_resubmit_after_rejection"] = True
     if "resubmit_off" in values:
         patch["allow_resubmit_after_rejection"] = False
-    await interaction.response.defer(ephemeral=True, thinking=True)
+    await _defer_if_needed(interaction)
     await _save_patch(interaction, api, patch)
     await _render_section(interaction, api, "system", notice="Regras atualizadas.")
 

@@ -36,6 +36,8 @@ CENTRAL_ACTION_PATTERN = re.compile(
     r"(?P<action>[a-z0-9_]{1,40})$"
 )
 
+_SELECT_COMPONENT_TYPES = frozenset({3, 5, 6, 7, 8})
+
 
 def central_custom_id(module_key: str, action: str, *, version: int = 1) -> str:
     value = f"yuno:central:v{version}:{module_key}:{action}"
@@ -253,6 +255,54 @@ async def _deny(interaction: discord.Interaction, message: str) -> None:
         await interaction.response.send_message(message, ephemeral=True)
 
 
+async def _acknowledge_select(interaction: discord.Interaction) -> None:
+    """Acknowledge Components V2 selects before any API round-trip."""
+
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+
+async def dispatch_components_v2(interaction: discord.Interaction) -> bool:
+    """Dispatch a Central component directly from the gateway payload.
+
+    discord.py 2.4 cannot rebuild children nested in a Components V2 container,
+    so its DynamicItem store silently skips these interactions.  The raw
+    interaction event still contains the stable custom ID and selected values.
+    """
+
+    data = interaction.data or {}
+    custom_id = str(data.get("custom_id") or "")
+    match = CENTRAL_CUSTOM_ID_PATTERN.fullmatch(custom_id)
+    if match is None:
+        return False
+
+    version = int(match.group("version"))
+    module_key = match.group("module")
+    action_key = match.group("action")
+    if version != 1:
+        await _deny(interaction, "Versao da Central nao suportada.")
+        return True
+
+    try:
+        component_type = int(data.get("component_type") or 0)
+    except (TypeError, ValueError):
+        component_type = 0
+
+    if module_key == "core" and action_key == "select_module":
+        values = list(data.get("values") or [])
+        if component_type != 3 or not values:
+            await _deny(interaction, "Selecao da Central invalida.")
+            return True
+        await _acknowledge_select(interaction)
+        await _dispatch_page(interaction, str(values[0]))
+        return True
+
+    if component_type in _SELECT_COMPONENT_TYPES:
+        await _acknowledge_select(interaction)
+    await _dispatch_action(interaction, module_key, action_key)
+    return True
+
+
 async def _dispatch_page(interaction: discord.Interaction, module_key: str) -> None:
     if await _central_config(interaction) is None:
         return
@@ -318,6 +368,7 @@ class CentralModuleSelect(
         ):
             await _deny(interaction, "Selecao da Central invalida.")
             return
+        await _acknowledge_select(interaction)
         await _dispatch_page(interaction, str(values[0]))
 
 
@@ -357,6 +408,7 @@ class CentralActionSelect(
         return cls(item, **cls._arguments(match))
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        await _acknowledge_select(interaction)
         await _dispatch_action(interaction, self.module_key, self.action_key)
 
 
@@ -375,6 +427,7 @@ class CentralChannelSelect(
         return cls(item, **cls._arguments(match))
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        await _acknowledge_select(interaction)
         await _dispatch_action(interaction, self.module_key, self.action_key)
 
 
@@ -393,4 +446,5 @@ class CentralRoleSelect(
         return cls(item, **cls._arguments(match))
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        await _acknowledge_select(interaction)
         await _dispatch_action(interaction, self.module_key, self.action_key)

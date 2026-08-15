@@ -39,6 +39,24 @@ class InteractionRouter:
         self.api = api
         self.registry = registry or ui_registry
 
+    async def dispatch_components_v2(self, interaction: discord.Interaction) -> bool:
+        """Route a raw Components V2 interaction by its stable custom ID."""
+
+        data = interaction.data or {}
+        parsed = parse_custom_id(str(data.get("custom_id") or ""))
+        if parsed is None:
+            return False
+        if parsed["version"] != 1:
+            await self._deny(interaction, "Versao desta interacao nao e mais suportada.")
+            return True
+        await self.dispatch(
+            interaction,
+            module_key=str(parsed["module"]),
+            surface=str(parsed["surface"]),
+            action_key=str(parsed["action"]),
+        )
+        return True
+
     async def dispatch(
         self,
         interaction: discord.Interaction,
