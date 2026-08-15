@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -15,6 +16,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 import app.models  # noqa: E402,F401
 from app.api.platform import router as platform_router  # noqa: E402
+from app.api.platform.deliveries import delivery_out  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.db import Base, get_session  # noqa: E402
 from app.models import License, LicenseStatus  # noqa: E402
@@ -29,6 +31,7 @@ from app.platform.contracts import (  # noqa: E402
     PanelContract,
 )
 from app.platform.registry import module_registry  # noqa: E402
+from app.platform.models import WorkState  # noqa: E402
 
 
 def test_platform_api_revalidates_actor_and_tenant() -> None:
@@ -222,3 +225,27 @@ def test_platform_api_revalidates_actor_and_tenant() -> None:
     finally:
         module_registry.unregister("api_test")
         asyncio.run(engine.dispose())
+
+
+def test_delivery_contract_exposes_destination_and_body_to_renderer() -> None:
+    item = SimpleNamespace(
+        id="delivery-1",
+        guild_id="guild-a",
+        module_key="registration",
+        renderer_key="registration.review_request",
+        destination_type="panel",
+        destination_id="channel-100",
+        resource_type="registration_request",
+        resource_id="request-1",
+        payload={"request_id": "request-1"},
+        state=WorkState.claimed,
+        attempts=1,
+        max_attempts=10,
+        correlation_id="delivery-contract",
+    )
+
+    result = delivery_out(item)
+
+    assert result.destination_type == "panel"
+    assert result.destination_id == "channel-100"
+    assert result.payload == {"request_id": "request-1"}

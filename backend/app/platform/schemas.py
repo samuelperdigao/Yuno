@@ -239,6 +239,11 @@ class WorkItemOut(BaseModel):
     correlation_id: str
 
 
+class DeliveryWorkItemOut(WorkItemOut):
+    destination_type: Literal["channel", "user", "panel"]
+    destination_id: str
+
+
 class DeliveryCreateIn(BaseModel):
     renderer_key: str = Field(min_length=1, max_length=100)
     destination_type: Literal["channel", "user", "panel"]
