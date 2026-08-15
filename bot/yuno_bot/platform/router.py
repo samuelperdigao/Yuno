@@ -292,6 +292,54 @@ class RoutedActionSelect(
         )
 
 
+class RoutedChannelSelect(
+    discord.ui.DynamicItem[discord.ui.ChannelSelect],
+    template=CUSTOM_ID_PATTERN,
+):
+    def __init__(self, item, *, version: int, module_key: str, surface: str, action_key: str) -> None:
+        super().__init__(item)
+        self.version = version
+        self.module_key = module_key
+        self.surface = surface
+        self.action_key = action_key
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        del interaction
+        return cls(item, version=int(match.group("version")), module_key=match.group("module"), surface=match.group("surface"), action_key=match.group("action"))
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        router = getattr(interaction.client, "platform_interaction_router", None)
+        if self.version != 1 or router is None:
+            await InteractionRouter._deny(interaction, "Runtime desta interacao indisponivel.")
+            return
+        await router.dispatch(interaction, module_key=self.module_key, surface=self.surface, action_key=self.action_key)
+
+
+class RoutedRoleSelect(
+    discord.ui.DynamicItem[discord.ui.RoleSelect],
+    template=CUSTOM_ID_PATTERN,
+):
+    def __init__(self, item, *, version: int, module_key: str, surface: str, action_key: str) -> None:
+        super().__init__(item)
+        self.version = version
+        self.module_key = module_key
+        self.surface = surface
+        self.action_key = action_key
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        del interaction
+        return cls(item, version=int(match.group("version")), module_key=match.group("module"), surface=match.group("surface"), action_key=match.group("action"))
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        router = getattr(interaction.client, "platform_interaction_router", None)
+        if self.version != 1 or router is None:
+            await InteractionRouter._deny(interaction, "Runtime desta interacao indisponivel.")
+            return
+        await router.dispatch(interaction, module_key=self.module_key, surface=self.surface, action_key=self.action_key)
+
+
 class RoutedModal(discord.ui.Modal):
     """Base para modais que voltam ao mesmo router e revalidam permissao."""
 

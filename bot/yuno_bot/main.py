@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from datetime import datetime, timezone
 
 import discord
 import httpx
@@ -7,15 +9,21 @@ from discord.ext import commands
 
 from yuno_bot import dashboard, diagnostics, server_setup
 from yuno_bot.api_client import YunoAPI
-from yuno_bot.commands.parceria.repository import ParceriasRepository
 from yuno_bot.config import get_settings
 from yuno_bot.control_plane import is_control_plane_admin
 from yuno_bot.guards import deny
 from yuno_bot.modules import ModuleContext, discover_modules, load_modules
 from yuno_bot.platform.api import PlatformAPIClient
+from yuno_bot.platform.contracts import ActorContext
 from yuno_bot.platform.coordinator import PlatformCoordinator
 from yuno_bot.platform.registry import discover_ui_modules, verify_backend_manifest
-from yuno_bot.platform.router import InteractionRouter, RoutedActionButton, RoutedActionSelect
+from yuno_bot.platform.router import (
+    InteractionRouter,
+    RoutedActionButton,
+    RoutedActionSelect,
+    RoutedChannelSelect,
+    RoutedRoleSelect,
+)
 
 INTENTS = discord.Intents.default()
 INTENTS.guilds = True
@@ -39,18 +47,24 @@ class YunoBot(commands.Bot):
         self.platform_coordinator = PlatformCoordinator(
             self, self.platform_api, self.platform_ui_registry
         )
-        self.parcerias_repository = ParceriasRepository()
         self.module_context: ModuleContext | None = None
+        self._registration_recovery_task: asyncio.Task | None = None
 
     async def setup_hook(self) -> None:
         await self.add_cog(YunoAdminCog(self))
-        # Nunca renderizada diretamente -- a mensagem do painel usa payload V2
-        # cru (yuno_bot.dashboard.build_payload). Precisa ser registrada aqui
-        # para os custom_id sobreviverem a um restart do bot.
-        self.add_view(dashboard.PainelDispatcherView(self.api))
         # Dispatcher generico somente para modulos domain-first. As views
         # antigas continuam no loader legado e nao alimentam este registry.
-        self.add_dynamic_items(RoutedActionButton, RoutedActionSelect)
+        self.add_dynamic_items(
+            RoutedActionButton,
+            RoutedActionSelect,
+            RoutedChannelSelect,
+            RoutedRoleSelect,
+            dashboard.CentralModuleSelect,
+            dashboard.CentralActionButton,
+            dashboard.CentralActionSelect,
+            dashboard.CentralChannelSelect,
+            dashboard.CentralRoleSelect,
+        )
 
         try:
             platform_manifest = await self.platform_api.manifest()
@@ -73,6 +87,11 @@ class YunoBot(commands.Bot):
         self.module_context = await load_modules(self)
         self.log.info("Modulos carregados: %s", ", ".join(discover_modules()))
         self.platform_coordinator.start()
+        if self.platform_ui_registry.get("registration") is not None:
+            self._registration_recovery_task = asyncio.create_task(
+                self._run_registration_recovery_sweeper(),
+                name="yuno-registration-recovery-sweeper",
+            )
 
         settings = get_settings()
         if settings.control_plane_enabled:
@@ -100,7 +119,76 @@ class YunoBot(commands.Bot):
         guilds = ", ".join(f"{guild.name} ({guild.id})" for guild in self.guilds) or "nenhum servidor"
         self.log.info("Yuno conectado como %s. Servidores: %s", self.user, guilds)
 
+    async def on_member_remove(self, member: discord.Member) -> None:
+        if self.platform_ui_registry.get("registration") is None or self.user is None:
+            return
+        actor = ActorContext(
+            guild_id=member.guild.id,
+            user_id=self.user.id,
+            role_ids=(),
+            discord_permissions=(),
+            channel_id=None,
+            category_id=None,
+            actor_type="system",
+            is_guild_owner=False,
+            correlation_id=f"member-remove:{member.guild.id}:{member.id}",
+        )
+        try:
+            await self.platform_api.registration_deactivate_member(
+                member.guild.id, member.id, actor=actor
+            )
+        except httpx.HTTPError:
+            self.log.exception(
+                "Falha ao inativar cadastro do membro %s na guild %s",
+                member.id,
+                member.guild.id,
+            )
+
+    async def sweep_registration_recovery_once(self) -> None:
+        now = datetime.now(timezone.utc)
+        for guild in self.guilds:
+            try:
+                stale = await self.platform_api.registration_stale(guild.id)
+                for request in stale:
+                    await self.platform_api.schedule_task(
+                        guild.id,
+                        "registration",
+                        {
+                            "job_key": "registration.processing.recover",
+                            "resource_type": "registration_request",
+                            "resource_id": request["id"],
+                            "payload": {"request_id": request["id"]},
+                            "due_at": now.isoformat(),
+                            "idempotency_key": (
+                                f"stale:{request['id']}:{request['revision']}"
+                            ),
+                            "correlation_id": f"registration-sweeper:{guild.id}",
+                            "max_attempts": 10,
+                        },
+                    )
+            except Exception:
+                self.log.exception(
+                    "Falha ao agendar recuperacao de claims do Registro na guild %s",
+                    guild.id,
+                )
+
+    async def _run_registration_recovery_sweeper(self) -> None:
+        await self.wait_until_ready()
+        while not self.is_closed():
+            await self.sweep_registration_recovery_once()
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                return
+
     async def close(self) -> None:
+        if self._registration_recovery_task is not None:
+            self._registration_recovery_task.cancel()
+            try:
+                await self._registration_recovery_task
+            except asyncio.CancelledError:
+                pass
+            self._registration_recovery_task = None
         await self.platform_coordinator.stop()
         await super().close()
 
@@ -126,7 +214,7 @@ class YunoAdminCog(commands.Cog):
             "Este servidor ainda nao possui licenca ativa.", ephemeral=True
         )
 
-    @yuno.command(name="configurar", description="Cria ou reconcilia a estrutura do Yuno neste servidor")
+    @yuno.command(name="configurar", description="Publica ou reconcilia a Central do Yuno neste canal")
     @app_commands.default_permissions(manage_guild=True)
     async def yuno_configurar(self, interaction: discord.Interaction) -> None:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
@@ -141,6 +229,61 @@ class YunoAdminCog(commands.Cog):
         if not is_control_plane_admin(interaction.guild, interaction.user, config):
             await interaction.followup.send(
                 "Você não possui permissão para administrar a Central.", ephemeral=True
+            )
+            return
+
+        if get_settings().control_plane_enabled:
+            central_channel = interaction.channel
+            if not isinstance(central_channel, discord.TextChannel):
+                await interaction.followup.send(
+                    "Use este comando em um canal de texto onde a Central deve ser publicada.",
+                    ephemeral=True,
+                )
+                return
+            states = await dashboard.fetch_control_states(
+                self.bot.api,
+                interaction.guild.id,
+                interaction.user.id,
+                platform_api=self.bot.platform_api,
+            )
+            try:
+                message_id = await dashboard.publish_or_update(
+                    self.bot,
+                    central_channel,
+                    config,
+                    control_states=states,
+                )
+            except discord.HTTPException:
+                await interaction.followup.send(
+                    "Não consegui publicar a Central neste canal.", ephemeral=True
+                )
+                return
+            central_config = dashboard.with_dashboard_ref(
+                config,
+                channel_id=central_channel.id,
+                message_id=message_id,
+            )
+            try:
+                await self.bot.api.save_guild_config(
+                    interaction.guild.id,
+                    central_config,
+                    actor_id=interaction.user.id,
+                )
+            except httpx.HTTPError:
+                await dashboard.rollback_unsaved_dashboard(
+                    config, central_channel, message_id
+                )
+                await interaction.followup.send(
+                    "A Central foi publicada, mas a referência não pôde ser salva. Tente novamente.",
+                    ephemeral=True,
+                )
+                return
+            await dashboard.remove_previous_dashboard(
+                config, central_channel, message_id
+            )
+            await interaction.followup.send(
+                f"Central reconciliada e publicada em {central_channel.mention}.",
+                ephemeral=True,
             )
             return
 
@@ -171,61 +314,6 @@ class YunoAdminCog(commands.Cog):
             await interaction.followup.send(
                 "Criei os canais, mas nao consegui salvar a configuracao. Rode o comando de novo "
                 "em alguns instantes — nada sera duplicado.",
-                ephemeral=True,
-            )
-            return
-
-        if get_settings().control_plane_enabled:
-            central_channel = resultado.channels.get("painel")
-            if not isinstance(central_channel, discord.TextChannel):
-                await interaction.followup.send(
-                    "A estrutura foi salva, mas o canal da Central não pôde ser resolvido.",
-                    ephemeral=True,
-                )
-                return
-            states = await dashboard.fetch_control_states(
-                self.bot.api,
-                interaction.guild.id,
-                interaction.user.id,
-                platform_api=self.bot.platform_api,
-            )
-            try:
-                message_id = await dashboard.publish_or_update(
-                    self.bot,
-                    central_channel,
-                    saved_setup,
-                    control_states=states,
-                )
-            except discord.HTTPException:
-                await interaction.followup.send(
-                    "A estrutura foi salva, mas não consegui publicar a Central.", ephemeral=True
-                )
-                return
-            central_config = dashboard.with_dashboard_ref(
-                saved_setup,
-                channel_id=central_channel.id,
-                message_id=message_id,
-            )
-            try:
-                await self.bot.api.save_guild_config(
-                    interaction.guild.id,
-                    central_config,
-                    actor_id=interaction.user.id,
-                )
-            except httpx.HTTPError:
-                await dashboard.rollback_unsaved_dashboard(
-                    saved_setup, central_channel, message_id
-                )
-                await interaction.followup.send(
-                    "A Central foi publicada, mas a referência não pôde ser salva. Tente novamente.",
-                    ephemeral=True,
-                )
-                return
-            await dashboard.remove_previous_dashboard(
-                saved_setup, central_channel, message_id
-            )
-            await interaction.followup.send(
-                f"Central reconciliada e publicada em {central_channel.mention}. {resultado.resumo().capitalize()}.",
                 ephemeral=True,
             )
             return

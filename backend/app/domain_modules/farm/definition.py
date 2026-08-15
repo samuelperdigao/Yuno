@@ -111,6 +111,7 @@ MODULE_DEFINITION = ModuleDefinition(
         provided_resources=("product", "template", "cycle", "ticket", "submission", "review"),
         runtime_modes=("legacy", "shadow", "domain"),
         default_runtime_mode="legacy",
+        released=False,
     ),
     configuration=FARM_CONFIGURATION,
     capabilities=CAPABILITIES,

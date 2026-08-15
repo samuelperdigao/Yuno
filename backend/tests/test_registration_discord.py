@@ -1,0 +1,240 @@
+import asyncio
+from types import SimpleNamespace
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "bot"))
+
+from yuno_bot.domain_modules.registration import ui as registration_ui  # noqa: E402
+from yuno_bot.domain_modules.registration.ui import approve  # noqa: E402
+from yuno_bot.platform.contracts import ActorContext, RoutedContext  # noqa: E402
+
+
+class FakeResponse:
+    def __init__(self) -> None:
+        self.done = False
+
+    def is_done(self) -> bool:
+        return self.done
+
+    async def defer(self, **_kwargs) -> None:
+        self.done = True
+
+
+class FakeRole:
+    id = 1004
+    managed = False
+
+    def __init__(self) -> None:
+        self.permissions = SimpleNamespace()
+        self.position = 10
+
+    def __le__(self, other) -> bool:
+        return self.position <= getattr(other, "position", other)
+
+    def __ge__(self, other) -> bool:
+        return self.position >= getattr(other, "position", other)
+
+    def is_default(self) -> bool:
+        return False
+
+
+class FakeMember:
+    def __init__(self, events: list[str], role: FakeRole) -> None:
+        self.id = 10
+        self.nick = "Antes"
+        self.roles: list[FakeRole] = []
+        self.top_role = FakeRole()
+        self.events = events
+        self.role = role
+
+    async def edit(self, *, nick, reason) -> None:
+        del reason
+        self.events.append(f"discord.nick:{nick}")
+        self.nick = nick
+
+    async def add_roles(self, role, *, reason) -> None:
+        del reason
+        self.events.append("discord.role.add")
+        self.roles.append(role)
+
+    async def remove_roles(self, role, *, reason) -> None:
+        del reason
+        self.events.append("discord.role.remove")
+        if role in self.roles:
+            self.roles.remove(role)
+
+
+class FakeAPI:
+    def __init__(self, events: list[str], *, fail_role_step: bool = False) -> None:
+        self.events = events
+        self.fail_role_step = fail_role_step
+        self.release_payload = None
+
+    async def registration_claim(self, guild_id, request_id, *, actor):
+        del guild_id, request_id, actor
+        self.events.append("api.claim")
+        return {
+            "id": "request-1",
+            "discord_user_id": "10",
+            "operation_token": "opaque-token-value-123456",
+            "target_nickname": "Ana | 001",
+            "config": {"member_role_id": "1004"},
+        }
+
+    async def registration_preflight(self, guild_id, request_id, payload, *, actor):
+        del guild_id, request_id, actor
+        assert payload["previous_nickname"] == "Antes"
+        self.events.append("api.preflight")
+
+    async def registration_step(self, guild_id, request_id, token, step, *, actor):
+        del guild_id, request_id, token, actor
+        self.events.append(f"api.step.{step}")
+        if step == "role" and self.fail_role_step:
+            raise RuntimeError("falha ao persistir passo de cargo")
+
+    async def registration_complete(self, guild_id, request_id, token, *, actor):
+        del guild_id, request_id, token, actor
+        self.events.append("api.complete")
+
+    async def registration_release(
+        self, guild_id, request_id, token, *, actor, compensated, error_code
+    ):
+        del guild_id, request_id, token, actor
+        self.events.append("api.release")
+        self.release_payload = {"compensated": compensated, "error_code": error_code}
+
+
+def _context(*, fail_role_step: bool = False):
+    events: list[str] = []
+    role = FakeRole()
+    member = FakeMember(events, role)
+    bot_member = SimpleNamespace(
+        guild_permissions=SimpleNamespace(manage_roles=True, manage_nicknames=True),
+        top_role=SimpleNamespace(position=100),
+    )
+    guild = SimpleNamespace(
+        id=100,
+        owner_id=999,
+        me=bot_member,
+        get_member=lambda user_id: member if user_id == 10 else None,
+        get_role=lambda role_id: role if role_id == 1004 else None,
+    )
+    interaction = SimpleNamespace(guild=guild, response=FakeResponse())
+    actor = ActorContext(
+        guild_id=100,
+        user_id=20,
+        role_ids=(9,),
+        discord_permissions=(),
+        channel_id=1002,
+        category_id=None,
+        actor_type="user",
+        is_guild_owner=False,
+        correlation_id="discord-flow",
+    )
+    api = FakeAPI(events, fail_role_step=fail_role_step)
+    return (
+        RoutedContext(
+            interaction=interaction,
+            actor=actor,
+            panel={"resource_id": "request-1"},
+            api=api,
+            receipt_id="receipt-1",
+        ),
+        events,
+        member,
+        api,
+    )
+
+
+def test_discord_approval_applies_nickname_before_role_and_finalizes_last() -> None:
+    context, events, member, api = _context()
+    result = asyncio.run(approve(context))
+
+    assert result.content == "Registro aprovado com nickname e cargo aplicados."
+    assert events == [
+        "api.claim",
+        "api.preflight",
+        "discord.nick:Ana | 001",
+        "api.step.nickname",
+        "discord.role.add",
+        "api.step.role",
+        "api.complete",
+    ]
+    assert member.nick == "Ana | 001"
+    assert api.release_payload is None
+
+
+def test_discord_approval_compensates_only_role_added_and_restores_nickname() -> None:
+    context, events, member, api = _context(fail_role_step=True)
+    result = asyncio.run(approve(context))
+
+    assert "falha ao persistir" in result.content
+    assert events == [
+        "api.claim",
+        "api.preflight",
+        "discord.nick:Ana | 001",
+        "api.step.nickname",
+        "discord.role.add",
+        "api.step.role",
+        "discord.role.remove",
+        "discord.nick:Antes",
+        "api.release",
+    ]
+    assert member.nick == "Antes"
+    assert member.roles == []
+    assert api.release_payload == {"compensated": True, "error_code": "RuntimeError"}
+
+
+def test_panel_recovery_activates_registration_after_visual_reconciliation(monkeypatch) -> None:
+    events: list[str] = []
+
+    async def reconcile(_self, **kwargs):
+        assert kwargs["module_key"] == "registration"
+        assert kwargs["panel_key"] == "public"
+        events.append("panel.reconciled")
+
+    class FakeAPI:
+        async def registration_config(self, guild_id):
+            assert guild_id == 100
+            return {
+                "version": 3,
+                "data": {"panel_channel_id": "200", "enabled": True},
+            }
+
+        async def module_instance(self, guild_id, module_key):
+            assert (guild_id, module_key) == (100, "registration")
+            return {"lifecycle": "inactive"}
+
+        async def update_lifecycle(
+            self, guild_id, module_key, *, lifecycle, expected_lifecycle, actor, reason
+        ):
+            assert (guild_id, module_key) == (100, "registration")
+            assert lifecycle == "active"
+            assert expected_lifecycle == "inactive"
+            assert actor.actor_type == "system"
+            assert reason
+            events.append("lifecycle.active")
+
+    monkeypatch.setattr(registration_ui.PanelPublisher, "reconcile", reconcile)
+    guild = SimpleNamespace(id=100)
+    bot = SimpleNamespace(
+        user=SimpleNamespace(id=999),
+        get_guild=lambda guild_id: guild if guild_id == 100 else None,
+    )
+    result = asyncio.run(
+        registration_ui.run_job(
+            bot,
+            FakeAPI(),
+            {
+                "guild_id": "100",
+                "key": "registration.panel.reconcile",
+                "correlation_id": "panel-recovery",
+            },
+        )
+    )
+
+    assert events == ["panel.reconciled", "lifecycle.active"]
+    assert result == {"changed": True, "panel_key": "public", "activated": True}

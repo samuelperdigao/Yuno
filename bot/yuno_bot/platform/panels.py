@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import discord
 
-from yuno_bot.platform.contracts import ActorContext
+from yuno_bot.platform.components_v2 import edit_message as edit_v2_message
+from yuno_bot.platform.components_v2 import send_message as send_v2_message
+from yuno_bot.platform.contracts import ActorContext, ComponentsV2Payload
 from yuno_bot.platform.registry import UIRegistry, ui_registry
 
 
@@ -60,13 +62,15 @@ class PanelPublisher:
                 "panel": panel,
                 "resource_type": resource_type,
                 "resource_id": resource_id,
+                "api": self.api,
+                "bot": self.bot,
                 **(render_context or {}),
             }
         )
 
         old_message = await self._resolve_existing_message(guild, panel)
         if old_message is not None and old_message.channel.id == channel.id:
-            await old_message.edit(**payload)
+            await self._edit_rendered(old_message, payload)
             return await self._update(
                 guild.id,
                 panel,
@@ -78,6 +82,7 @@ class PanelPublisher:
                 message_id=str(old_message.id),
                 verified=True,
                 last_error=None,
+                config_version=(render_context or {}).get("config_version"),
             )
 
         if (
@@ -105,7 +110,7 @@ class PanelPublisher:
                 state="ready",
                 last_error=None,
             )
-        new_message = await channel.send(**payload)
+        new_message = await self._send_rendered(channel, payload)
         try:
             updated = await self._update(
                 guild.id,
@@ -118,6 +123,7 @@ class PanelPublisher:
                 message_id=str(new_message.id),
                 verified=True,
                 last_error=None,
+                config_version=(render_context or {}).get("config_version"),
             )
         except Exception:
             await self._delete_if_owned(new_message)
@@ -176,3 +182,15 @@ class PanelPublisher:
                 await message.delete()
             except discord.HTTPException:
                 pass
+
+    async def _edit_rendered(self, message: discord.Message, payload) -> None:
+        if isinstance(payload, ComponentsV2Payload):
+            await edit_v2_message(self.bot, message.channel.id, message.id, payload.data)
+            return
+        await message.edit(**payload)
+
+    async def _send_rendered(self, channel, payload) -> discord.Message:
+        if isinstance(payload, ComponentsV2Payload):
+            message_id = await send_v2_message(self.bot, channel.id, payload.data)
+            return await channel.fetch_message(message_id)
+        return await channel.send(**payload)

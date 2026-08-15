@@ -12,6 +12,7 @@ from app.api.platform import (
     modules,
     panels,
     permissions,
+    registration,
     tenancy,
 )
 
@@ -29,6 +30,7 @@ for child in (
     migrations.router,
     diagnostics.router,
     farm.router,
+    registration.router,
     audits.router,
 ):
     router.include_router(child)

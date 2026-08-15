@@ -100,8 +100,9 @@ def test_platform_api_revalidates_actor_and_tenant() -> None:
         with TestClient(app) as client:
             manifest = client.get("/internal/platform/manifest", headers=headers)
             assert manifest.status_code == 200
-            assert [item["key"] for item in manifest.json()["modules"]] == ["api_test"]
-            assert manifest.json()["modules"][0]["configuration"]["schema_version"] == 1
+            modules = {item["key"]: item for item in manifest.json()["modules"]}
+            assert "api_test" in modules
+            assert modules["api_test"]["configuration"]["schema_version"] == 1
 
             draft = client.get(
                 "/internal/platform/guilds/guild-a/modules/api_test/configuration/draft",

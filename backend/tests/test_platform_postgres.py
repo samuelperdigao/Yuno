@@ -8,6 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -22,6 +23,9 @@ from app.platform.contracts import JobDefinition, ModuleDefinition, ModuleManife
 from app.platform.lifecycle import ensure_module_instance, update_lifecycle  # noqa: E402
 from app.platform.models import ModuleLifecycle  # noqa: E402
 from app.platform.registry import module_registry  # noqa: E402
+from app.domain_modules.registration import services as registration_services  # noqa: E402
+from app.domain_modules.registration.schemas import RegistrationConfig, RegistrationSubmit  # noqa: E402
+from app.platform.models import ModuleConfigVersion, ModuleInstance, RuntimeMode  # noqa: E402
 
 
 POSTGRES_URL = os.getenv("YUNO_TEST_POSTGRES_URL")
@@ -100,6 +104,111 @@ def test_postgres_claim_is_exclusive_between_workers() -> None:
             assert len(first) + len(second) == 1
         finally:
             module_registry.unregister("pg_claim_test")
+            await engine.dispose()
+            async with admin_engine.begin() as connection:
+                await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+            await admin_engine.dispose()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.skipif(
+    not POSTGRES_URL,
+    reason="Defina YUNO_TEST_POSTGRES_URL para validar indices parciais do Registro.",
+)
+def test_postgres_registration_partial_indexes_and_concurrent_approvers() -> None:
+    async def scenario() -> None:
+        assert POSTGRES_URL is not None
+        schema = f"yuno_registration_test_{uuid4().hex}"
+        admin_engine = create_async_engine(POSTGRES_URL)
+        async with admin_engine.begin() as connection:
+            await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        engine = create_async_engine(
+            POSTGRES_URL,
+            connect_args={"server_settings": {"search_path": schema}},
+        )
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with sessions() as session:
+                instance = ModuleInstance(
+                    guild_id="registration-guild",
+                    module_key="registration",
+                    lifecycle=ModuleLifecycle.active,
+                    runtime_mode=RuntimeMode.domain,
+                    contract_version=1,
+                    domain_version="2.0.0",
+                )
+                session.add(instance)
+                await session.flush()
+                version = ModuleConfigVersion(
+                    module_instance_id=instance.id,
+                    guild_id="registration-guild",
+                    module_key="registration",
+                    version=1,
+                    schema_version=1,
+                    data=RegistrationConfig(
+                        panel_channel_id="1",
+                        approval_channel_id="2",
+                        log_channel_id="3",
+                        member_role_id="4",
+                    ).model_dump(mode="json"),
+                    content_hash="b" * 64,
+                    published_by="1",
+                )
+                session.add(version)
+                await session.flush()
+                instance.published_config_version_id = version.id
+                await session.commit()
+
+            async def submit(user_id: str, player_id: str):
+                async with sessions() as session:
+                    try:
+                        return await registration_services.submit_request(
+                            session,
+                            guild_id="registration-guild",
+                            actor_id=user_id,
+                            correlation_id=f"submit-{user_id}-{uuid4()}",
+                            data=RegistrationSubmit(name=f"Membro {user_id}", player_id=player_id),
+                        )
+                    except HTTPException as exc:
+                        return exc.status_code
+
+            same_user = await asyncio.gather(submit("10", "100"), submit("10", "101"))
+            assert sum(not isinstance(value, int) for value in same_user) == 1
+            assert 409 in same_user
+
+            first, second = await asyncio.gather(submit("20", "888"), submit("21", "888"))
+            assert not isinstance(first, int) and not isinstance(second, int)
+
+            async def claim(request_id: str, actor_id: str):
+                async with sessions() as session:
+                    try:
+                        item, _ = await registration_services.claim_approval(
+                            session,
+                            guild_id="registration-guild",
+                            request_id=request_id,
+                            actor_id=actor_id,
+                            correlation_id=f"claim-{actor_id}",
+                        )
+                        return item.id
+                    except HTTPException as exc:
+                        return exc.status_code
+
+            competing_ids = await asyncio.gather(
+                claim(first.id, "900"), claim(second.id, "901")
+            )
+            assert sum(isinstance(value, str) for value in competing_ids) == 1
+            assert 409 in competing_ids
+
+            third = await submit("30", "999")
+            same_request = await asyncio.gather(
+                claim(third.id, "902"), claim(third.id, "903")
+            )
+            assert sum(isinstance(value, str) for value in same_request) == 1
+            assert 409 in same_request
+        finally:
             await engine.dispose()
             async with admin_engine.begin() as connection:
                 await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))

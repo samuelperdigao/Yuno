@@ -110,6 +110,10 @@ class ModuleSpec:
     log_channel: str | None = None
     dashboard_fields: tuple[DashboardField, ...] = field(default_factory=tuple)
     control_plane: "ControlPlaneSpec | None" = None
+    # O catalogo legado permanece apenas para preservar dados e permitir
+    # reconstrucoes domain-first. Nenhum modulo antigo volta ao runtime por
+    # simples descoberta de pacote.
+    retired: bool = True
 
     def __post_init__(self) -> None:
         if not self.key or self.key != self.key.lower().replace(" ", "_"):
@@ -234,12 +238,21 @@ def module_keys() -> tuple[str, ...]:
 
 
 def setup_channels() -> tuple[SetupChannel, ...]:
-    return tuple(canal for spec in discover_modules().values() for canal in spec.setup_channels)
+    return tuple(
+        canal
+        for spec in discover_modules().values()
+        if not spec.retired
+        for canal in spec.setup_channels
+    )
 
 
 def log_channels() -> dict[str, str]:
     """`{chave_do_modulo: nome_do_canal_de_log}` para os modulos que tem log."""
-    return {spec.key: spec.log_channel for spec in discover_modules().values() if spec.log_channel}
+    return {
+        spec.key: spec.log_channel
+        for spec in discover_modules().values()
+        if not spec.retired and spec.log_channel
+    }
 
 
 # ── Carga no boot ─────────────────────────────────────────────────────────────
@@ -255,6 +268,8 @@ async def load_modules(bot: "YunoBot") -> ModuleContext:
     context = ModuleContext(bot)
 
     for spec in discover_modules().values():
+        if spec.retired:
+            continue
         for fabrica in spec.cogs:
             try:
                 cog = fabrica(context)
@@ -264,6 +279,8 @@ async def load_modules(bot: "YunoBot") -> ModuleContext:
                 bot.log.exception("Falha ao registrar cog do modulo '%s'", spec.key)
 
     for spec in discover_modules().values():
+        if spec.retired:
+            continue
         for fabrica in spec.views:
             try:
                 bot.add_view(fabrica(context))

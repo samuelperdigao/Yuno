@@ -32,6 +32,7 @@ MODULE_UI = ModuleUIAdapter(
     icon="🌾",
     order=24,
     minimum_plan="pro",
+    released=False,
     admin_pages=(AdminPageDefinition("overview", render_admin),),
     panels=(
         PanelDefinition("public", render_public, recovery_policy="automatic"),

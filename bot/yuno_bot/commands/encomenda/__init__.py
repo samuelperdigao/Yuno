@@ -1,21 +1,12 @@
-"""Modulo de Encomendas."""
+"""Catálogo do módulo; implementação será adicionada quando ele for configurado."""
 
-from yuno_bot.commands.encomenda.cog import EncomendaCog
-from yuno_bot.commands.encomenda.views import EncomendaPanelView
-from yuno_bot.modules import DashboardField, ModuleSpec, SetupChannel
+from yuno_bot.modules import ModuleSpec
+
 
 MODULE = ModuleSpec(
     key="encomenda",
     nome="Sistema de Encomenda",
-    descricao="Registro de encomendas de produtos pelos membros.",
-    icon="\U0001F4E6",
+    descricao="",
+    icon="📦",
     ordem=50,
-    cogs=(lambda ctx: EncomendaCog(ctx.bot),),
-    views=(lambda ctx: EncomendaPanelView(ctx.api),),
-    setup_channels=(SetupChannel("encomendas", "encomendas", "operacao", ("encomenda.criar",)),),
-    log_channel="logs-encomenda",
-    dashboard_fields=(
-        DashboardField("panel_channel_id", "Canal de encomendas", "channel"),
-        DashboardField("role_ids", "Cargo autorizado", "roles", obrigatorio=False),
-    ),
 )

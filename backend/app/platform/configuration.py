@@ -106,7 +106,7 @@ async def save_draft(
         session,
         guild_id=guild_id,
         module_key=module_key,
-        action="configuration.draft_saved",
+        action=f"{module_key}.config_updated",
         resource_type="module_config_draft",
         resource_id=str(draft.id),
         actor_id=actor_id,
@@ -177,6 +177,13 @@ async def publish(
     errors = definition.configuration.validate(draft.data or {})
     if errors:
         raise HTTPException(status_code=422, detail={"detail": "Configuracao invalida.", "errors": errors})
+    if definition.permission_validator is not None:
+        permission_errors = definition.permission_validator(draft.data or {}, grants)
+        if permission_errors:
+            raise HTTPException(
+                status_code=422,
+                detail={"detail": "Permissoes publicadas invalidas.", "errors": permission_errors},
+            )
 
     version = ModuleConfigVersion(
         module_instance_id=instance.id,
@@ -207,7 +214,11 @@ async def publish(
         session,
         guild_id=guild_id,
         module_key=module_key,
-        action="configuration.published" if source_version is None else "configuration.rolled_back",
+        action=(
+            f"{module_key}.config_published"
+            if source_version is None
+            else f"{module_key}.config_rolled_back"
+        ),
         resource_type="module_config_version",
         resource_id=str(version.id),
         actor_id=actor_id,

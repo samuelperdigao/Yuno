@@ -6,6 +6,7 @@ from types import ModuleType
 
 from yuno_bot.platform.contracts import (
     ActionDefinition,
+    AdminActionDefinition,
     DeliveryRendererDefinition,
     JobHandlerDefinition,
     ModuleUIAdapter,
@@ -41,6 +42,12 @@ class UIRegistry:
             None,
         )
 
+    def admin_action(self, module_key: str, action_key: str) -> AdminActionDefinition | None:
+        adapter = self.get(module_key)
+        if adapter is None:
+            return None
+        return next((item for item in adapter.admin_actions if item.key == action_key), None)
+
     def panel(self, module_key: str, panel_key: str) -> PanelDefinition | None:
         adapter = self.get(module_key)
         return next((item for item in adapter.panels if item.key == panel_key), None) if adapter else None
@@ -65,6 +72,8 @@ class UIRegistry:
                 raise TypeError(f"{imported.__name__}.MODULE_UI deve ser ModuleUIAdapter.")
             if adapter.module_key != info.name:
                 raise ValueError("A pasta do adapter UI deve ter a mesma chave do modulo.")
+            if not adapter.released:
+                continue
             if self.get(adapter.module_key) is adapter:
                 continue
             self.register(adapter)
@@ -73,6 +82,7 @@ class UIRegistry:
     def _validate(adapter: ModuleUIAdapter) -> None:
         groups = {
             "pagina": [item.key for item in adapter.admin_pages],
+            "acao administrativa": [item.key for item in adapter.admin_actions],
             "painel": [item.key for item in adapter.panels],
             "acao": [(item.surface, item.key) for item in adapter.actions],
             "job": [item.key for item in adapter.jobs],

@@ -300,3 +300,4 @@ class FarmTicketAction(Base):
 # conceitos com os modelos legados deste arquivo.
 from app.platform import models as platform_models  # noqa: E402,F401
 from app.domain_modules.farm import models as farm_domain_models  # noqa: E402,F401
+from app.domain_modules.registration import models as registration_domain_models  # noqa: E402,F401

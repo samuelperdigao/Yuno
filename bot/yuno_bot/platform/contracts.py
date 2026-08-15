@@ -56,14 +56,27 @@ ActionHandler = Callable[[RoutedContext], Awaitable[InteractionResult]]
 ResourceOwnerResolver = Callable[[discord.Interaction, dict[str, Any], Any], Awaitable[str | None]]
 JobHandler = Callable[[discord.Client, Any, dict[str, Any]], Awaitable[dict[str, Any]]]
 DeliveryHandler = Callable[[discord.Client, dict[str, Any]], Awaitable[str | None]]
-PanelRenderer = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+@dataclass(frozen=True)
+class ComponentsV2Payload:
+    data: dict[str, Any]
+
+
+RenderedMessage = dict[str, Any] | ComponentsV2Payload
+PanelRenderer = Callable[[dict[str, Any]], Awaitable[RenderedMessage]]
 AdminPageRenderer = Callable[[discord.Interaction, Any], Awaitable[None]]
+AdminActionHandler = Callable[[discord.Interaction, Any], Awaitable[None]]
 
 
 @dataclass(frozen=True)
 class AdminPageDefinition:
     key: str
     renderer: AdminPageRenderer
+
+
+@dataclass(frozen=True)
+class AdminActionDefinition:
+    key: str
+    handler: AdminActionHandler
 
 
 @dataclass(frozen=True)
@@ -105,7 +118,9 @@ class ModuleUIAdapter:
     icon: str = "\u2699\ufe0f"
     order: int = 100
     minimum_plan: str = "basico"
+    released: bool = True
     admin_pages: tuple[AdminPageDefinition, ...] = ()
+    admin_actions: tuple[AdminActionDefinition, ...] = ()
     panels: tuple[PanelDefinition, ...] = ()
     actions: tuple[ActionDefinition, ...] = ()
     jobs: tuple[JobHandlerDefinition, ...] = ()

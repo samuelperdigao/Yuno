@@ -1,21 +1,12 @@
-"""Modulo de Producao."""
+"""Catálogo do módulo; implementação será adicionada quando ele for configurado."""
 
-from yuno_bot.commands.producao.cog import ProducaoCog
-from yuno_bot.commands.producao.views import ProducaoPanelView
-from yuno_bot.modules import DashboardField, ModuleSpec, SetupChannel
+from yuno_bot.modules import ModuleSpec
+
 
 MODULE = ModuleSpec(
     key="producao",
-    nome="Sistema de Producao",
-    descricao="Registro da producao de itens pelos membros.",
-    icon="\U0001F3ED",
+    nome="Sistema de Produção",
+    descricao="",
+    icon="🏭",
     ordem=80,
-    cogs=(lambda ctx: ProducaoCog(ctx.bot),),
-    views=(lambda ctx: ProducaoPanelView(ctx.api),),
-    setup_channels=(SetupChannel("producao", "producao", "operacao", ("producao.registrar",)),),
-    log_channel="logs-producao",
-    dashboard_fields=(
-        DashboardField("panel_channel_id", "Canal de producao", "channel"),
-        DashboardField("role_ids", "Cargo autorizado", "roles", obrigatorio=False),
-    ),
 )

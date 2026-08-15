@@ -50,9 +50,14 @@ def test_bot_e_backend_declaram_os_mesmos_modulos(registry):
     assert set(registry) == set(_backend_modules())
 
 
-def test_modulos_tem_pelo_menos_um_cog(registry):
-    sem_cog = [key for key, spec in registry.items() if not spec.cogs]
-    assert not sem_cog, f"Modulos sem cog registrado: {sem_cog}"
+def test_modulos_estao_sem_cogs_ate_configuracao_individual(registry):
+    assert all(not spec.cogs for spec in registry.values())
+
+
+def test_catalogo_legado_fica_aposentado_e_nao_recria_estrutura(registry):
+    assert all(spec.retired for spec in registry.values())
+    assert server_setup.setup_channels() == server_setup.CORE_CHANNELS
+    assert server_setup.log_channels() == {}
 
 
 def test_command_keys_usam_o_prefixo_do_proprio_modulo(registry):
@@ -123,18 +128,8 @@ def views(registry):
     return asyncio.run(_construir_views(registry))
 
 
-def test_fabricas_de_view_constroem_sem_erro(views):
-    """Toda view persistente e reconstruida a cada boot.
-
-    Se uma fabrica quebra, os botoes do painel morrem no servidor do cliente no
-    primeiro deploy e a falha so aparece quando alguem clica.
-    """
-    assert views, "Nenhuma view foi construida; o registry provavelmente nao descobriu os modulos."
-    for key, view in views:
-        assert view.timeout is None, (
-            f"View de '{key}' tem timeout. View de painel fixo precisa de timeout=None, "
-            f"senao para de responder depois de alguns minutos."
-        )
+def test_modulos_estao_sem_views_ate_configuracao_individual(views):
+    assert views == []
 
 
 def test_views_persistentes_tem_custom_id_estavel(views):

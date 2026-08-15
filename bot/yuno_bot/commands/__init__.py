@@ -1,1 +1,1 @@
-"""Slash command modules for Yuno."""
+"""Catálogo das funções exibidas no painel do Yuno."""

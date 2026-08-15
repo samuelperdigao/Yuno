@@ -16,7 +16,10 @@ from dataclasses import dataclass
 import discord
 
 from yuno_bot import modules, server_setup
-from yuno_bot.commands.shared import YUNO_GREEN, YUNO_ORANGE, YUNO_RED
+
+YUNO_GREEN = 0x2ECC71
+YUNO_ORANGE = 0xF39C12
+YUNO_RED = 0xE74C3C
 
 LIMITE_CAMPO = 1000  # embed field aceita 1024; a folga cobre o sufixo de corte
 

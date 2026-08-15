@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(ROOT / "bot"))
 
 import app.models  # noqa: E402,F401 -- registra legado e plataforma no Base
+from app.domain_modules.farm.definition import MODULE_DEFINITION as FARM_DEFINITION  # noqa: E402
 from app.api.platform.dependencies import require_platform_admin  # noqa: E402
 from app.db import Base  # noqa: E402
 from app.platform.audit import write_audit  # noqa: E402
@@ -71,6 +72,7 @@ from app.platform.schemas import ActorContextIn, PermissionGrantIn  # noqa: E402
 from yuno_bot.platform.registry import UIRegistry, discover_ui_modules, verify_backend_manifest  # noqa: E402
 from yuno_bot.platform.contracts import ModuleUIAdapter  # noqa: E402
 from yuno_bot.platform.router import custom_id, parse_custom_id  # noqa: E402
+from yuno_bot.domain_modules.farm import MODULE_UI as FARM_UI  # noqa: E402
 
 
 class SyntheticMigration:
@@ -138,15 +140,16 @@ def synthetic_definition() -> ModuleDefinition:
 
 def test_new_registry_discovers_only_domain_first_modules() -> None:
     definitions = discover_domain_modules().all()
-    assert [item.manifest.key for item in definitions] == ["farm"]
+    assert [item.manifest.key for item in definitions] == ["registration"]
     adapters = discover_ui_modules().all()
-    assert [item.module_key for item in adapters] == ["farm"]
-    assert {item.key for item in adapters[0].panels} == {"public", "ticket", "review"}
-    assert {item.key for item in adapters[0].jobs} == {
-        "farm.cycle.start",
-        "farm.cycle.begin_closing",
-        "farm.cycle.finish_closing",
-        "farm.panel.reconcile",
+    assert [item.module_key for item in adapters] == ["registration"]
+    by_key = {item.module_key: item for item in adapters}
+    assert FARM_DEFINITION.manifest.released is False
+    assert FARM_UI.released is False
+    assert {item.key for item in by_key["registration"].panels} == {"public", "review"}
+    assert {item.key for item in by_key["registration"].jobs} == {
+        "registration.processing.recover",
+        "registration.panel.reconcile",
     }
     legacy_keys = {
         "farm_tickets", "meta", "set", "ticket", "ausencia", "parceria", "producao"

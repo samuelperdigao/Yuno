@@ -190,6 +190,15 @@ class PlatformAPIClient:
             "POST", "/automation/tasks/claim", json={"worker_id": worker_id, "limit": limit, "lease_seconds": 60}
         )
 
+    async def schedule_task(
+        self, guild_id: int, module_key: str, payload: dict
+    ) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/{module_key}/automation/tasks",
+            json=payload,
+        )
+
     async def complete_task(self, item: dict, worker_id: str, result: dict) -> dict:
         return await self._request(
             "POST",
@@ -221,6 +230,149 @@ class PlatformAPIClient:
             "POST",
             f"/guilds/{item['guild_id']}/deliveries/{item['id']}/fail",
             json={"worker_id": worker_id, "error": error},
+        )
+
+    async def registration_config(self, guild_id: int) -> dict:
+        return await self._request("GET", f"/guilds/{guild_id}/modules/registration/config")
+
+    async def registration_submit(
+        self,
+        guild_id: int,
+        registration: dict,
+        *,
+        actor: Any,
+        panel_config_version: int | None = None,
+    ) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/registration/requests",
+            json={
+                "actor": actor.as_payload(),
+                "registration": registration,
+                "panel_config_version": panel_config_version,
+            },
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def registration_request(self, guild_id: int, request_id: str) -> dict:
+        return await self._request(
+            "GET", f"/guilds/{guild_id}/modules/registration/requests/{request_id}"
+        )
+
+    async def registration_claim(
+        self, guild_id: int, request_id: str, *, actor: Any, operation_token: str | None = None
+    ) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/registration/requests/{request_id}/approval/claim",
+            json={"actor": actor.as_payload(), "operation_token": operation_token},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def registration_preflight(
+        self, guild_id: int, request_id: str, payload: dict, *, actor: Any
+    ) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/registration/requests/{request_id}/approval/preflight",
+            json={"actor": actor.as_payload(), **payload},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def registration_step(
+        self, guild_id: int, request_id: str, operation_token: str, step: str, *, actor: Any
+    ) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/registration/requests/{request_id}/approval/step",
+            json={"actor": actor.as_payload(), "operation_token": operation_token, "step": step},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def registration_complete(
+        self, guild_id: int, request_id: str, operation_token: str, *, actor: Any
+    ) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/registration/requests/{request_id}/approval/complete",
+            json={"actor": actor.as_payload(), "operation_token": operation_token},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def registration_release(
+        self,
+        guild_id: int,
+        request_id: str,
+        operation_token: str,
+        *,
+        actor: Any,
+        compensated: bool,
+        error_code: str,
+    ) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/registration/requests/{request_id}/approval/release",
+            json={
+                "actor": actor.as_payload(),
+                "operation_token": operation_token,
+                "compensated": compensated,
+                "error_code": error_code,
+            },
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def registration_reject(
+        self, guild_id: int, request_id: str, reason: str, *, actor: Any
+    ) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/registration/requests/{request_id}/reject",
+            json={"actor": actor.as_payload(), "reason": reason},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def registration_attach_review_message(
+        self,
+        guild_id: int,
+        request_id: str,
+        channel_id: int,
+        message_id: int,
+        *,
+        actor: Any,
+    ) -> dict:
+        return await self._request(
+            "PATCH",
+            f"/guilds/{guild_id}/modules/registration/requests/{request_id}/review-message",
+            json={
+                "actor": actor.as_payload(),
+                "channel_id": str(channel_id),
+                "message_id": str(message_id),
+            },
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def registration_stale(self, guild_id: int) -> list[dict]:
+        return await self._request(
+            "GET", f"/guilds/{guild_id}/modules/registration/recovery/stale"
+        )
+
+    async def registration_deactivate_member(
+        self, guild_id: int, discord_user_id: int, *, actor: Any
+    ) -> dict | None:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/registration/members/{discord_user_id}/deactivate",
+            json={"actor": actor.as_payload()},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
         )
 
     async def farm_products(self, guild_id: int) -> list[dict]:

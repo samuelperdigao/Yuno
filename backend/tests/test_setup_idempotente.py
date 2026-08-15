@@ -120,13 +120,13 @@ def test_canal_renomeado_pelo_cliente_continua_sendo_o_mesmo():
     primeira = asyncio.run(server_setup.ensure_setup_channels(guild, {}))
     config = _config_de(guild, primeira)
 
-    metas = primeira.channels["metas"]
-    metas.name = "metas-da-familia"
+    painel = primeira.channels["painel"]
+    painel.name = "central-da-familia"
     total_antes = len(guild.text_channels)
 
     segunda = asyncio.run(server_setup.ensure_setup_channels(guild, config))
 
-    assert segunda.channels["metas"].id == metas.id
+    assert segunda.channels["painel"].id == painel.id
     assert len(guild.text_channels) == total_antes, "criou canal duplicado apos rename"
 
 
@@ -136,24 +136,24 @@ def test_canal_movido_de_categoria_nao_e_movido_de_volta():
     primeira = asyncio.run(server_setup.ensure_setup_channels(guild, {}))
     config = _config_de(guild, primeira)
 
-    metas = primeira.channels["metas"]
-    metas.category_id = 123456  # cliente arrastou para outra categoria
+    painel = primeira.channels["painel"]
+    painel.category_id = 123456  # cliente arrastou para outra categoria
 
     asyncio.run(server_setup.ensure_setup_channels(guild, config))
 
-    metas.edit.assert_not_called()
-    assert metas.category_id == 123456
+    painel.edit.assert_not_called()
+    assert painel.category_id == 123456
 
 
 def test_adota_canal_de_mesmo_nome_quando_nao_ha_id_salvo():
     """Servidor configurado antes desta versao migra sem duplicar nada."""
-    existente = _texto(555, "metas-semanais")
+    existente = _texto(555, "yuno-painel")
     guild = FakeGuild(canais=[existente])
 
     resultado = asyncio.run(server_setup.ensure_setup_channels(guild, {}))
 
-    assert resultado.channels["metas"].id == 555
-    assert "#metas-semanais" in resultado.adopted
+    assert resultado.channels["painel"].id == 555
+    assert "#yuno-painel" in resultado.adopted
 
 
 def test_canal_apagado_pelo_cliente_e_recriado():
@@ -161,13 +161,13 @@ def test_canal_apagado_pelo_cliente_e_recriado():
     primeira = asyncio.run(server_setup.ensure_setup_channels(guild, {}))
     config = _config_de(guild, primeira)
 
-    metas = primeira.channels["metas"]
-    guild.text_channels.remove(metas)
+    painel = primeira.channels["painel"]
+    guild.text_channels.remove(painel)
 
     segunda = asyncio.run(server_setup.ensure_setup_channels(guild, config))
 
-    assert segunda.channels["metas"].id != metas.id
-    assert "#metas-semanais" in segunda.created
+    assert segunda.channels["painel"].id != painel.id
+    assert "#yuno-painel" in segunda.created
 
 
 def test_modulo_desligado_pelo_cliente_permanece_desligado():
@@ -225,7 +225,7 @@ def test_diagnostico_sem_licenca_nunca_esta_pronto():
 
 def test_diagnostico_aponta_canal_apagado():
     guild, config = _guild_configurado()
-    apagado = guild.get_channel(int(config["settings"]["discord_setup"]["channel_ids"]["metas"]))
+    apagado = guild.get_channel(int(config["settings"]["discord_setup"]["channel_ids"]["painel"]))
     guild.text_channels.remove(apagado)
 
     relatorio = diagnostics.diagnose(guild, config, licenca_ativa=True)

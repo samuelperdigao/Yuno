@@ -106,6 +106,8 @@ class ModuleRegistry:
                 raise ValueError(
                     f"Modulo '{definition.manifest.key}' deve usar uma pasta com a mesma chave."
                 )
+            if not definition.manifest.released:
+                continue
             if self.get(definition.manifest.key) is definition:
                 continue
             if self.get(definition.manifest.key) is not None:

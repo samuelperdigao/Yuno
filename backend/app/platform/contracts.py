@@ -49,6 +49,7 @@ class ConfigurationField:
 
 
 ConfigValidator = Callable[[dict[str, Any]], list[str]]
+PermissionValidator = Callable[[dict[str, Any], list[Any]], list[str]]
 
 
 @dataclass(frozen=True)
@@ -164,6 +165,7 @@ class ModuleManifest:
     provided_resources: tuple[str, ...] = ()
     runtime_modes: tuple[str, ...] = ("legacy",)
     default_runtime_mode: str = "legacy"
+    released: bool = True
 
 
 @dataclass(frozen=True)
@@ -239,6 +241,7 @@ class ModuleDefinition:
     notifications: tuple[NotificationDefinition, ...] = ()
     health_checks: tuple[HealthContributor, ...] = ()
     migration: MigrationContract | None = None
+    permission_validator: PermissionValidator | None = None
 
     def capability(self, key: str) -> CapabilityDefinition | None:
         return next((item for item in self.capabilities if item.key == key), None)
