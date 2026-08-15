@@ -149,9 +149,9 @@ def _panel_color_options(current: str | None) -> list[dict[str, Any]]:
 
 def _discord_ref(value: Any, *, kind: str) -> str:
     if not value:
-        return "⚪ Não definido"
+        return "*Não configurado*"
     prefix = "#" if kind == "channel" else "@&"
-    return f"✅ <{prefix}{value}>"
+    return f"<{prefix}{value}>"
 
 
 async def render_public(context: dict) -> ComponentsV2Payload:
@@ -460,48 +460,56 @@ async def _admin_state(api: Any, guild_id: int) -> tuple[dict, dict]:
     )
 
 
+def build_admin_payload(instance: dict, draft: dict) -> dict[str, Any]:
+    published = int(draft["base_published_version"] or 0)
+    config = draft["data"]
+    is_active = published > 0 and instance["lifecycle"] == "active"
+    action_label = "Configurar Registro"
+    if is_active:
+        status = f"🟢 **Ativo** · versão `{published}`"
+        status_detail = "O painel está disponível para os membros."
+    elif published:
+        status = f"🟠 **Desativado** · versão `{published}`"
+        status_detail = "A configuração está publicada, mas o módulo não está atendendo membros."
+    else:
+        status = "⚪ **Ainda não publicado**"
+        status_detail = "Conclua as etapas e publique quando estiver pronto."
+
+    approver_count = len(config["approver_role_ids"])
+    approver_label = "cargo configurado" if approver_count == 1 else "cargos configurados"
+    return payload(
+        container(
+            text_display(
+                "# Registro\n\n"
+                "Formulário, análise e aprovação de novos membros da organização."
+            ),
+            separator(spacing=1),
+            text_display(f"### Status\n{status}\n{status_detail}"),
+            separator(spacing=1),
+            text_display(
+                "### Fluxo atual\n"
+                f"**Painel dos membros** — {_discord_ref(config['panel_channel_id'], kind='channel')}\n"
+                f"**Fila de análise** — {_discord_ref(config['approval_channel_id'], kind='channel')}\n"
+                f"**Cargo após aprovação** — {_discord_ref(config['member_role_id'], kind='role')}\n"
+                f"**Equipe aprovadora** — {approver_count} {approver_label}"
+            ),
+            separator(spacing=1, divider=False),
+            action_row(
+                button(
+                    custom_id=dashboard.central_custom_id("registration", "open_system"),
+                    label=action_label,
+                    style=2,
+                )
+            ),
+            accent_color=COLOR,
+        )
+    )
+
+
 async def render_admin(interaction: discord.Interaction, api: Any) -> None:
     try:
         instance, draft = await _admin_state(api, interaction.guild_id)
-        published = int(draft["base_published_version"] or 0)
-        config = draft["data"]
-        is_active = published > 0 and instance["lifecycle"] == "active"
-        action_label = "Editar configuração" if published else "Começar configuração"
-        if is_active:
-            status = f"🟢 **Publicado · versão {published}**"
-        elif published:
-            status = f"🟠 **Publicado, mas desativado · versão {published}**"
-        else:
-            status = "⚪ **Ainda não publicado**"
-        guidance = (
-            "O painel de registro está disponível para os membros."
-            if is_active
-            else "Defina canais, cargos e mensagens. Nada será publicado sem sua confirmação."
-        )
-        data = payload(
-            container(
-                text_display(
-                    "# 📝 Registro\n\n"
-                    "Recebe nome e ID, envia para análise e, após a aprovação, "
-                    "ajusta o apelido e entrega o cargo configurado.\n\n"
-                    f"{status}\n{guidance}\n\n"
-                    f"📍 Painel público: {_discord_ref(config['panel_channel_id'], kind='channel')}\n"
-                    f"🔎 Análises: {_discord_ref(config['approval_channel_id'], kind='channel')}\n"
-                    f"🎭 Cargo entregue: {_discord_ref(config['member_role_id'], kind='role')}\n"
-                    f"👥 Equipe responsável: **{len(config['approver_role_ids'])} cargo(s)**"
-                ),
-                separator(),
-                action_row(
-                    button(
-                        custom_id=dashboard.central_custom_id("registration", "open_system"),
-                        label=action_label,
-                        emoji="✏️",
-                    )
-                ),
-                accent_color=COLOR,
-            )
-        )
-        await _replace_central(interaction, data)
+        await _replace_central(interaction, build_admin_payload(instance, draft))
     except Exception as exc:
         if interaction.response.is_done():
             await interaction.followup.send(error_text(exc), ephemeral=True)

@@ -334,9 +334,38 @@ def test_unpublished_admin_summary_hides_internal_state(monkeypatch) -> None:
 
     asyncio.run(registration_ui.render_admin(SimpleNamespace(guild_id=100), object()))
 
-    content = captured["components"][0]["components"][0]["content"]
-    button_label = captured["components"][0]["components"][2]["components"][0]["label"]
+    children = captured["components"][0]["components"]
+    content = "\n".join(item["content"] for item in children if item["type"] == 10)
+    action = next(item for item in children if item["type"] == 1)
+    button_data = action["components"][0]
     assert "Ainda não publicado" in content
     assert "lifecycle" not in content.lower()
     assert "rascunho" not in content.lower()
-    assert button_label == "Começar configuração"
+    assert button_data["label"] == "Configurar Registro"
+    assert button_data["style"] == 2
+    assert "emoji" not in button_data
+
+
+def test_published_admin_summary_has_clean_visual_hierarchy() -> None:
+    data = registration_ui.build_admin_payload(
+        {"lifecycle": "active"},
+        {
+            "base_published_version": 2,
+            "data": {
+                "panel_channel_id": "10",
+                "approval_channel_id": "20",
+                "member_role_id": "30",
+                "approver_role_ids": ["40"],
+            },
+        },
+    )
+    children = data["components"][0]["components"]
+    content = "\n".join(item["content"] for item in children if item["type"] == 10)
+
+    assert content.startswith("# Registro")
+    assert "### Status" in content
+    assert "### Fluxo atual" in content
+    assert "<#10>" in content
+    assert "<#20>" in content
+    assert "<@&30>" in content
+    assert not {"📍", "🔎", "🎭", "👥", "✅"}.intersection(content)
