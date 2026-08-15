@@ -31,6 +31,16 @@ def test_registration_normalization_preserves_leading_zeroes_and_name_case() -> 
         validate_player_id("١٢٣", numeric_only=True, min_length=1, max_length=16)
 
 
+def test_alphanumeric_player_id_accepts_only_ascii_letters_and_numbers() -> None:
+    assert (
+        validate_player_id(" AbC１２３ ", numeric_only=False, min_length=1, max_length=16)
+        == "abc123"
+    )
+    for invalid in ("ABC-123", "ABC_123", "ABC 123", "ABC!", "ç123"):
+        with pytest.raises(RegistrationDomainError, match="A a Z"):
+            validate_player_id(invalid, numeric_only=False, min_length=1, max_length=16)
+
+
 @pytest.mark.parametrize(
     "template",
     ("", "nickname fixo", "{unknown}", "{name.__class__}", "{name:>20}", "{{name}}"),

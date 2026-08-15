@@ -81,6 +81,10 @@ def validate_player_id(
         )
     if numeric_only and not re.fullmatch(r"[0-9]+", normalized):
         raise RegistrationDomainError("O ID deve conter apenas numeros ASCII de 0 a 9.")
+    if not numeric_only and not re.fullmatch(r"[a-z0-9]+", normalized):
+        raise RegistrationDomainError(
+            "O ID deve conter apenas letras de A a Z e numeros de 0 a 9."
+        )
     return normalized
 
 

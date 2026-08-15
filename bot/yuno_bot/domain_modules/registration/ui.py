@@ -147,6 +147,81 @@ def _panel_color_options(current: str | None) -> list[dict[str, Any]]:
     ]
 
 
+def _id_format_options(numeric_only: bool) -> list[dict[str, Any]]:
+    return [
+        {
+            "label": "Somente números",
+            "value": "numeric",
+            "description": "Aceita apenas 0–9. Exemplo: 12345",
+            "default": numeric_only,
+        },
+        {
+            "label": "Letras e números",
+            "value": "alphanumeric",
+            "description": "Aceita A–Z e 0–9. Exemplo: ABC123",
+            "default": not numeric_only,
+        },
+    ]
+
+
+def _resubmit_policy_options(allowed: bool) -> list[dict[str, Any]]:
+    return [
+        {
+            "label": "Permitir novo envio",
+            "value": "allow",
+            "description": "O membro pode corrigir os dados e tentar novamente",
+            "default": allowed,
+        },
+        {
+            "label": "Bloquear novo envio",
+            "value": "block",
+            "description": "O membro não pode enviar outra solicitação",
+            "default": not allowed,
+        },
+    ]
+
+
+def _rules_section_components(config: dict[str, Any]) -> list[dict[str, Any]]:
+    numeric_only = bool(config["player_id_numeric_only"])
+    resubmit_allowed = bool(config["allow_resubmit_after_rejection"])
+    id_format = "Somente números (0–9)" if numeric_only else "Letras (A–Z) e números (0–9)"
+    id_example = "12345" if numeric_only else "ABC123"
+    resubmit_label = "Permitido" if resubmit_allowed else "Bloqueado"
+
+    return [
+        text_display(
+            "## ⚙️ 3 · Regras do formulário\n\n"
+            "Estas são duas regras independentes. Escolha uma opção em cada campo.\n\n"
+            f"**Formato atual do ID:** {id_format}\n"
+            f"**Exemplo aceito:** `{id_example}`\n"
+            "Espaços, acentos e símbolos não são aceitos no ID.\n\n"
+            f"**Novo envio após rejeição:** {resubmit_label}\n"
+            f"**Limites:** ID com {config['player_id_min_length']}–{config['player_id_max_length']} caracteres; "
+            f"nome com {config['name_min_length']}–{config['name_max_length']} caracteres."
+        ),
+        text_display("### 1. Quais caracteres o ID pode ter?"),
+        action_row(
+            string_select(
+                custom_id=dashboard.central_custom_id("registration", "set_id_format"),
+                options=_id_format_options(numeric_only),
+                placeholder="Escolha o formato do ID",
+            )
+        ),
+        text_display("### 2. O membro pode tentar novamente após uma rejeição?"),
+        action_row(
+            string_select(
+                custom_id=dashboard.central_custom_id("registration", "set_resubmit_policy"),
+                options=_resubmit_policy_options(resubmit_allowed),
+                placeholder="Escolha a regra de novo envio",
+            )
+        ),
+        action_row(
+            button(custom_id=dashboard.central_custom_id("registration", "edit_rules"), label="Editar limites", emoji="✏️", style=2),
+            button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="Revisar e publicar", emoji="👁️", style=1),
+        ),
+    ]
+
+
 def _discord_ref(value: Any, *, kind: str) -> str:
     if not value:
         return "*Não configurado*"
@@ -571,36 +646,7 @@ async def _render_section(
             ]
         )
     elif section == "rules":
-        components.extend(
-            [
-                text_display(
-                    "## ⚙️ 3 · Regras do formulário\n\n"
-                    "Escolha como o nome e o ID serão aceitos.\n\n"
-                    f"ID: **{'somente números' if config['player_id_numeric_only'] else 'letras e números'}**\n"
-                    f"Tamanho do ID: **{config['player_id_min_length']} a {config['player_id_max_length']} caracteres**\n"
-                    f"Tamanho do nome: **{config['name_min_length']} a {config['name_max_length']} caracteres**\n"
-                    f"Novo envio após rejeição: **{'permitido' if config['allow_resubmit_after_rejection'] else 'bloqueado'}**"
-                ),
-                action_row(
-                    string_select(
-                        custom_id=dashboard.central_custom_id("registration", "set_flags"),
-                        options=[
-                            {"label": "ID: somente números", "value": "numeric_on", "emoji": {"name": "🔢"}},
-                            {"label": "ID: letras e números", "value": "numeric_off", "emoji": {"name": "🔤"}},
-                            {"label": "Reenvio: permitir", "value": "resubmit_on", "emoji": {"name": "✅"}},
-                            {"label": "Reenvio: bloquear", "value": "resubmit_off", "emoji": {"name": "⛔"}},
-                        ],
-                        placeholder="Alterar validação e reenvio",
-                        min_values=1,
-                        max_values=2,
-                    )
-                ),
-                action_row(
-                    button(custom_id=dashboard.central_custom_id("registration", "edit_rules"), label="Editar limites", emoji="✏️", style=2),
-                    button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="Revisar e publicar", emoji="👁️", style=1),
-                ),
-            ]
-        )
+        components.extend(_rules_section_components(config))
     elif section == "panel":
         components.extend(
             [
@@ -743,6 +789,34 @@ async def set_flags(interaction: discord.Interaction, api: Any) -> None:
         patch["allow_resubmit_after_rejection"] = False
     await _defer_if_needed(interaction)
     await _save_patch(interaction, api, patch)
+    await _render_section(interaction, api, "rules")
+
+
+async def set_id_format(interaction: discord.Interaction, api: Any) -> None:
+    values = _selected_ids(interaction)
+    if len(values) != 1 or values[0] not in {"numeric", "alphanumeric"}:
+        await _send_interaction_error(interaction, "Escolha um formato de ID válido.")
+        return
+    await _defer_if_needed(interaction)
+    await _save_patch(
+        interaction,
+        api,
+        {"player_id_numeric_only": values[0] == "numeric"},
+    )
+    await _render_section(interaction, api, "rules")
+
+
+async def set_resubmit_policy(interaction: discord.Interaction, api: Any) -> None:
+    values = _selected_ids(interaction)
+    if len(values) != 1 or values[0] not in {"allow", "block"}:
+        await _send_interaction_error(interaction, "Escolha uma regra de novo envio válida.")
+        return
+    await _defer_if_needed(interaction)
+    await _save_patch(
+        interaction,
+        api,
+        {"allow_resubmit_after_rejection": values[0] == "allow"},
+    )
     await _render_section(interaction, api, "rules")
 
 

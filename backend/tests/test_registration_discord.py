@@ -275,6 +275,78 @@ def test_panel_color_is_selected_by_name_and_not_typed_as_hex() -> None:
     )
 
 
+def test_registration_rules_use_two_clear_single_choice_selects() -> None:
+    numeric = registration_ui._id_format_options(True)
+    alphanumeric = registration_ui._id_format_options(False)
+    allow = registration_ui._resubmit_policy_options(True)
+    block = registration_ui._resubmit_policy_options(False)
+
+    assert [item["value"] for item in numeric] == ["numeric", "alphanumeric"]
+    assert [item["default"] for item in numeric] == [True, False]
+    assert [item["default"] for item in alphanumeric] == [False, True]
+    assert "12345" in numeric[0]["description"]
+    assert "ABC123" in numeric[1]["description"]
+    assert [item["value"] for item in allow] == ["allow", "block"]
+    assert [item["default"] for item in allow] == [True, False]
+    assert [item["default"] for item in block] == [False, True]
+
+    components = registration_ui._rules_section_components(
+        {
+            "player_id_numeric_only": True,
+            "allow_resubmit_after_rejection": True,
+            "player_id_min_length": 1,
+            "player_id_max_length": 16,
+            "name_min_length": 2,
+            "name_max_length": 24,
+        }
+    )
+    selects = [
+        row["components"][0]
+        for row in components
+        if row["type"] == 1 and row["components"][0]["type"] == 3
+    ]
+    assert [select["custom_id"].rsplit(":", 1)[-1] for select in selects] == [
+        "set_id_format",
+        "set_resubmit_policy",
+    ]
+    assert all(select["min_values"] == select["max_values"] == 1 for select in selects)
+
+
+def test_registration_rule_handlers_change_only_the_selected_rule(monkeypatch) -> None:
+    saved: list[dict] = []
+    rendered: list[str] = []
+
+    async def defer(_interaction) -> None:
+        return None
+
+    async def save(_interaction, _api, patch: dict) -> None:
+        saved.append(patch)
+
+    async def render(_interaction, _api, section: str) -> None:
+        rendered.append(section)
+
+    monkeypatch.setattr(registration_ui, "_defer_if_needed", defer)
+    monkeypatch.setattr(registration_ui, "_save_patch", save)
+    monkeypatch.setattr(registration_ui, "_render_section", render)
+
+    asyncio.run(
+        registration_ui.set_id_format(
+            SimpleNamespace(data={"values": ["alphanumeric"]}), object()
+        )
+    )
+    asyncio.run(
+        registration_ui.set_resubmit_policy(
+            SimpleNamespace(data={"values": ["block"]}), object()
+        )
+    )
+
+    assert saved == [
+        {"player_id_numeric_only": False},
+        {"allow_resubmit_after_rejection": False},
+    ]
+    assert rendered == ["rules", "rules"]
+
+
 def test_central_replacement_acknowledges_silently_without_receipt(monkeypatch) -> None:
     calls: list[tuple] = []
 
