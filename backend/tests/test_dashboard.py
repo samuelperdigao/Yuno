@@ -62,7 +62,7 @@ class _FakeResponse:
         return self.deferred
 
     async def defer(self, **kwargs) -> None:
-        assert kwargs == {"ephemeral": True, "thinking": True}
+        assert kwargs == {}
         self.deferred = True
 
 

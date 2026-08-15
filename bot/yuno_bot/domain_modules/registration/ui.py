@@ -31,6 +31,17 @@ from yuno_bot.platform.router import RoutedModal, custom_id
 
 
 COLOR = 0xFFC72C
+PANEL_COLOR_CHOICES = (
+    ("Amarelo Yuno", "🟡", "#FFC72C"),
+    ("Vermelho", "🔴", "#ED4245"),
+    ("Azul", "🔵", "#5865F2"),
+    ("Verde", "🟢", "#57F287"),
+    ("Roxo", "🟣", "#9B59B6"),
+    ("Rosa", "🌸", "#EB459E"),
+    ("Laranja", "🟠", "#E67E22"),
+    ("Branco", "⚪", "#FFFFFF"),
+    ("Cinza", "⚙️", "#95A5A6"),
+)
 PROTECTED_ROLE_PERMISSIONS = (
     "administrator",
     "manage_guild",
@@ -107,11 +118,40 @@ def _selected_ids(interaction: discord.Interaction) -> list[str]:
     return [str(value) for value in ((interaction.data or {}).get("values") or [])]
 
 
-def _hex_color(value: str) -> int:
+def _hex_color(value: str | None) -> int:
     try:
         return int(value.lstrip("#"), 16)
     except (TypeError, ValueError):
         return COLOR
+
+
+def _panel_color_label(value: str | None) -> str:
+    normalized = str(value or "").upper()
+    for label, emoji, hex_value in PANEL_COLOR_CHOICES:
+        if hex_value == normalized:
+            return f"{emoji} {label}"
+    return "🟡 Amarelo Yuno"
+
+
+def _panel_color_options(current: str | None) -> list[dict[str, Any]]:
+    normalized = str(current or "").upper()
+    return [
+        {
+            "label": label,
+            "value": hex_value,
+            "emoji": {"name": emoji},
+            "description": f"Destaque {label.lower()} para o painel",
+            "default": hex_value == normalized,
+        }
+        for label, emoji, hex_value in PANEL_COLOR_CHOICES
+    ]
+
+
+def _discord_ref(value: Any, *, kind: str) -> str:
+    if not value:
+        return "⚪ Não definido"
+    prefix = "#" if kind == "channel" else "@&"
+    return f"✅ <{prefix}{value}>"
 
 
 async def render_public(context: dict) -> ComponentsV2Payload:
@@ -371,30 +411,17 @@ async def submit_rejection(context: RoutedContext) -> InteractionResult:
         return InteractionResult(content=error_text(exc))
 
 
-def _module_select() -> dict[str, Any]:
-    return string_select(
-        custom_id=dashboard.central_custom_id("core", "select_module"),
-        options=[
-            {
-                "label": spec.nome[:100],
-                "value": spec.key,
-                "emoji": {"name": spec.icon},
-            }
-            for spec in dashboard.dashboard_specs().values()
-        ],
-        placeholder="Trocar de modulo",
-    )
-
-
 def _section_select() -> dict[str, Any]:
     return string_select(
         custom_id=dashboard.central_custom_id("registration", "section"),
         options=[
-            {"label": "Sistema", "value": "system", "emoji": {"name": "⚙️"}},
-            {"label": "Painel publico", "value": "panel", "emoji": {"name": "🪧"}},
-            {"label": "Mensagens", "value": "messages", "emoji": {"name": "💬"}},
+            {"label": "1 · Canais", "value": "channels", "emoji": {"name": "📍"}},
+            {"label": "2 · Equipe e cargo", "value": "team", "emoji": {"name": "👥"}},
+            {"label": "3 · Regras do formulário", "value": "rules", "emoji": {"name": "⚙️"}},
+            {"label": "4 · Aparência do painel", "value": "panel", "emoji": {"name": "🎨"}},
+            {"label": "5 · Mensagens", "value": "messages", "emoji": {"name": "💬"}},
         ],
-        placeholder="Navegar no Registro",
+        placeholder="Selecione uma etapa do Registro",
     )
 
 
@@ -404,26 +431,24 @@ async def _replace_central(
     *,
     channel_id: int | None = None,
     message_id: int | None = None,
-    notice: str = "Central atualizada.",
 ) -> None:
     if not interaction.response.is_done():
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer()
     target_channel = channel_id or interaction.channel_id
     target_message = message_id or getattr(interaction.message, "id", None)
     if target_channel is None or target_message is None:
         raise RuntimeError("Referencia da Central indisponivel.")
     await edit_message(interaction.client, target_channel, target_message, data)
-    await interaction.edit_original_response(content=notice)
 
 
 async def _defer_if_needed(interaction: discord.Interaction) -> None:
     if not interaction.response.is_done():
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer()
 
 
 async def _send_interaction_error(interaction: discord.Interaction, message: str) -> None:
     if interaction.response.is_done():
-        await interaction.edit_original_response(content=message)
+        await interaction.followup.send(message, ephemeral=True)
     else:
         await interaction.response.send_message(message, ephemeral=True)
 
@@ -439,14 +464,31 @@ async def render_admin(interaction: discord.Interaction, api: Any) -> None:
     try:
         instance, draft = await _admin_state(api, interaction.guild_id)
         published = int(draft["base_published_version"] or 0)
-        action_label = "Editar" if published else "Configurar"
+        config = draft["data"]
+        is_active = published > 0 and instance["lifecycle"] == "active"
+        action_label = "Editar configuração" if published else "Começar configuração"
+        if is_active:
+            status = f"🟢 **Publicado · versão {published}**"
+        elif published:
+            status = f"🟠 **Publicado, mas desativado · versão {published}**"
+        else:
+            status = "⚪ **Ainda não publicado**"
+        guidance = (
+            "O painel de registro está disponível para os membros."
+            if is_active
+            else "Defina canais, cargos e mensagens. Nada será publicado sem sua confirmação."
+        )
         data = payload(
             container(
                 text_display(
                     "# 📝 Registro\n\n"
-                    f"Lifecycle: **{instance['lifecycle']}**\n"
-                    f"Configuracao publicada: **{published or 'nao'}**\n"
-                    f"Rascunho: **r{draft['revision']}**"
+                    "Recebe nome e ID, envia para análise e, após a aprovação, "
+                    "ajusta o apelido e entrega o cargo configurado.\n\n"
+                    f"{status}\n{guidance}\n\n"
+                    f"📍 Painel público: {_discord_ref(config['panel_channel_id'], kind='channel')}\n"
+                    f"🔎 Análises: {_discord_ref(config['approval_channel_id'], kind='channel')}\n"
+                    f"🎭 Cargo entregue: {_discord_ref(config['member_role_id'], kind='role')}\n"
+                    f"👥 Equipe responsável: **{len(config['approver_role_ids'])} cargo(s)**"
                 ),
                 separator(),
                 action_row(
@@ -456,14 +498,13 @@ async def render_admin(interaction: discord.Interaction, api: Any) -> None:
                         emoji="✏️",
                     )
                 ),
-                action_row(_module_select()),
                 accent_color=COLOR,
             )
         )
-        await _replace_central(interaction, data, notice="Modulo Registro aberto.")
+        await _replace_central(interaction, data)
     except Exception as exc:
         if interaction.response.is_done():
-            await interaction.edit_original_response(content=error_text(exc))
+            await interaction.followup.send(error_text(exc), ephemeral=True)
         else:
             await interaction.response.send_message(error_text(exc), ephemeral=True)
 
@@ -475,49 +516,80 @@ async def _render_section(
     *,
     channel_id: int | None = None,
     message_id: int | None = None,
-    notice: str = "Secao atualizada.",
 ) -> None:
+    if section == "system":
+        section = "channels"
     _, draft = await _admin_state(api, interaction.guild_id)
     config = draft["data"]
     components: list[dict[str, Any]] = [
-        text_display(f"# Registro · {section.title()}\n\nRascunho **r{draft['revision']}**"),
+        text_display("# 📝 Registro\n\nConfigure uma etapa por vez. As alterações só entram no painel público depois da sua confirmação."),
         action_row(_section_select()),
+        separator(),
     ]
-    if section == "system":
-        approvers = ", ".join(f"<@&{value}>" for value in config["approver_role_ids"]) or "nenhum"
+    if section == "channels":
         components.extend(
             [
                 text_display(
-                    f"**Painel:** <#{config['panel_channel_id']}>\n"
-                    f"**Analise:** <#{config['approval_channel_id']}>\n"
-                    f"**Logs:** <#{config['log_channel_id']}>\n"
-                    f"**Cargo entregue:** <@&{config['member_role_id']}>\n"
-                    f"**Aprovadores:** {approvers}\n"
-                    f"**Nickname:** `{config['nickname_template']}`"
+                    "## 📍 1 · Canais\n\n"
+                    "Escolha onde o painel será publicado e onde a equipe trabalhará.\n\n"
+                    f"Painel público: {_discord_ref(config['panel_channel_id'], kind='channel')}\n"
+                    f"Análise: {_discord_ref(config['approval_channel_id'], kind='channel')}\n"
+                    f"Logs: {_discord_ref(config['log_channel_id'], kind='channel')}"
                 ),
-                action_row(channel_select(custom_id=dashboard.central_custom_id("registration", "set_panel_channel"), placeholder="Canal do painel publico", channel_types=[0])),
-                action_row(channel_select(custom_id=dashboard.central_custom_id("registration", "set_approval_channel"), placeholder="Canal de analise", channel_types=[0])),
-                action_row(channel_select(custom_id=dashboard.central_custom_id("registration", "set_log_channel"), placeholder="Canal de logs", channel_types=[0])),
-                action_row(role_select(custom_id=dashboard.central_custom_id("registration", "set_member_role"), placeholder="Cargo entregue")),
-                action_row(role_select(custom_id=dashboard.central_custom_id("registration", "add_approvers"), placeholder="Adicionar aprovadores (lote)", max_values=25)),
-                action_row(role_select(custom_id=dashboard.central_custom_id("registration", "remove_approvers"), placeholder="Remover aprovadores (lote)", max_values=25)),
+                action_row(channel_select(custom_id=dashboard.central_custom_id("registration", "set_panel_channel"), placeholder="Publicar o painel de registro em…", channel_types=[0])),
+                action_row(channel_select(custom_id=dashboard.central_custom_id("registration", "set_approval_channel"), placeholder="Receber solicitações para análise em…", channel_types=[0])),
+                action_row(channel_select(custom_id=dashboard.central_custom_id("registration", "set_log_channel"), placeholder="Enviar histórico e logs em…", channel_types=[0])),
+                action_row(button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="Revisar e publicar", emoji="👁️", style=1)),
+            ]
+        )
+    elif section == "team":
+        approvers = ", ".join(f"<@&{value}>" for value in config["approver_role_ids"]) or "⚪ Nenhum definido"
+        components.extend(
+            [
+                text_display(
+                    "## 👥 2 · Equipe e cargo\n\n"
+                    "Defina quem analisa os pedidos e o que o membro recebe ao ser aprovado.\n\n"
+                    f"Cargo entregue: {_discord_ref(config['member_role_id'], kind='role')}\n"
+                    f"Equipe responsável: {approvers}\n"
+                    f"Formato do apelido: `{config['nickname_template']}`"
+                ),
+                action_row(role_select(custom_id=dashboard.central_custom_id("registration", "set_member_role"), placeholder="Cargo entregue ao membro aprovado")),
+                action_row(role_select(custom_id=dashboard.central_custom_id("registration", "add_approvers"), placeholder="Adicionar cargos aprovadores", max_values=25)),
+                action_row(role_select(custom_id=dashboard.central_custom_id("registration", "remove_approvers"), placeholder="Remover cargos aprovadores", max_values=25)),
+                action_row(
+                    button(custom_id=dashboard.central_custom_id("registration", "edit_team"), label="Editar formato do apelido", emoji="✏️", style=2),
+                    button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="Revisar e publicar", emoji="👁️", style=1),
+                ),
+            ]
+        )
+    elif section == "rules":
+        components.extend(
+            [
+                text_display(
+                    "## ⚙️ 3 · Regras do formulário\n\n"
+                    "Escolha como o nome e o ID serão aceitos.\n\n"
+                    f"ID: **{'somente números' if config['player_id_numeric_only'] else 'letras e números'}**\n"
+                    f"Tamanho do ID: **{config['player_id_min_length']} a {config['player_id_max_length']} caracteres**\n"
+                    f"Tamanho do nome: **{config['name_min_length']} a {config['name_max_length']} caracteres**\n"
+                    f"Novo envio após rejeição: **{'permitido' if config['allow_resubmit_after_rejection'] else 'bloqueado'}**"
+                ),
                 action_row(
                     string_select(
                         custom_id=dashboard.central_custom_id("registration", "set_flags"),
                         options=[
-                            {"label": "ID numerico", "value": "numeric_on"},
-                            {"label": "ID alfanumerico", "value": "numeric_off"},
-                            {"label": "Permitir reenvio", "value": "resubmit_on"},
-                            {"label": "Bloquear reenvio", "value": "resubmit_off"},
+                            {"label": "ID: somente números", "value": "numeric_on", "emoji": {"name": "🔢"}},
+                            {"label": "ID: letras e números", "value": "numeric_off", "emoji": {"name": "🔤"}},
+                            {"label": "Reenvio: permitir", "value": "resubmit_on", "emoji": {"name": "✅"}},
+                            {"label": "Reenvio: bloquear", "value": "resubmit_off", "emoji": {"name": "⛔"}},
                         ],
-                        placeholder="Validacao e reenvio",
+                        placeholder="Alterar validação e reenvio",
                         min_values=1,
                         max_values=2,
                     )
                 ),
                 action_row(
-                    button(custom_id=dashboard.central_custom_id("registration", "edit_system"), label="Editar regras", emoji="✏️", style=2),
-                    button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="Revisar publicacao", emoji="👁️", style=1),
+                    button(custom_id=dashboard.central_custom_id("registration", "edit_rules"), label="Editar limites", emoji="✏️", style=2),
+                    button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="Revisar e publicar", emoji="👁️", style=1),
                 ),
             ]
         )
@@ -525,44 +597,57 @@ async def _render_section(
         components.extend(
             [
                 text_display(
-                    f"## {config['panel_title']}\n\n{config['panel_description']}\n\n"
-                    f"Botao: {config['button_emoji']} {config['button_label']}\n"
-                    f"Cor: `{config['panel_color']}`"
+                    "## 🎨 4 · Aparência do painel\n\n"
+                    "**Prévia do conteúdo**\n"
+                    f"### {config['panel_title']}\n{config['panel_description']}\n\n"
+                    f"{config['panel_instructions']}\n\n"
+                    f"Botão: **{config['button_emoji']} {config['button_label']}**\n"
+                    f"Cor do destaque: **{_panel_color_label(config['panel_color'])}**"
                 ),
-                action_row(button(custom_id=dashboard.central_custom_id("registration", "edit_panel"), label="Editar painel", emoji="✏️", style=2)),
-                action_row(button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="Revisar publicacao", emoji="👁️", style=1)),
+                action_row(
+                    string_select(
+                        custom_id=dashboard.central_custom_id("registration", "set_panel_color"),
+                        options=_panel_color_options(config["panel_color"]),
+                        placeholder="Escolha a cor do destaque",
+                    )
+                ),
+                action_row(
+                    button(custom_id=dashboard.central_custom_id("registration", "edit_panel"), label="Editar textos do painel", emoji="✏️", style=2),
+                    button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="Revisar e publicar", emoji="👁️", style=1),
+                ),
             ]
         )
     else:
         components.extend(
             [
                 text_display(
-                    f"**Enviado:** {config['submitted_message']}\n"
-                    f"**Aprovado:** {config['approved_message']}\n"
-                    f"**Rejeitado:** {config['rejected_message']}"
+                    "## 💬 5 · Mensagens\n\n"
+                    f"**Solicitação enviada**\n{config['submitted_message']}\n\n"
+                    f"**Registro aprovado**\n{config['approved_message']}\n\n"
+                    f"**Registro rejeitado**\n{config['rejected_message']}"
                 ),
-                action_row(button(custom_id=dashboard.central_custom_id("registration", "edit_messages"), label="Editar decisoes", emoji="✏️", style=2)),
-                action_row(button(custom_id=dashboard.central_custom_id("registration", "edit_errors"), label="Editar alertas", emoji="⚠️", style=2)),
-                action_row(button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="Revisar publicacao", emoji="👁️", style=1)),
+                action_row(
+                    button(custom_id=dashboard.central_custom_id("registration", "edit_messages"), label="Editar respostas", emoji="✏️", style=2),
+                    button(custom_id=dashboard.central_custom_id("registration", "edit_errors"), label="Editar avisos", emoji="⚠️", style=2),
+                ),
+                action_row(button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="Revisar e publicar", emoji="👁️", style=1)),
             ]
         )
-    components.append(action_row(_module_select()))
     await _replace_central(
         interaction,
         payload(container(*components, accent_color=COLOR)),
         channel_id=channel_id,
         message_id=message_id,
-        notice=notice,
     )
 
 
 async def open_system(interaction: discord.Interaction, api: Any) -> None:
-    await _render_section(interaction, api, "system")
+    await _render_section(interaction, api, "channels")
 
 
 async def section(interaction: discord.Interaction, api: Any) -> None:
     values = _selected_ids(interaction)
-    await _render_section(interaction, api, values[0] if values else "system")
+    await _render_section(interaction, api, values[0] if values else "channels")
 
 
 async def _save_patch(interaction: discord.Interaction, api: Any, patch: dict[str, Any]) -> dict:
@@ -581,30 +666,32 @@ async def _save_patch(interaction: discord.Interaction, api: Any, patch: dict[st
     )
 
 
-async def _set_selected(interaction: discord.Interaction, api: Any, field: str) -> None:
+async def _set_selected(
+    interaction: discord.Interaction, api: Any, field: str, *, section_name: str
+) -> None:
     values = _selected_ids(interaction)
     if not values:
         await _send_interaction_error(interaction, "Selecione um valor.")
         return
     await _defer_if_needed(interaction)
     await _save_patch(interaction, api, {field: values[0]})
-    await _render_section(interaction, api, "system", notice="Destino atualizado.")
+    await _render_section(interaction, api, section_name)
 
 
 async def set_panel_channel(interaction, api):
-    await _set_selected(interaction, api, "panel_channel_id")
+    await _set_selected(interaction, api, "panel_channel_id", section_name="channels")
 
 
 async def set_approval_channel(interaction, api):
-    await _set_selected(interaction, api, "approval_channel_id")
+    await _set_selected(interaction, api, "approval_channel_id", section_name="channels")
 
 
 async def set_log_channel(interaction, api):
-    await _set_selected(interaction, api, "log_channel_id")
+    await _set_selected(interaction, api, "log_channel_id", section_name="channels")
 
 
 async def set_member_role(interaction, api):
-    await _set_selected(interaction, api, "member_role_id")
+    await _set_selected(interaction, api, "member_role_id", section_name="team")
 
 
 async def _change_approvers(interaction: discord.Interaction, api: Any, *, remove: bool) -> None:
@@ -618,7 +705,7 @@ async def _change_approvers(interaction: discord.Interaction, api: Any, *, remov
     else:
         updated = list(dict.fromkeys([*current, *values]))
     await _save_patch(interaction, api, {"approver_role_ids": updated})
-    await _render_section(interaction, api, "system", notice="Aprovadores atualizados.")
+    await _render_section(interaction, api, "team")
 
 
 async def add_approvers(interaction, api):
@@ -648,12 +735,26 @@ async def set_flags(interaction: discord.Interaction, api: Any) -> None:
         patch["allow_resubmit_after_rejection"] = False
     await _defer_if_needed(interaction)
     await _save_patch(interaction, api, patch)
-    await _render_section(interaction, api, "system", notice="Regras atualizadas.")
+    await _render_section(interaction, api, "rules")
+
+
+async def set_panel_color(interaction: discord.Interaction, api: Any) -> None:
+    values = _selected_ids(interaction)
+    allowed = {hex_value for _, _, hex_value in PANEL_COLOR_CHOICES}
+    selected = values[0].upper() if values else ""
+    if selected not in allowed:
+        await _send_interaction_error(interaction, "Escolha uma das cores disponíveis.")
+        return
+    await _defer_if_needed(interaction)
+    await _save_patch(interaction, api, {"panel_color": selected})
+    await _render_section(interaction, api, "panel")
 
 
 CONFIG_MODAL_FIELDS: dict[str, tuple[tuple[str, str, str], ...]] = {
-    "system": (
+    "team": (
         ("nickname_template", "Template de nickname", "{name} | {id}"),
+    ),
+    "rules": (
         ("player_id_min_length", "Minimo do ID", "1"),
         ("player_id_max_length", "Maximo do ID", "16"),
         ("name_min_length", "Minimo do nome", "2"),
@@ -664,7 +765,7 @@ CONFIG_MODAL_FIELDS: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("panel_description", "Descricao", ""),
         ("panel_instructions", "Instrucoes", ""),
         ("button_label", "Texto do botao", "Fazer meu registro"),
-        ("panel_color", "Cor #RRGGBB", "#FFC72C"),
+        ("panel_banner_url", "URL do banner (opcional)", ""),
     ),
     "messages": (
         ("submitted_message", "Enviado", ""),
@@ -677,8 +778,6 @@ CONFIG_MODAL_FIELDS: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("already_registered_message", "Ja registrado", ""),
         ("duplicate_id_message", "ID duplicado", ""),
         ("resubmit_not_allowed_message", "Reenvio bloqueado", ""),
-        ("panel_banner_url", "URL do banner (opcional)", ""),
-        ("panel_thumbnail_url", "URL da miniatura (opcional)", ""),
     ),
 }
 
@@ -700,22 +799,24 @@ class AdminConfigModal(discord.ui.Modal):
                     default=current or None,
                     placeholder=placeholder or None,
                     max_length=2000 if style == discord.TextStyle.paragraph else 120,
-                    required=key not in {"panel_banner_url", "panel_thumbnail_url"},
+                    required=key != "panel_banner_url",
                     style=style,
                 )
             )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True, thinking=True)
         values: dict[str, Any] = _modal_values(interaction)
         for key in ("player_id_min_length", "player_id_max_length", "name_min_length", "name_max_length"):
             if key in values:
                 try:
                     values[key] = int(values[key])
                 except ValueError:
-                    await interaction.edit_original_response(content=f"{key} deve ser numero inteiro.")
+                    await interaction.response.send_message(
+                        "Os limites de nome e ID devem usar somente números.", ephemeral=True
+                    )
                     return
         try:
+            await interaction.response.defer()
             await _save_patch(interaction, self.api, values)
             section_name = "messages" if self.group in {"messages", "errors"} else self.group
             await _render_section(
@@ -724,10 +825,9 @@ class AdminConfigModal(discord.ui.Modal):
                 section_name,
                 channel_id=self.central_channel_id,
                 message_id=self.central_message_id,
-                notice="Rascunho salvo.",
             )
         except Exception as exc:
-            await interaction.edit_original_response(content=error_text(exc))
+            await _send_interaction_error(interaction, error_text(exc))
 
 
 async def _open_config_modal(interaction: discord.Interaction, api: Any, group: str) -> None:
@@ -744,7 +844,15 @@ async def _open_config_modal(interaction: discord.Interaction, api: Any, group: 
 
 
 async def edit_system(interaction, api):
-    await _open_config_modal(interaction, api, "system")
+    await _open_config_modal(interaction, api, "rules")
+
+
+async def edit_team(interaction, api):
+    await _open_config_modal(interaction, api, "team")
+
+
+async def edit_rules(interaction, api):
+    await _open_config_modal(interaction, api, "rules")
 
 
 async def edit_panel(interaction, api):
@@ -792,11 +900,13 @@ async def _preflight(guild: discord.Guild, config: dict) -> list[str]:
 
 
 async def review_publish(interaction: discord.Interaction, api: Any) -> None:
-    await interaction.response.defer(ephemeral=True, thinking=True)
+    await _defer_if_needed(interaction)
     draft = await api.configuration_draft(interaction.guild_id, "registration")
     errors = await _preflight(interaction.guild, draft["data"])
     if errors:
-        await interaction.edit_original_response(content="Publicacao bloqueada:\n- " + "\n- ".join(errors))
+        await _send_interaction_error(
+            interaction, "Publicação bloqueada:\n- " + "\n- ".join(errors)
+        )
         return
     config = draft["data"]
     data = payload(
@@ -817,16 +927,18 @@ async def review_publish(interaction: discord.Interaction, api: Any) -> None:
             accent_color=COLOR,
         )
     )
-    await _replace_central(interaction, data, notice="Revisao pronta para confirmacao.")
+    await _replace_central(interaction, data)
 
 
 async def confirm_publish(interaction: discord.Interaction, api: Any) -> None:
-    await interaction.response.defer(ephemeral=True, thinking=True)
+    await _defer_if_needed(interaction)
     actor = actor_from(interaction)
     draft = await api.configuration_draft(interaction.guild_id, "registration")
     errors = await _preflight(interaction.guild, draft["data"])
     if errors:
-        await interaction.edit_original_response(content="Publicacao bloqueada:\n- " + "\n- ".join(errors))
+        await _send_interaction_error(
+            interaction, "Publicação bloqueada:\n- " + "\n- ".join(errors)
+        )
         return
     grants = [
         {
@@ -888,8 +1000,9 @@ async def confirm_publish(interaction: discord.Interaction, api: Any) -> None:
                     "max_attempts": 5,
                 },
             )
-            await interaction.edit_original_response(
+            await interaction.followup.send(
                 content="Versao publicada, mas o painel visual ficou na versao anterior. A reconciliacao foi enfileirada."
+                , ephemeral=True
             )
             return
         if instance["lifecycle"] != "active":
@@ -902,11 +1015,11 @@ async def confirm_publish(interaction: discord.Interaction, api: Any) -> None:
                 reason=None,
             )
         await render_admin(interaction, api)
-        await interaction.edit_original_response(
-            content=f"Registro publicado na versao {version['version']} e painel reconciliado."
+        await interaction.followup.send(
+            f"Registro publicado na versão {version['version']}.", ephemeral=True
         )
     except Exception as exc:
-        await interaction.edit_original_response(content=error_text(exc))
+        await _send_interaction_error(interaction, error_text(exc))
 
 
 async def deliver_review(bot: discord.Client, item: dict) -> str | None:

@@ -259,7 +259,7 @@ async def _acknowledge_select(interaction: discord.Interaction) -> None:
     """Acknowledge Components V2 selects before any API round-trip."""
 
     if not interaction.response.is_done():
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer()
 
 
 async def dispatch_components_v2(interaction: discord.Interaction) -> bool:

@@ -238,3 +238,105 @@ def test_panel_recovery_activates_registration_after_visual_reconciliation(monke
 
     assert events == ["panel.reconciled", "lifecycle.active"]
     assert result == {"changed": True, "panel_key": "public", "activated": True}
+
+
+def test_registration_admin_uses_five_clear_configuration_steps() -> None:
+    selector = registration_ui._section_select()
+    options = selector["options"]
+
+    assert [item["value"] for item in options] == [
+        "channels",
+        "team",
+        "rules",
+        "panel",
+        "messages",
+    ]
+    assert [item["label"] for item in options] == [
+        "1 · Canais",
+        "2 · Equipe e cargo",
+        "3 · Regras do formulário",
+        "4 · Aparência do painel",
+        "5 · Mensagens",
+    ]
+
+
+def test_panel_color_is_selected_by_name_and_not_typed_as_hex() -> None:
+    options = registration_ui._panel_color_options("#ED4245")
+    labels = {item["label"] for item in options}
+
+    assert {"Amarelo Yuno", "Vermelho", "Branco"} <= labels
+    assert next(item for item in options if item["label"] == "Vermelho")["default"] is True
+    assert all(field[0] != "panel_color" for field in registration_ui.CONFIG_MODAL_FIELDS["panel"])
+    assert any(field[0] == "panel_banner_url" for field in registration_ui.CONFIG_MODAL_FIELDS["panel"])
+    assert all(
+        field[0] != "panel_thumbnail_url"
+        for fields in registration_ui.CONFIG_MODAL_FIELDS.values()
+        for field in fields
+    )
+
+
+def test_central_replacement_acknowledges_silently_without_receipt(monkeypatch) -> None:
+    calls: list[tuple] = []
+
+    class SilentResponse:
+        done = False
+
+        def is_done(self) -> bool:
+            return self.done
+
+        async def defer(self, **kwargs) -> None:
+            calls.append(("defer", kwargs))
+            self.done = True
+
+    async def edit_message(bot, channel_id, message_id, data) -> None:
+        calls.append(("edit", bot, channel_id, message_id, data))
+
+    monkeypatch.setattr(registration_ui, "edit_message", edit_message)
+    interaction = SimpleNamespace(
+        response=SilentResponse(),
+        client="bot",
+        channel_id=10,
+        message=SimpleNamespace(id=20),
+    )
+
+    asyncio.run(registration_ui._replace_central(interaction, {"components": []}))
+
+    assert calls == [
+        ("defer", {}),
+        ("edit", "bot", 10, 20, {"components": []}),
+    ]
+
+
+def test_unpublished_admin_summary_hides_internal_state(monkeypatch) -> None:
+    captured: dict = {}
+
+    async def admin_state(api, guild_id):
+        del api, guild_id
+        return (
+            {"lifecycle": "inactive"},
+            {
+                "base_published_version": None,
+                "data": {
+                    "panel_channel_id": "",
+                    "approval_channel_id": "",
+                    "member_role_id": "",
+                    "approver_role_ids": [],
+                },
+            },
+        )
+
+    async def replace_central(interaction, data, **kwargs):
+        del interaction, kwargs
+        captured.update(data)
+
+    monkeypatch.setattr(registration_ui, "_admin_state", admin_state)
+    monkeypatch.setattr(registration_ui, "_replace_central", replace_central)
+
+    asyncio.run(registration_ui.render_admin(SimpleNamespace(guild_id=100), object()))
+
+    content = captured["components"][0]["components"][0]["content"]
+    button_label = captured["components"][0]["components"][2]["components"][0]["label"]
+    assert "Ainda não publicado" in content
+    assert "lifecycle" not in content.lower()
+    assert "rascunho" not in content.lower()
+    assert button_label == "Começar configuração"
