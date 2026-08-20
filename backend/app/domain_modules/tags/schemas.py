@@ -90,6 +90,7 @@ class TagSyncFailIn(BaseModel):
 class TagSyncRunCreateIn(BaseModel):
     mode: TagSyncRunMode = TagSyncRunMode.effective
     reason: str = Field(default="manual", min_length=1, max_length=80)
+    supersede_active: bool = False
     actor: ActorContextIn
 
 

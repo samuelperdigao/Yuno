@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -562,6 +562,45 @@ def test_global_run_pages_only_active_identities_and_cancels_unstarted_items() -
                     session, guild_id="100", run_id=sync_run.id
                 )
                 assert finalized.status == TagSyncRunStatus.cancelled
+
+                replacement = await services.create_sync_run(
+                    session,
+                    guild_id="100",
+                    mode=TagSyncRunMode.effective,
+                    reason="manual_retry",
+                    actor_id="900",
+                    correlation_id="run-replacement",
+                )
+                cleanup_run = await services.create_sync_run(
+                    session,
+                    guild_id="100",
+                    mode=TagSyncRunMode.base_only,
+                    reason="cleanup",
+                    actor_id="900",
+                    correlation_id="cleanup-supersede",
+                    supersede_active=True,
+                )
+                await session.refresh(replacement)
+                assert replacement.status == TagSyncRunStatus.cancelled
+                assert replacement.cancel_requested_at is not None
+                assert cleanup_run.mode == TagSyncRunMode.base_only
+
+                planned_cleanup = await services.plan_sync_run_batch(
+                    session, guild_id="100", run_id=cleanup_run.id
+                )
+                assert planned_cleanup.status == TagSyncRunStatus.running
+                await session.execute(
+                    update(TagSyncRunItem)
+                    .where(TagSyncRunItem.run_id == cleanup_run.id)
+                    .values(state=TagSyncState.skipped, result_code="already_correct")
+                )
+                await session.commit()
+                completed_cleanup = await services.finalize_sync_run(
+                    session, guild_id="100", run_id=cleanup_run.id
+                )
+                assert completed_cleanup.status == TagSyncRunStatus.completed
+                await session.refresh(tags_instance)
+                assert tags_instance.lifecycle == ModuleLifecycle.inactive
         finally:
             await engine.dispose()
 

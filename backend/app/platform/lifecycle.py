@@ -163,5 +163,6 @@ async def update_lifecycle(
             reason="activated",
             actor_id=actor_id,
             correlation_id=correlation_id,
+            supersede_active=True,
         )
     return instance

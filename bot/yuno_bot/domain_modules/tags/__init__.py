@@ -1,5 +1,6 @@
 from yuno_bot.domain_modules.tags.ui import (
     add_binding,
+    advanced,
     back,
     cancel_run,
     cleanup,
@@ -35,6 +36,7 @@ MODULE_UI = ModuleUIAdapter(
         AdminActionDefinition("page_next", page_next),
         AdminActionDefinition("back", back),
         AdminActionDefinition("add_binding", add_binding),
+        AdminActionDefinition("advanced", advanced),
         AdminActionDefinition("manage_binding", manage_binding),
         AdminActionDefinition("preview", preview),
         AdminActionDefinition("confirm_publish", confirm_publish),

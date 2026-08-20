@@ -460,6 +460,7 @@ async def create_sync_run(
     actor_id: str | None,
     correlation_id: str,
     due_at: datetime | None = None,
+    supersede_active: bool = False,
 ) -> TagSyncRun:
     instance = await _tags_instance(session, guild_id=guild_id, for_update=True)
     if (
@@ -478,11 +479,30 @@ async def create_sync_run(
     ).scalars().first()
     if active is not None:
         if active.mode != mode:
-            raise HTTPException(
-                status_code=409,
-                detail="Ja existe um run ativo com outro modo; conclua ou cancele antes.",
+            if not supersede_active:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Ja existe um run ativo com outro modo; conclua ou cancele antes.",
+                )
+            now = datetime.now(timezone.utc)
+            active.cancel_requested_at = now
+            active.status = TagSyncRunStatus.cancelled
+            active.finished_at = now
+            await session.execute(
+                update(TagSyncRunItem)
+                .where(
+                    TagSyncRunItem.run_id == active.id,
+                    TagSyncRunItem.guild_id == guild_id,
+                    TagSyncRunItem.state == TagSyncState.pending,
+                )
+                .values(
+                    state=TagSyncState.cancelled,
+                    result_code="superseded_by_request",
+                )
             )
-        return active
+            await session.flush()
+        else:
+            return active
     run = TagSyncRun(
         guild_id=guild_id,
         mode=mode,
@@ -766,6 +786,27 @@ async def finalize_sync_run(session: AsyncSession, *, guild_id: str, run_id: str
             max_attempts=None,
             commit=False,
         )
+    if (
+        run.mode == TagSyncRunMode.base_only
+        and run.status in {TagSyncRunStatus.completed, TagSyncRunStatus.completed_with_errors}
+    ):
+        instance = await _tags_instance(session, guild_id=guild_id, for_update=True)
+        if instance is not None and instance.lifecycle != ModuleLifecycle.inactive:
+            before = instance.lifecycle.value
+            instance.lifecycle = ModuleLifecycle.inactive
+            for action in ("module.lifecycle_changed", "tags.lifecycle_changed"):
+                await write_audit(
+                    session,
+                    guild_id=guild_id,
+                    module_key="tags",
+                    action=action,
+                    resource_type="module_instance",
+                    resource_id=str(instance.id),
+                    actor_type="system",
+                    before={"lifecycle": before},
+                    after={"lifecycle": ModuleLifecycle.inactive.value, "reason": "cleanup_completed"},
+                    correlation_id=run.correlation_id,
+                )
     await session.commit()
     await session.refresh(run)
     return run

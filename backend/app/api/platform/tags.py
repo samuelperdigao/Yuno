@@ -309,6 +309,7 @@ async def create_sync_run(
         guild_id=guild_id,
         mode=data.mode,
         reason=data.reason,
+        supersede_active=data.supersede_active,
         actor_id=x_yuno_actor_id if data.actor.actor_type == "user" else None,
         correlation_id=correlation,
     )

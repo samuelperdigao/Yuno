@@ -2,6 +2,7 @@ import pytest
 from types import SimpleNamespace
 
 from yuno_bot import dashboard
+from yuno_bot.domain_modules.tags import ui as tags_ui
 from yuno_bot.modules import discover_modules
 
 
@@ -48,6 +49,142 @@ def test_module_navigation_switches_between_released_modules() -> None:
     assert options["registration"]["default"] is True
     assert options["tags"]["default"] is False
     assert set(options) == {"registration", "tags"}
+
+
+def test_tags_primary_screen_keeps_only_the_simple_daily_flow() -> None:
+    data = tags_ui._detail_payload(
+        draft={
+            "bindings": [{"discord_role_id": "10", "tag": "[MEM]", "enabled": True}],
+            "base_published_version": 1,
+        },
+        lifecycle="active",
+        last_run={},
+        lines=["<@&10> → `[MEM]` · ativo"],
+        current_page=0,
+        max_page=0,
+    )
+    rows = [
+        component["components"]
+        for component in data["components"][0]["components"]
+        if component["type"] == 1
+    ]
+    buttons = {
+        item["custom_id"].rsplit(":", 1)[-1]: item
+        for row in rows
+        for item in row
+        if item["type"] == 2
+    }
+
+    assert set(buttons) == {
+        "add_binding",
+        "manage_binding",
+        "confirm_publish",
+        "cleanup",
+        "preview",
+        "advanced",
+    }
+    assert buttons["confirm_publish"]["label"] == "Confirmar e aplicar"
+    assert buttons["cleanup"]["label"] == "Limpar todas as Tags"
+    assert "page_prev" not in buttons
+    assert "toggle_lifecycle" not in buttons
+
+
+@pytest.mark.asyncio
+async def test_tags_confirm_publishes_activates_and_reconciles_everyone(monkeypatch) -> None:
+    calls = []
+
+    class API:
+        async def tags_draft_bindings(self, guild_id):
+            return {"revision": 4, "base_published_version": 2, "bindings": []}
+
+        async def publish_configuration(self, guild_id, module_key, data, *, actor):
+            calls.append(("publish", data))
+
+        async def module_instance(self, guild_id, module_key):
+            return {"lifecycle": "inactive", "published_config_version_id": 3}
+
+        async def update_lifecycle(self, guild_id, module_key, **kwargs):
+            calls.append(("activate", kwargs))
+
+        async def tags_create_run(self, guild_id, data, *, actor):
+            calls.append(("run", data))
+            return {"id": "run-1"}
+
+    class Response:
+        async def defer(self):
+            return None
+
+    sent = []
+
+    class Followup:
+        async def send(self, message, **kwargs):
+            sent.append(message)
+
+    interaction = SimpleNamespace(
+        guild_id=100,
+        guild=SimpleNamespace(
+            me=SimpleNamespace(guild_permissions=SimpleNamespace(manage_nicknames=True))
+        ),
+        response=Response(),
+        followup=Followup(),
+    )
+    actor = SimpleNamespace(user_id=900)
+    monkeypatch.setattr(tags_ui, "actor_from", lambda current: actor)
+
+    async def no_render(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(tags_ui, "_render_detail", no_render)
+    await tags_ui.confirm_publish(interaction, API())
+
+    assert [name for name, _ in calls] == ["publish", "activate", "run"]
+    assert calls[-1][1] == {
+        "mode": "effective",
+        "reason": "confirm_apply",
+        "supersede_active": True,
+    }
+    assert "Tudo confirmado" in sent[-1]
+
+
+@pytest.mark.asyncio
+async def test_tags_cleanup_supersedes_an_active_application(monkeypatch) -> None:
+    payloads = []
+
+    class API:
+        async def module_instance(self, guild_id, module_key):
+            return {"lifecycle": "active", "published_config_version_id": 3}
+
+        async def tags_create_run(self, guild_id, data, *, actor):
+            payloads.append(data)
+            return {"id": "cleanup-1"}
+
+    class Response:
+        async def defer(self):
+            return None
+
+    sent = []
+
+    class Followup:
+        async def send(self, message, **kwargs):
+            sent.append(message)
+
+    interaction = SimpleNamespace(
+        guild_id=100,
+        response=Response(),
+        followup=Followup(),
+    )
+    monkeypatch.setattr(tags_ui, "actor_from", lambda current: SimpleNamespace(user_id=900))
+
+    async def no_render(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(tags_ui, "_render_detail", no_render)
+    await tags_ui.confirm_cleanup(interaction, API())
+
+    assert payloads == [
+        {"mode": "base_only", "reason": "cleanup", "supersede_active": True}
+    ]
+    assert "desativado automaticamente" in sent[-1]
 
 
 def test_dashboard_message_ref_and_with_dashboard_ref_roundtrip() -> None:

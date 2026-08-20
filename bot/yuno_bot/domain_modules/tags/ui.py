@@ -150,6 +150,68 @@ def _overview_payload(
     )
 
 
+def _detail_payload(
+    *,
+    draft: dict,
+    lifecycle: str,
+    last_run: dict,
+    lines: list[str],
+    current_page: int,
+    max_page: int,
+) -> dict:
+    status = {
+        "active": "🟢 ativo",
+        "paused": "🟡 pausado",
+        "degraded": "🔴 com problema",
+        "inactive": "⚪ inativo",
+    }.get(lifecycle, "⚪ indisponível")
+    processed = sum(
+        int(last_run.get(key, 0) or 0)
+        for key in ("succeeded_items", "skipped_items", "blocked_items", "failed_items")
+    )
+    run_text = (
+        f"{last_run.get('status')} · {processed}/{int(last_run.get('total_items', 0) or 0)} processados"
+        if last_run
+        else "nenhuma aplicação executada"
+    )
+    components = [
+        dashboard.module_navigation("tags"),
+        separator(),
+        text_display(
+            "# 🏷️ Sistema de Tags\n\n"
+            "As alterações ficam salvas aqui e só mudam os apelidos quando você confirma.\n\n"
+            f"### Vínculos para confirmar · página {current_page + 1}/{max_page + 1}\n"
+            + "\n".join(lines)
+            + f"\n\nSistema **{status}** · publicação **{draft['base_published_version'] or 'nenhuma'}**"
+            + f"\nÚltima aplicação: **{run_text}**"
+        ),
+        action_row(
+            button(custom_id=dashboard.central_custom_id("tags", "add_binding"), label="Adicionar vínculo", emoji="➕", style=1),
+            button(custom_id=dashboard.central_custom_id("tags", "manage_binding"), label="Editar vínculo", emoji="✏️", style=2, disabled=not bool(draft["bindings"])),
+        ),
+    ]
+    if max_page > 0:
+        components.append(
+            action_row(
+                button(custom_id=dashboard.central_custom_id("tags", "page_prev"), label="Anterior", style=2, disabled=current_page == 0),
+                button(custom_id=dashboard.central_custom_id("tags", "page_next"), label="Próxima", style=2, disabled=current_page >= max_page),
+            )
+        )
+    components.extend(
+        [
+            action_row(
+                button(custom_id=dashboard.central_custom_id("tags", "confirm_publish"), label="Confirmar e aplicar", emoji="✅", style=3),
+                button(custom_id=dashboard.central_custom_id("tags", "cleanup"), label="Limpar todas as Tags", emoji="🧹", style=4, disabled=not bool(draft["base_published_version"])),
+            ),
+            action_row(
+                button(custom_id=dashboard.central_custom_id("tags", "preview"), label="Pré-visualizar", emoji="👁️", style=2),
+                button(custom_id=dashboard.central_custom_id("tags", "advanced"), label="Opções avançadas", emoji="⚙️", style=2),
+            ),
+        ]
+    )
+    return payload(container(*components, accent_color=COLOR))
+
+
 async def render_admin(interaction: discord.Interaction, api: Any) -> None:
     try:
         instance, draft, diagnostics = await _state(api, interaction.guild_id)
@@ -196,9 +258,26 @@ async def _render_detail(
         lines.append(f"{role_text} → `{item['tag']}` · {state}")
     if not lines:
         lines.append("_Nenhum vínculo no rascunho._")
+    await _replace(
+        interaction,
+        _detail_payload(
+            draft=draft,
+            lifecycle=instance["lifecycle"],
+            last_run=diagnostics.get("last_run") or {},
+            lines=lines,
+            current_page=current,
+            max_page=max_page,
+        ),
+        channel_id=channel_id,
+        message_id=message_id,
+    )
+
+
+async def _render_advanced(interaction: discord.Interaction, api: Any) -> None:
+    instance, draft, diagnostics_data = await _state(api, interaction.guild_id)
     lifecycle = instance["lifecycle"]
+    last_run = diagnostics_data.get("last_run") or {}
     toggle_label = "Desativar sistema" if lifecycle == "active" else "Ativar sistema"
-    last_run = diagnostics.get("last_run") or {}
     await _replace(
         interaction,
         payload(
@@ -206,37 +285,29 @@ async def _render_detail(
                 dashboard.module_navigation("tags"),
                 separator(),
                 text_display(
-                    "# 🏷️ Sistema de Tags\n\n"
-                    f"### Vínculos do rascunho · página {current + 1}/{max_page + 1}\n"
-                    + "\n".join(lines)
-                    + f"\n\nVersão publicada: **{draft['base_published_version'] or 'nenhuma'}** · revisão: **{draft['revision']}**"
-                ),
-                action_row(
-                    button(custom_id=dashboard.central_custom_id("tags", "add_binding"), label="Adicionar vínculo", emoji="➕", style=1),
-                    button(custom_id=dashboard.central_custom_id("tags", "manage_binding"), label="Editar vínculo", emoji="✏️", style=2, disabled=not bool(draft["bindings"])),
-                ),
-                action_row(
-                    button(custom_id=dashboard.central_custom_id("tags", "page_prev"), label="Anterior", style=2, disabled=current == 0),
-                    button(custom_id=dashboard.central_custom_id("tags", "page_next"), label="Próxima", style=2, disabled=current >= max_page),
-                    button(custom_id=dashboard.central_custom_id("tags", "confirm_publish"), label="Publicar rascunho", emoji="✅", style=3),
+                    "# ⚙️ Opções avançadas\n\n"
+                    f"Sistema: **{lifecycle}**\n"
+                    f"Última execução: **{last_run.get('status', 'nenhuma')}**\n\n"
+                    "Use estas ações apenas para operação e diagnóstico."
                 ),
                 action_row(
                     button(custom_id=dashboard.central_custom_id("tags", "toggle_lifecycle"), label=toggle_label, style=2, disabled=not draft["base_published_version"]),
-                    button(custom_id=dashboard.central_custom_id("tags", "sync"), label="Sincronizar", emoji="🔄", style=1, disabled=lifecycle != "active"),
-                    button(custom_id=dashboard.central_custom_id("tags", "cancel_run"), label="Cancelar run", style=4, disabled=last_run.get("status") not in {"pending", "planning", "running"}),
+                    button(custom_id=dashboard.central_custom_id("tags", "sync"), label="Sincronizar novamente", emoji="🔄", style=1, disabled=lifecycle != "active"),
+                    button(custom_id=dashboard.central_custom_id("tags", "cancel_run"), label="Cancelar execução", style=4, disabled=last_run.get("status") not in {"pending", "planning", "running"}),
                 ),
                 action_row(
-                    button(custom_id=dashboard.central_custom_id("tags", "diagnostics"), label="Diagnóstico", emoji="🩺", style=2),
+                    button(custom_id=dashboard.central_custom_id("tags", "diagnostics"), label="Diagnóstico geral", emoji="🩺", style=2),
                     button(custom_id=dashboard.central_custom_id("tags", "diagnose_member"), label="Diagnosticar membro", style=2),
-                    button(custom_id=dashboard.central_custom_id("tags", "cleanup"), label="Limpar Tags", emoji="🧹", style=4, disabled=lifecycle != "active"),
-                    button(custom_id=dashboard.central_custom_id("tags", "back"), label="Voltar", emoji="↩️", style=2),
+                    button(custom_id=dashboard.central_custom_id("tags", "open_system"), label="Voltar aos vínculos", emoji="↩️", style=2),
                 ),
                 accent_color=COLOR,
             )
         ),
-        channel_id=channel_id,
-        message_id=message_id,
     )
+
+
+async def advanced(interaction: discord.Interaction, api: Any) -> None:
+    await _render_advanced(interaction, api)
 
 
 async def open_system(interaction: discord.Interaction, api: Any) -> None:
@@ -300,7 +371,7 @@ class BindingModal(discord.ui.Modal):
                 },
                 actor=actor_from(interaction),
             )
-            await interaction.followup.send("Vínculo salvo no rascunho. Publique para alterar o Runtime.", ephemeral=True)
+            await interaction.followup.send("Vínculo salvo. Use **Confirmar e aplicar** quando terminar.", ephemeral=True)
             await _render_detail(
                 interaction,
                 self.api,
@@ -423,7 +494,7 @@ class BindingActionsView(discord.ui.View):
     async def remove(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
         await interaction.response.send_message(
-            "Confirme a remoção. O Runtime só mudará depois da próxima publicação.",
+            "Confirme a remoção. Os apelidos só mudarão quando você usar **Confirmar e aplicar**.",
             view=ConfirmDeleteView(
                 self.api,
                 self.binding,
@@ -563,11 +634,27 @@ async def confirm_publish(interaction: discord.Interaction, api: Any) -> None:
             actor=actor,
         )
         instance = await api.module_instance(interaction.guild_id, "tags")
-        if instance["lifecycle"] == "active":
-            await api.tags_create_run(
-                interaction.guild_id, {"mode": "effective", "reason": "config_published"}, actor=actor
+        if instance["lifecycle"] != "active":
+            await api.update_lifecycle(
+                interaction.guild_id,
+                "tags",
+                lifecycle="active",
+                expected_lifecycle=instance["lifecycle"],
+                actor=actor,
             )
-        await interaction.followup.send("Configuração publicada de forma imutável.", ephemeral=True)
+        run = await api.tags_create_run(
+            interaction.guild_id,
+            {
+                "mode": "effective",
+                "reason": "confirm_apply",
+                "supersede_active": True,
+            },
+            actor=actor,
+        )
+        await interaction.followup.send(
+            f"Tudo confirmado. Os vínculos foram publicados e a atualização dos apelidos foi iniciada (`{run['id']}`).",
+            ephemeral=True,
+        )
         await _render_detail(interaction, api)
     except Exception as exc:
         await _reply(interaction, _error_text(exc))
@@ -591,7 +678,7 @@ async def toggle_lifecycle(interaction: discord.Interaction, api: Any) -> None:
             "Sistema ativado e reconciliação solicitada." if target == "active" else "Sistema desativado. Os apelidos existentes foram preservados.",
             ephemeral=True,
         )
-        await _render_detail(interaction, api)
+        await _render_advanced(interaction, api)
     except Exception as exc:
         await _reply(interaction, _error_text(exc))
 
@@ -603,7 +690,7 @@ async def sync(interaction: discord.Interaction, api: Any) -> None:
             interaction.guild_id, {"mode": "effective", "reason": "manual"}, actor=actor_from(interaction)
         )
         await interaction.followup.send(f"Sincronização durável criada: `{run['id']}`.", ephemeral=True)
-        await _render_detail(interaction, api)
+        await _render_advanced(interaction, api)
     except Exception as exc:
         await _reply(interaction, _error_text(exc))
 
@@ -618,7 +705,7 @@ async def cancel_run(interaction: discord.Interaction, api: Any) -> None:
             return
         await api.tags_cancel_run(interaction.guild_id, run["id"], actor=actor_from(interaction))
         await interaction.followup.send("Cancelamento solicitado. Itens já aplicados não serão desfeitos.", ephemeral=True)
-        await _render_detail(interaction, api)
+        await _render_advanced(interaction, api)
     except Exception as exc:
         await _reply(interaction, _error_text(exc))
 
@@ -630,10 +717,15 @@ async def cleanup(interaction: discord.Interaction, api: Any) -> None:
             container(
                 dashboard.module_navigation("tags"),
                 separator(),
-                text_display("# Confirmar limpeza de Tags\n\nEsta operação cria um run `base_only`: remove a Tag dos apelidos registrados, preserva identidades e não desfaz alterações já concluídas se for cancelada."),
+                text_display(
+                    "# 🧹 Limpar todas as Tags\n\n"
+                    "Isso remove as Tags dos apelidos de todos os membros registrados. "
+                    "Os vínculos continuarão salvos, mas o sistema ficará inativo ao terminar para não recolocá-las.\n\n"
+                    "Para usar as Tags novamente, basta clicar em **Confirmar e aplicar**."
+                ),
                 action_row(
-                    button(custom_id=dashboard.central_custom_id("tags", "confirm_cleanup"), label="Confirmar limpeza", emoji="🧹", style=4),
-                    button(custom_id=dashboard.central_custom_id("tags", "open_system"), label="Voltar", style=2),
+                    button(custom_id=dashboard.central_custom_id("tags", "confirm_cleanup"), label="Sim, limpar todas", emoji="🧹", style=4),
+                    button(custom_id=dashboard.central_custom_id("tags", "open_system"), label="Cancelar", style=2),
                 ),
                 accent_color=0xD83C3E,
             )
@@ -644,10 +736,28 @@ async def cleanup(interaction: discord.Interaction, api: Any) -> None:
 async def confirm_cleanup(interaction: discord.Interaction, api: Any) -> None:
     await interaction.response.defer()
     try:
+        actor = actor_from(interaction)
+        instance = await api.module_instance(interaction.guild_id, "tags")
+        if not instance.get("published_config_version_id"):
+            await interaction.followup.send("Não existe uma configuração publicada para limpar.", ephemeral=True)
+            return
+        if instance["lifecycle"] != "active":
+            await api.update_lifecycle(
+                interaction.guild_id,
+                "tags",
+                lifecycle="active",
+                expected_lifecycle=instance["lifecycle"],
+                actor=actor,
+            )
         run = await api.tags_create_run(
-            interaction.guild_id, {"mode": "base_only", "reason": "cleanup"}, actor=actor_from(interaction)
+            interaction.guild_id,
+            {"mode": "base_only", "reason": "cleanup", "supersede_active": True},
+            actor=actor,
         )
-        await interaction.followup.send(f"Limpeza auditada criada: `{run['id']}`.", ephemeral=True)
+        await interaction.followup.send(
+            f"Limpeza iniciada (`{run['id']}`). O sistema será desativado automaticamente ao terminar.",
+            ephemeral=True,
+        )
         await _render_detail(interaction, api)
     except Exception as exc:
         await _reply(interaction, _error_text(exc))
