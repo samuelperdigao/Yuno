@@ -25,6 +25,7 @@ async def schedule_task(
     idempotency_key: str,
     correlation_id: str,
     max_attempts: int | None,
+    commit: bool = True,
 ) -> AutomationTask:
     definition = module_registry.get(module_key)
     job = definition.job(job_key) if definition else None
@@ -72,7 +73,8 @@ async def schedule_task(
                 )
             )
         ).scalar_one()
-    await session.commit()
+    if commit:
+        await session.commit()
     return task
 
 

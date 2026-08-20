@@ -9,6 +9,7 @@ ACTION_ROW = 1
 BUTTON = 2
 STRING_SELECT = 3
 ROLE_SELECT = 6
+USER_SELECT = 5
 CHANNEL_SELECT = 8
 TEXT_DISPLAY = 10
 MEDIA_GALLERY = 12
@@ -87,6 +88,18 @@ def role_select(
 ) -> dict[str, Any]:
     return {
         "type": ROLE_SELECT,
+        "custom_id": custom_id,
+        "placeholder": placeholder,
+        "min_values": min_values,
+        "max_values": max_values,
+    }
+
+
+def user_select(
+    *, custom_id: str, placeholder: str, min_values: int = 1, max_values: int = 1
+) -> dict[str, Any]:
+    return {
+        "type": USER_SELECT,
         "custom_id": custom_id,
         "placeholder": placeholder,
         "min_values": min_values,

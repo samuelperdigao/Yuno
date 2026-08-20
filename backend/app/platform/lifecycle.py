@@ -138,5 +138,30 @@ async def update_lifecycle(
         after={"lifecycle": target.value, "reason": reason},
         correlation_id=correlation_id,
     )
+    if module_key == "tags":
+        await write_audit(
+            session,
+            guild_id=guild_id,
+            module_key="tags",
+            action="tags.lifecycle_changed",
+            resource_type="module_instance",
+            resource_id=str(instance.id),
+            actor_id=actor_id,
+            before={"lifecycle": before},
+            after={"lifecycle": target.value, "reason": reason},
+            correlation_id=correlation_id,
+        )
     await session.commit()
+    if module_key == "tags" and target == ModuleLifecycle.active:
+        from app.domain_modules.tags.domain import TagSyncRunMode
+        from app.domain_modules.tags.services import create_sync_run
+
+        await create_sync_run(
+            session,
+            guild_id=guild_id,
+            mode=TagSyncRunMode.effective,
+            reason="activated",
+            actor_id=actor_id,
+            correlation_id=correlation_id,
+        )
     return instance

@@ -4,6 +4,7 @@ import asyncio
 import socket
 
 from yuno_bot.platform.registry import UIRegistry, ui_registry
+from yuno_bot.platform.contracts import RetryableJobError
 
 
 class PlatformCoordinator:
@@ -68,6 +69,11 @@ class PlatformCoordinator:
             try:
                 result = await handler.handler(self.bot, self.api, item)
                 await self.api.complete_task(item, self.worker_id, result)
+            except RetryableJobError as exc:
+                self.bot.log.warning("Job %s:%s sera repetido", item["module_key"], item["key"])
+                await self.api.fail_task(
+                    item, self.worker_id, str(exc), retry_at=exc.retry_at
+                )
             except Exception:
                 self.bot.log.exception("Falha no job %s:%s", item["module_key"], item["key"])
                 await self.api.fail_task(item, self.worker_id, "Falha no handler do job.")

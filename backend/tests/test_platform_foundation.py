@@ -143,9 +143,9 @@ def synthetic_definition() -> ModuleDefinition:
 
 def test_new_registry_discovers_only_domain_first_modules() -> None:
     definitions = discover_domain_modules().all()
-    assert [item.manifest.key for item in definitions] == ["registration"]
+    assert [item.manifest.key for item in definitions] == ["registration", "tags"]
     adapters = discover_ui_modules().all()
-    assert [item.module_key for item in adapters] == ["registration"]
+    assert [item.module_key for item in adapters] == ["registration", "tags"]
     by_key = {item.module_key: item for item in adapters}
     assert FARM_DEFINITION.manifest.released is False
     assert FARM_UI.released is False
@@ -153,6 +153,13 @@ def test_new_registry_discovers_only_domain_first_modules() -> None:
     assert {item.key for item in by_key["registration"].jobs} == {
         "registration.processing.recover",
         "registration.panel.reconcile",
+    }
+    assert by_key["tags"].panels == ()
+    assert {item.key for item in by_key["tags"].jobs} == {
+        "tags.member.sync",
+        "tags.run.plan",
+        "tags.run.finalize",
+        "tags.retention",
     }
     legacy_keys = {
         "farm_tickets", "meta", "set", "ticket", "ausencia", "parceria", "producao"

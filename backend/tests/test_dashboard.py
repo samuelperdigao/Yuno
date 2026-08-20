@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 
 from yuno_bot import dashboard
 from yuno_bot.modules import discover_modules
@@ -34,7 +35,19 @@ def test_legacy_catalog_has_no_runtime_implementation() -> None:
         assert spec.dashboard_fields == ()
         assert spec.control_plane is None
         assert spec.retired is True
-    assert list(dashboard.dashboard_specs()) == ["registration"]
+    assert list(dashboard.dashboard_specs()) == ["registration", "tags"]
+
+
+def test_module_navigation_switches_between_released_modules() -> None:
+    navigation = dashboard.module_navigation("registration")
+    select = navigation["components"][0]
+    options = {item["value"]: item for item in select["options"]}
+
+    assert select["custom_id"] == "yuno:central:v1:core:select_module"
+    assert select["placeholder"] == "Trocar de modulo"
+    assert options["registration"]["default"] is True
+    assert options["tags"]["default"] is False
+    assert set(options) == {"registration", "tags"}
 
 
 def test_dashboard_message_ref_and_with_dashboard_ref_roundtrip() -> None:
@@ -43,6 +56,40 @@ def test_dashboard_message_ref_and_with_dashboard_ref_roundtrip() -> None:
 
     assert dashboard.dashboard_message_ref(updated) == (10, 20)
     assert updated["settings"]["preserved"] == {"value": True}
+
+
+@pytest.mark.asyncio
+async def test_startup_refresh_updates_only_the_registered_central(monkeypatch) -> None:
+    edited = []
+
+    class Channel:
+        id = 10
+
+        async def fetch_message(self, message_id):
+            assert message_id == 20
+            return SimpleNamespace(author=SimpleNamespace(id=42))
+
+    class Guild:
+        me = SimpleNamespace(id=42)
+
+        def get_channel(self, channel_id):
+            return Channel() if channel_id == 10 else None
+
+    async def edit(bot, channel_id, message_id, data):
+        edited.append((bot, channel_id, message_id, data))
+
+    monkeypatch.setattr(dashboard, "_edit_v2", edit)
+    bot = object()
+    refreshed = await dashboard.refresh_existing(
+        bot,
+        Guild(),
+        {"settings": {"dashboard": {"panel_channel_id": "10", "panel_message_id": "20"}}},
+    )
+
+    assert refreshed is True
+    assert edited[0][1:3] == (10, 20)
+    options = edited[0][3]["components"][0]["components"][1]["components"][0]["options"]
+    assert {item["value"] for item in options} == {"registration", "tags"}
 
 
 def test_central_dynamic_patterns_do_not_compete_for_string_selects() -> None:

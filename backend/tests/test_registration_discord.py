@@ -408,8 +408,14 @@ def test_unpublished_admin_summary_hides_internal_state(monkeypatch) -> None:
 
     children = captured["components"][0]["components"]
     content = "\n".join(item["content"] for item in children if item["type"] == 10)
-    action = next(item for item in children if item["type"] == 1)
+    navigation = next(
+        item for item in children if item["type"] == 1 and item["components"][0]["type"] == 3
+    )
+    action = next(
+        item for item in children if item["type"] == 1 and item["components"][0]["type"] == 2
+    )
     button_data = action["components"][0]
+    assert navigation["components"][0]["custom_id"] == "yuno:central:v1:core:select_module"
     assert "Ainda não publicado" in content
     assert "lifecycle" not in content.lower()
     assert "rascunho" not in content.lower()

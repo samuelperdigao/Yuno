@@ -45,7 +45,7 @@ from yuno_bot.platform.contracts import (
 
 MODULE_UI = ModuleUIAdapter(
     module_key="registration",
-    contract_version=1,
+    contract_version=2,
     name="Registro",
     description="Registro de membros com aprovacao segura.",
     icon="📝",

@@ -554,6 +554,8 @@ def build_admin_payload(instance: dict, draft: dict) -> dict[str, Any]:
     approver_label = "cargo configurado" if approver_count == 1 else "cargos configurados"
     return payload(
         container(
+            dashboard.module_navigation("registration"),
+            separator(spacing=1),
             text_display(
                 "# Registro\n\n"
                 "Formulário, análise e aprovação de novos membros da organização."
@@ -605,6 +607,8 @@ async def _render_section(
     _, draft = await _admin_state(api, interaction.guild_id)
     config = draft["data"]
     components: list[dict[str, Any]] = [
+        dashboard.module_navigation("registration"),
+        separator(spacing=1),
         text_display("# 📝 Registro\n\nConfigure uma etapa por vez. As alterações só entram no painel público depois da sua confirmação."),
         action_row(_section_select()),
         separator(),
@@ -993,6 +997,8 @@ async def review_publish(interaction: discord.Interaction, api: Any) -> None:
     config = draft["data"]
     data = payload(
         container(
+            dashboard.module_navigation("registration"),
+            separator(spacing=1),
             text_display(
                 "# Revisar publicacao do Registro\n\n"
                 f"Painel: <#{config['panel_channel_id']}>\n"

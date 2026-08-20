@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
@@ -23,8 +23,13 @@ from app.platform.contracts import JobDefinition, ModuleDefinition, ModuleManife
 from app.platform.lifecycle import ensure_module_instance, update_lifecycle  # noqa: E402
 from app.platform.models import ModuleLifecycle  # noqa: E402
 from app.platform.registry import module_registry  # noqa: E402
+from app.platform.registry import discover_domain_modules  # noqa: E402
 from app.domain_modules.registration import services as registration_services  # noqa: E402
 from app.domain_modules.registration.schemas import RegistrationConfig, RegistrationSubmit  # noqa: E402
+from app.domain_modules.tags import services as tag_services  # noqa: E402
+from app.domain_modules.tags.domain import TagSyncRunMode, TagSyncRunStatus  # noqa: E402
+from app.domain_modules.tags.models import TagSyncRun  # noqa: E402
+from app.platform.configuration import publish  # noqa: E402
 from app.platform.models import ModuleConfigVersion, ModuleInstance, RuntimeMode  # noqa: E402
 
 
@@ -208,6 +213,136 @@ def test_postgres_registration_partial_indexes_and_concurrent_approvers() -> Non
             )
             assert sum(isinstance(value, str) for value in same_request) == 1
             assert 409 in same_request
+        finally:
+            await engine.dispose()
+            async with admin_engine.begin() as connection:
+                await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+            await admin_engine.dispose()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.skipif(
+    not POSTGRES_URL,
+    reason="Defina YUNO_TEST_POSTGRES_URL para validar runs e publicacoes concorrentes de Tags.",
+)
+def test_postgres_tags_keeps_one_active_run_during_concurrent_publish() -> None:
+    async def scenario() -> None:
+        assert POSTGRES_URL is not None
+        discover_domain_modules()
+        schema = f"yuno_tags_test_{uuid4().hex}"
+        admin_engine = create_async_engine(POSTGRES_URL)
+        async with admin_engine.begin() as connection:
+            await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        engine = create_async_engine(
+            POSTGRES_URL,
+            connect_args={"server_settings": {"search_path": schema}},
+        )
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with sessions() as session:
+                await tag_services.upsert_draft_binding(
+                    session,
+                    guild_id="tags-guild",
+                    discord_role_id="10",
+                    tag="[MEM]",
+                    enabled=True,
+                    actor_id="900",
+                    expected_revision=0,
+                    expected_published_version=0,
+                    correlation_id="draft-1",
+                )
+                await publish(
+                    session,
+                    guild_id="tags-guild",
+                    module_key="tags",
+                    actor_id="900",
+                    expected_revision=1,
+                    expected_published_version=0,
+                    grants=[],
+                    correlation_id="publish-1",
+                )
+                await update_lifecycle(
+                    session,
+                    guild_id="tags-guild",
+                    module_key="tags",
+                    actor_id="900",
+                    expected=ModuleLifecycle.inactive,
+                    target=ModuleLifecycle.active,
+                    reason=None,
+                    correlation_id="activate",
+                )
+
+            async def create_run(correlation: str):
+                async with sessions() as session:
+                    return await tag_services.create_sync_run(
+                        session,
+                        guild_id="tags-guild",
+                        mode=TagSyncRunMode.effective,
+                        reason="concurrent",
+                        actor_id="900",
+                        correlation_id=correlation,
+                    )
+
+            first_run, second_run = await asyncio.gather(
+                create_run("run-a"), create_run("run-b")
+            )
+            assert first_run.id == second_run.id
+
+            async with sessions() as session:
+                await tag_services.upsert_draft_binding(
+                    session,
+                    guild_id="tags-guild",
+                    discord_role_id="10",
+                    tag="[NOVO]",
+                    enabled=True,
+                    actor_id="900",
+                    expected_revision=1,
+                    expected_published_version=1,
+                    correlation_id="draft-2",
+                )
+
+            async def publish_latest(actor_id: str):
+                async with sessions() as session:
+                    try:
+                        return await publish(
+                            session,
+                            guild_id="tags-guild",
+                            module_key="tags",
+                            actor_id=actor_id,
+                            expected_revision=2,
+                            expected_published_version=1,
+                            grants=[],
+                            correlation_id=f"publish-{actor_id}",
+                        )
+                    except HTTPException as exc:
+                        return exc.status_code
+
+            publications = await asyncio.gather(
+                publish_latest("901"), publish_latest("902")
+            )
+            assert sum(not isinstance(item, int) for item in publications) == 1
+            assert 409 in publications
+
+            async with sessions() as session:
+                active_count = int(
+                    await session.scalar(
+                        select(func.count(TagSyncRun.id)).where(
+                            TagSyncRun.guild_id == "tags-guild",
+                            TagSyncRun.status.in_(
+                                [
+                                    TagSyncRunStatus.pending,
+                                    TagSyncRunStatus.planning,
+                                    TagSyncRunStatus.running,
+                                ]
+                            ),
+                        )
+                    )
+                    or 0
+                )
+                assert active_count == 1
         finally:
             await engine.dispose()
             async with admin_engine.begin() as connection:

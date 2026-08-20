@@ -634,6 +634,26 @@ async def complete_approval(
         dm_message=config.approved_message,
     )
     try:
+        async with session.begin_nested():
+            from app.domain_modules.tags.services import request_member_sync
+
+            await request_member_sync(
+                session,
+                guild_id=guild_id,
+                discord_user_id=request.discord_user_id,
+                observed_fingerprint=None,
+                reason="registration_approved",
+                correlation_id=correlation_id,
+                commit=False,
+            )
+    except Exception:
+        log.exception(
+            "tags_sync_enqueue_failed guild_id=%s request_id=%s correlation_id=%s",
+            guild_id,
+            request.id,
+            correlation_id,
+        )
+    try:
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()

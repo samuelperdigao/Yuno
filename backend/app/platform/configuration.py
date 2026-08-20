@@ -175,6 +175,12 @@ async def publish(
     definition = module_registry.get(module_key)
     assert definition is not None and definition.configuration is not None
     errors = definition.configuration.validate(draft.data or {})
+    if definition.relational_configuration is not None:
+        errors.extend(
+            await definition.relational_configuration.validate_draft(
+                session, guild_id=guild_id, instance=instance, draft=draft
+            )
+        )
     if errors:
         raise HTTPException(status_code=422, detail={"detail": "Configuracao invalida.", "errors": errors})
     if definition.permission_validator is not None:
@@ -198,6 +204,14 @@ async def publish(
     )
     session.add(version)
     await session.flush()
+    if definition.relational_configuration is not None:
+        await definition.relational_configuration.materialize_version(
+            session,
+            guild_id=guild_id,
+            instance=instance,
+            draft=draft,
+            version=version,
+        )
     for grant in grants:
         session.add(
             ModulePermissionGrant(
@@ -263,6 +277,16 @@ async def rollback(
     draft.base_published_version = expected_published_version
     draft.revision += 1
     draft.updated_by = actor_id
+    definition = module_registry.get(module_key)
+    assert definition is not None
+    if definition.relational_configuration is not None:
+        await definition.relational_configuration.restore_version(
+            session,
+            guild_id=guild_id,
+            instance=instance,
+            draft=draft,
+            source=source,
+        )
     grants = (
         await session.execute(
             select(ModulePermissionGrant).where(

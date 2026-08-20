@@ -206,11 +206,17 @@ class PlatformAPIClient:
             json={"worker_id": worker_id, "result": result},
         )
 
-    async def fail_task(self, item: dict, worker_id: str, error: str) -> dict:
+    async def fail_task(
+        self, item: dict, worker_id: str, error: str, *, retry_at: Any | None = None
+    ) -> dict:
         return await self._request(
             "POST",
             f"/guilds/{item['guild_id']}/automation/tasks/{item['id']}/fail",
-            json={"worker_id": worker_id, "error": error},
+            json={
+                "worker_id": worker_id,
+                "error": error,
+                "retry_at": retry_at.isoformat() if retry_at is not None else None,
+            },
         )
 
     async def claim_deliveries(self, worker_id: str, *, limit: int = 10) -> list[dict]:
@@ -371,6 +377,122 @@ class PlatformAPIClient:
             "POST",
             f"/guilds/{guild_id}/modules/registration/members/{discord_user_id}/deactivate",
             json={"actor": actor.as_payload()},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def tags_draft_bindings(self, guild_id: int) -> dict:
+        return await self._request("GET", f"/guilds/{guild_id}/modules/tags/bindings/draft")
+
+    async def tags_effective_bindings(self, guild_id: int) -> dict:
+        return await self._request("GET", f"/guilds/{guild_id}/modules/tags/bindings/effective")
+
+    async def tags_upsert_binding(self, guild_id: int, payload: dict, *, actor: Any) -> dict:
+        return await self._request(
+            "PUT", f"/guilds/{guild_id}/modules/tags/bindings/draft",
+            json={**payload, "actor": actor.as_payload()}, actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def tags_delete_binding(
+        self, guild_id: int, role_id: int | str, payload: dict, *, actor: Any
+    ) -> dict:
+        return await self._request(
+            "DELETE", f"/guilds/{guild_id}/modules/tags/bindings/draft/{role_id}",
+            json={**payload, "actor": actor.as_payload()}, actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def tags_preview(self, guild_id: int, payload: dict, *, actor: Any) -> dict:
+        return await self._request(
+            "POST", f"/guilds/{guild_id}/modules/tags/preview",
+            json={**payload, "actor": actor.as_payload()}, actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def tags_request_member(self, guild_id: int, payload: dict, *, actor: Any) -> dict:
+        return await self._request(
+            "POST", f"/guilds/{guild_id}/modules/tags/member-sync",
+            json={**payload, "actor": actor.as_payload()}, actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def tags_prepare(self, guild_id: int, payload: dict, *, actor: Any) -> dict:
+        return await self._request(
+            "POST", f"/guilds/{guild_id}/modules/tags/sync/prepare",
+            json={**payload, "actor": actor.as_payload()}, actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def tags_complete(self, guild_id: int, payload: dict, *, actor: Any) -> dict:
+        return await self._request(
+            "POST", f"/guilds/{guild_id}/modules/tags/sync/complete",
+            json={**payload, "actor": actor.as_payload()}, actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def tags_fail(self, guild_id: int, payload: dict, *, actor: Any) -> dict:
+        return await self._request(
+            "POST", f"/guilds/{guild_id}/modules/tags/sync/fail",
+            json={**payload, "actor": actor.as_payload()}, actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def tags_create_run(self, guild_id: int, payload: dict, *, actor: Any) -> dict:
+        return await self._request(
+            "POST", f"/guilds/{guild_id}/modules/tags/sync-runs",
+            json={**payload, "actor": actor.as_payload()}, actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def tags_run(self, guild_id: int, run_id: str) -> dict:
+        return await self._request("GET", f"/guilds/{guild_id}/modules/tags/sync-runs/{run_id}")
+
+    async def tags_cancel_run(self, guild_id: int, run_id: str, *, actor: Any) -> dict:
+        return await self._request(
+            "POST", f"/guilds/{guild_id}/modules/tags/sync-runs/{run_id}/cancel",
+            json={"actor": actor.as_payload()}, actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def tags_run_job(self, item: dict, *, actor: Any) -> dict:
+        return await self._request(
+            "POST", f"/guilds/{item['guild_id']}/modules/tags/jobs",
+            json={"job_key": item["key"], "payload": item.get("payload") or {}, "actor": actor.as_payload()},
+            actor_id=actor.user_id, correlation_id=actor.correlation_id,
+        )
+
+    async def tags_ensure_periodic(self, guild_id: int, day_key: str, *, actor: Any) -> dict:
+        return await self._request(
+            "POST", f"/guilds/{guild_id}/modules/tags/periodic/ensure",
+            json={"day_key": day_key, "actor": actor.as_payload()}, actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def tags_cancel_member(self, guild_id: int, user_id: int, *, actor: Any) -> dict:
+        return await self._request(
+            "POST", f"/guilds/{guild_id}/modules/tags/members/cancel",
+            json={"discord_user_id": str(user_id), "actor": actor.as_payload()},
+            actor_id=actor.user_id, correlation_id=actor.correlation_id,
+        )
+
+    async def tags_diagnostics(self, guild_id: int) -> dict:
+        return await self._request(
+            "GET", f"/guilds/{guild_id}/modules/tags/operational-diagnostics"
+        )
+
+    async def tags_member_diagnostics(self, guild_id: int, user_id: int) -> dict:
+        return await self._request(
+            "GET", f"/guilds/{guild_id}/modules/tags/members/{user_id}/diagnostics"
+        )
+
+    async def tags_member_live_diagnostics(
+        self, guild_id: int, user_id: int, snapshot: dict, *, actor: Any
+    ) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/tags/members/{user_id}/diagnostics",
+            json={"snapshot": snapshot, "actor": actor.as_payload()},
             actor_id=actor.user_id,
             correlation_id=actor.correlation_id,
         )

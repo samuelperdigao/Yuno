@@ -56,10 +56,11 @@ Com `CONTROL_PLANE_ENABLED=true`, a árvore pública contém somente:
 
 Esse comando reconcilia a estrutura e publica a Central de Gestão. Status,
 diagnóstico, ativação e configuração são feitos por botões, seletores e modais
-dentro da Central. Metas é o módulo piloto com rascunho, prévia e publicação
-versionada; os demais módulos aparecem como **Migração para a Central pendente**
-e serão migrados progressivamente. Views persistentes e listeners operacionais
-continuam carregados sem expor comandos slash adicionais.
+dentro da Central. Registro e Sistema de Tags são módulos domain-first liberados,
+com rascunhos e publicações independentes. O seletor compartilhado permite trocar
+de módulo sem publicar nem descartar alterações; futuros módulos liberados entram
+nessa navegação pelo registry. Os módulos ainda não aprovados permanecem fora do
+Runtime e não expõem comandos slash adicionais.
 
 `CONTROL_PLANE_ENABLED=false` mantém temporariamente a interface legada para
 rollback controlado. A flag não deve ser alterada sem um sync intencional da
@@ -82,4 +83,4 @@ Os fluxos do produto e os painéis fixos estão implementados. Antes de liberar 
 - Dominio, HTTPS e backups na VPS.
 - Politica comercial de troca manual de servidor.
 - Migrações em uma cópia do PostgreSQL de produção.
-- Fluxo `/yuno configurar` → Central → Metas → rascunho → prévia → publicação em um servidor Discord de teste.
+- Fluxo `/yuno configurar` → Central → Registro/Tags → rascunho → prévia → publicação em um servidor Discord de teste.

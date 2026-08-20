@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-08-20
+
+### Adicionado
+
+- Sistema de Tags domain-first, multi-guild, com vínculos Cargo → Tag versionados e resolução pela hierarquia ao vivo do Discord.
+- Sincronização durável individual e em massa, com revisões, leases, retry, cancelamento, diagnóstico e limpeza explícita.
+- Navegação compartilhada entre Registro e Tags na Central, preservando rascunhos e publicações independentes.
+- Validação contínua em Python 3.10 e PostgreSQL para concorrência, índices parciais e isolamento de jobs.
+
+### Corrigido
+
+- A Central publicada passa a incorporar módulos recém-liberados no reinício sem criar uma mensagem duplicada.
+- Uma nova publicação de Tags substitui com segurança qualquer reconciliação global antiga e agenda todos os membros novamente.
+- O Registro agenda Tags somente após persistir a identidade durável, sem desfazer aprovações quando a reconciliação falha.
+
 ## 2026-08-03
 
 ### Adicionado

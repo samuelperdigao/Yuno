@@ -78,6 +78,28 @@ def dashboard_specs() -> dict[str, ModuleSpec | DomainDashboardSpec]:
     }
 
 
+def module_navigation(current_module: str | None = None) -> dict[str, Any]:
+    """Navegacao compartilhada entre paginas administrativas da Central."""
+
+    options = [
+        {
+            "label": spec.nome[:100],
+            "value": spec.key,
+            "description": "Modulo atual" if spec.key == current_module else "Abrir configuracao do modulo",
+            "emoji": {"name": spec.icon},
+            "default": spec.key == current_module,
+        }
+        for spec in dashboard_specs().values()
+    ]
+    return action_row(
+        string_select(
+            custom_id=central_custom_id("core", "select_module"),
+            options=options,
+            placeholder="Trocar de modulo",
+        )
+    )
+
+
 def build_payload(
     config: dict,
     page: int = 0,
@@ -101,15 +123,7 @@ def build_payload(
         )
     ]
     if options:
-        components.append(
-            action_row(
-                string_select(
-                    custom_id=central_custom_id("core", "select_module"),
-                    options=options,
-                    placeholder="Selecione um modulo",
-                )
-            )
-        )
+        components.append(module_navigation())
     else:
         components.append(text_display("_Nenhum modulo disponivel._"))
     return payload(container(*components, accent_color=0xFFC72C))
@@ -168,6 +182,37 @@ async def publish_or_update(
         except discord.HTTPException:
             pass
     return await _send_v2(bot, channel.id, data)
+
+
+async def refresh_existing(
+    bot: commands.Bot,
+    guild: discord.Guild,
+    config: dict,
+    *,
+    control_states: dict[str, dict[str, Any]] | None = None,
+) -> bool:
+    """Atualiza uma Central publicada sem criar mensagem nova no startup."""
+
+    channel_id, message_id = dashboard_message_ref(config)
+    if not channel_id or not message_id:
+        return False
+    channel = guild.get_channel(channel_id)
+    if channel is None or not hasattr(channel, "fetch_message"):
+        return False
+    try:
+        known_message = await channel.fetch_message(message_id)
+        bot_member = guild.me
+        if bot_member is not None and known_message.author.id != bot_member.id:
+            return False
+        await _edit_v2(
+            bot,
+            channel_id,
+            message_id,
+            build_payload(config, control_states=control_states),
+        )
+    except discord.HTTPException:
+        return False
+    return True
 
 
 async def rollback_unsaved_dashboard(

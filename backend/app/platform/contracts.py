@@ -229,6 +229,22 @@ class MigrationContract(Protocol):
     async def validate(self, session: Any, guild_id: str) -> list[str]: ...
 
 
+class RelationalConfigurationParticipant(Protocol):
+    """Extensao opcional para filhos relacionais de uma configuracao versionada."""
+
+    async def validate_draft(
+        self, session: Any, *, guild_id: str, instance: Any, draft: Any
+    ) -> list[str]: ...
+
+    async def materialize_version(
+        self, session: Any, *, guild_id: str, instance: Any, draft: Any, version: Any
+    ) -> None: ...
+
+    async def restore_version(
+        self, session: Any, *, guild_id: str, instance: Any, draft: Any, source: Any
+    ) -> None: ...
+
+
 @dataclass(frozen=True)
 class ModuleDefinition:
     manifest: ModuleManifest
@@ -242,6 +258,7 @@ class ModuleDefinition:
     health_checks: tuple[HealthContributor, ...] = ()
     migration: MigrationContract | None = None
     permission_validator: PermissionValidator | None = None
+    relational_configuration: RelationalConfigurationParticipant | None = None
 
     def capability(self, key: str) -> CapabilityDefinition | None:
         return next((item for item in self.capabilities if item.key == key), None)

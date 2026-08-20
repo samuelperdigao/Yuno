@@ -1,6 +1,8 @@
 import asyncio
+import hashlib
 import logging
 from datetime import datetime, timezone
+from uuid import uuid4
 
 import discord
 import httpx
@@ -49,6 +51,10 @@ class YunoBot(commands.Bot):
         )
         self.module_context: ModuleContext | None = None
         self._registration_recovery_task: asyncio.Task | None = None
+        self._tags_periodic_task: asyncio.Task | None = None
+        self._tag_role_debounce: dict[int, asyncio.Task] = {}
+        self._tag_hierarchy_fingerprints: dict[int, str] = {}
+        self._central_refreshed_guilds: set[int] = set()
 
     async def setup_hook(self) -> None:
         await self.add_cog(YunoAdminCog(self))
@@ -92,6 +98,11 @@ class YunoBot(commands.Bot):
                 self._run_registration_recovery_sweeper(),
                 name="yuno-registration-recovery-sweeper",
             )
+        if self.platform_ui_registry.get("tags") is not None:
+            self._tags_periodic_task = asyncio.create_task(
+                self._run_tags_periodic_sweeper(),
+                name="yuno-tags-periodic-sweeper",
+            )
 
         settings = get_settings()
         if settings.control_plane_enabled:
@@ -118,6 +129,38 @@ class YunoBot(commands.Bot):
     async def on_ready(self) -> None:
         guilds = ", ".join(f"{guild.name} ({guild.id})" for guild in self.guilds) or "nenhum servidor"
         self.log.info("Yuno conectado como %s. Servidores: %s", self.user, guilds)
+        for guild in self.guilds:
+            self._tag_hierarchy_fingerprints[guild.id] = self._role_hierarchy_fingerprint(guild)
+        if get_settings().control_plane_enabled:
+            await self.refresh_published_central_once()
+
+    async def refresh_published_central_once(self) -> None:
+        """Reconciliacao segura: edita somente a mensagem ja registrada."""
+
+        if self.user is None:
+            return
+        for guild in self.guilds:
+            if guild.id in self._central_refreshed_guilds:
+                continue
+            try:
+                config = await self.api.get_guild_config(guild.id)
+                states = await dashboard.fetch_control_states(
+                    self.api,
+                    guild.id,
+                    self.user.id,
+                    platform_api=self.platform_api,
+                )
+                refreshed = await dashboard.refresh_existing(
+                    self,
+                    guild,
+                    config,
+                    control_states=states,
+                )
+                if refreshed:
+                    self._central_refreshed_guilds.add(guild.id)
+                    self.log.info("Central navegavel atualizada na guild %s", guild.id)
+            except Exception:
+                self.log.exception("Falha ao atualizar a Central publicada na guild %s", guild.id)
 
     async def on_interaction(self, interaction: discord.Interaction) -> None:
         if interaction.type is not discord.InteractionType.component:
@@ -148,11 +191,11 @@ class YunoBot(commands.Bot):
             else:
                 await interaction.response.send_message(message, ephemeral=True)
 
-    async def on_member_remove(self, member: discord.Member) -> None:
-        if self.platform_ui_registry.get("registration") is None or self.user is None:
-            return
-        actor = ActorContext(
-            guild_id=member.guild.id,
+    def _system_actor(self, guild_id: int, correlation_id: str) -> ActorContext | None:
+        if self.user is None:
+            return None
+        return ActorContext(
+            guild_id=guild_id,
             user_id=self.user.id,
             role_ids=(),
             discord_permissions=(),
@@ -160,17 +203,109 @@ class YunoBot(commands.Bot):
             category_id=None,
             actor_type="system",
             is_guild_owner=False,
-            correlation_id=f"member-remove:{member.guild.id}:{member.id}",
+            correlation_id=correlation_id,
         )
+
+    @staticmethod
+    def _role_hierarchy_fingerprint(guild: discord.Guild) -> str:
+        return hashlib.sha256(
+            ",".join(str(role.id) for role in guild.roles).encode("ascii")
+        ).hexdigest()
+
+    async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
+        if self.platform_ui_registry.get("tags") is None or after.bot:
+            return
+        roles_changed = tuple(role.id for role in before.roles) != tuple(role.id for role in after.roles)
+        nickname_changed = before.nick != after.nick
+        if not roles_changed and not nickname_changed:
+            return
+        correlation = f"member-update:{after.guild.id}:{after.id}:{uuid4().hex}"
+        actor = self._system_actor(after.guild.id, correlation)
+        if actor is None:
+            return
+        fingerprint = hashlib.sha256(
+            (",".join(str(role.id) for role in after.roles) + "|" + (after.nick or "")).encode("utf-8")
+        ).hexdigest()
         try:
-            await self.platform_api.registration_deactivate_member(
-                member.guild.id, member.id, actor=actor
+            await self.platform_api.tags_request_member(
+                after.guild.id,
+                {
+                    "discord_user_id": str(after.id),
+                    "observed_fingerprint": fingerprint,
+                    "reason": "roles_changed" if roles_changed else "nickname_changed",
+                },
+                actor=actor,
             )
         except httpx.HTTPError:
             self.log.exception(
+                "Falha ao solicitar Tags para membro %s na guild %s", after.id, after.guild.id
+            )
+
+    async def on_guild_role_update(self, before: discord.Role, after: discord.Role) -> None:
+        del before
+        guild = after.guild
+        current = self._role_hierarchy_fingerprint(guild)
+        previous = self._tag_hierarchy_fingerprints.get(guild.id)
+        self._tag_hierarchy_fingerprints[guild.id] = current
+        if previous is not None and previous != current:
+            self._debounce_tag_run(guild.id, "hierarchy_changed")
+
+    async def on_guild_role_delete(self, role: discord.Role) -> None:
+        self._tag_hierarchy_fingerprints[role.guild.id] = self._role_hierarchy_fingerprint(role.guild)
+        self._debounce_tag_run(role.guild.id, "role_deleted")
+
+    def _debounce_tag_run(self, guild_id: int, reason: str) -> None:
+        if self.platform_ui_registry.get("tags") is None:
+            return
+        previous = self._tag_role_debounce.pop(guild_id, None)
+        if previous is not None:
+            previous.cancel()
+        self._tag_role_debounce[guild_id] = asyncio.create_task(
+            self._create_debounced_tag_run(guild_id, reason),
+            name=f"yuno-tags-role-debounce:{guild_id}",
+        )
+
+    async def _create_debounced_tag_run(self, guild_id: int, reason: str) -> None:
+        try:
+            await asyncio.sleep(3)
+            correlation = f"role-event:{guild_id}:{uuid4().hex}"
+            actor = self._system_actor(guild_id, correlation)
+            if actor is None:
+                return
+            await self.platform_api.tags_create_run(
+                guild_id, {"mode": "effective", "reason": reason}, actor=actor
+            )
+        except asyncio.CancelledError:
+            return
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in {403, 409}:
+                self.log.exception("Falha ao criar run de Tags na guild %s", guild_id)
+        except httpx.HTTPError:
+            self.log.exception("Falha ao criar run de Tags na guild %s", guild_id)
+        finally:
+            self._tag_role_debounce.pop(guild_id, None)
+
+    async def on_raw_member_remove(self, payload: discord.RawMemberRemoveEvent) -> None:
+        if self.platform_ui_registry.get("registration") is None or self.user is None:
+            return
+        user_id = payload.user.id
+        correlation = f"member-remove:{payload.guild_id}:{user_id}"
+        actor = self._system_actor(payload.guild_id, correlation)
+        if actor is None:
+            return
+        try:
+            await self.platform_api.registration_deactivate_member(
+                payload.guild_id, user_id, actor=actor
+            )
+            if self.platform_ui_registry.get("tags") is not None:
+                await self.platform_api.tags_cancel_member(
+                    payload.guild_id, user_id, actor=actor
+                )
+        except httpx.HTTPError:
+            self.log.exception(
                 "Falha ao inativar cadastro do membro %s na guild %s",
-                member.id,
-                member.guild.id,
+                user_id,
+                payload.guild_id,
             )
 
     async def sweep_registration_recovery_once(self) -> None:
@@ -210,7 +345,52 @@ class YunoBot(commands.Bot):
             except asyncio.CancelledError:
                 return
 
+    async def sweep_tags_periodic_once(self) -> None:
+        day_key = datetime.now(timezone.utc).date().isoformat()
+        for guild in self.guilds:
+            actor = self._system_actor(
+                guild.id, f"tags-periodic-ensure:{guild.id}:{day_key}"
+            )
+            if actor is None:
+                return
+            try:
+                await self.platform_api.tags_ensure_periodic(
+                    guild.id, day_key, actor=actor
+                )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code not in {403, 409}:
+                    self.log.exception(
+                        "Falha ao garantir reconciliacao periodica de Tags na guild %s",
+                        guild.id,
+                    )
+            except httpx.HTTPError:
+                self.log.exception(
+                    "Falha ao garantir reconciliacao periodica de Tags na guild %s",
+                    guild.id,
+                )
+
+    async def _run_tags_periodic_sweeper(self) -> None:
+        await self.wait_until_ready()
+        while not self.is_closed():
+            await self.sweep_tags_periodic_once()
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                return
+
     async def close(self) -> None:
+        for task in tuple(self._tag_role_debounce.values()):
+            task.cancel()
+        if self._tag_role_debounce:
+            await asyncio.gather(*self._tag_role_debounce.values(), return_exceptions=True)
+        self._tag_role_debounce.clear()
+        if self._tags_periodic_task is not None:
+            self._tags_periodic_task.cancel()
+            try:
+                await self._tags_periodic_task
+            except asyncio.CancelledError:
+                pass
+            self._tags_periodic_task = None
         if self._registration_recovery_task is not None:
             self._registration_recovery_task.cancel()
             try:

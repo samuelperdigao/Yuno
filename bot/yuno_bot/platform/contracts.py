@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Awaitable, Callable
 
 import discord
+
+
+class RetryableJobError(RuntimeError):
+    def __init__(self, message: str, *, retry_at: datetime | None = None) -> None:
+        super().__init__(message)
+        self.retry_at = retry_at
 
 
 @dataclass(frozen=True)

@@ -38,6 +38,12 @@ class OrganizationMember(Base):
             "status",
             "updated_at",
         ),
+        Index(
+            "ix_organization_members_active_pagination",
+            "guild_id",
+            "status",
+            "discord_user_id",
+        ),
         CheckConstraint("status IN ('active', 'inactive')", name="ck_organization_members_status"),
     )
 

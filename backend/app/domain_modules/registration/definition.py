@@ -149,7 +149,7 @@ MODULE_DEFINITION = ModuleDefinition(
         key="registration",
         name="Registro",
         description="Registro tenant-safe de membros com aprovacao administrativa.",
-        contract_version=1,
+        contract_version=2,
         domain_version="2.0.0",
         required_discord_permissions=(
             "view_channel",
