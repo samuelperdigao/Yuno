@@ -315,6 +315,8 @@ def test_public_contracts_are_tenant_safe_and_return_immutable_dtos() -> None:
                 )
                 assert member_goal and member_goal.goal_id == goal["id"]
                 assert cycle and cycle.cycle_id == cycle_id
+                assert cycle.starts_at.utcoffset() == timedelta(0)
+                assert cycle.ends_at.utcoffset() == timedelta(0)
                 assert objectives and objectives[0].item_quantity == "10.500"
                 assert await contracts.get_cycle(session, guild_id="other", cycle_id=cycle_id) is None
                 with pytest.raises(Exception):
@@ -341,6 +343,7 @@ def test_four_events_are_ordered_correlated_and_deduplicated() -> None:
                 assert EVENT_PARTICIPANT_MOVED in types
                 assert EVENT_GOAL_CYCLE_ENDED in types
                 assert [item.sequence for item in page.events] == list(range(1, len(page.events) + 1))
+                assert all(item.occurred_at.utcoffset() == timedelta(0) for item in page.events)
                 count = int(await session.scalar(select(func.count(MetaIntegrationEvent.event_id))) or 0)
                 await services._emit_event(
                     session,
@@ -374,6 +377,23 @@ def test_scheduled_custom_is_editable_but_active_custom_is_read_only() -> None:
                     session, guild_id="100", admin_id="901", goal_id=goal["id"]
                 )
                 assert editable["goal_id"] == goal["id"]
+                assert editable["data"]["scheduled_start_at"].endswith("+00:00")
+                editable = await services.patch_draft(
+                    session,
+                    guild_id="100",
+                    admin_id="901",
+                    expected_revision=editable["revision"],
+                    step="review",
+                    patch={"name": "Personalizada editada"},
+                )
+                updated = await services.submit_draft(
+                    session,
+                    guild_id="100",
+                    admin_id="901",
+                    expected_revision=editable["revision"],
+                    correlation_id="custom:scheduled:edit",
+                )
+                assert updated["name"] == "Personalizada editada"
                 await _activate(session, goal, _members("1"))
                 with pytest.raises(HTTPException) as raised:
                     await services.open_draft(

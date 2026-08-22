@@ -101,8 +101,8 @@ def _config_dict(item: MetaGoalConfigVersion) -> dict[str, Any]:
         "daily_time": item.daily_time,
         "weekday": item.weekday,
         "month_day": item.month_day,
-        "scheduled_start_at": item.scheduled_start_at,
-        "scheduled_end_at": item.scheduled_end_at,
+        "scheduled_start_at": _utc(item.scheduled_start_at) if item.scheduled_start_at else None,
+        "scheduled_end_at": _utc(item.scheduled_end_at) if item.scheduled_end_at else None,
         "participation": item.participation.value,
         "role_ids": [value.role_id for value in item.roles],
         "objectives": [_objective_dict(value) for value in sorted(item.objectives, key=lambda x: x.position)],
@@ -122,10 +122,10 @@ def goal_dict(item: MetaGoal) -> dict[str, Any]:
         "created_sequence": item.created_sequence,
         "current_config_version_id": item.current_config_version_id,
         "future_config_version_id": item.future_config_version_id,
-        "next_transition_at": item.next_transition_at,
+        "next_transition_at": _utc(item.next_transition_at) if item.next_transition_at else None,
         "end_reason": item.end_reason.value if item.end_reason else None,
-        "created_at": item.created_at,
-        "ended_at": item.ended_at,
+        "created_at": _utc(item.created_at),
+        "ended_at": _utc(item.ended_at) if item.ended_at else None,
     }
 
 
@@ -140,8 +140,8 @@ def cycle_dict(item: MetaCycle) -> dict[str, Any]:
         "notice_text": item.notice_text,
         "state": item.state.value,
         "timezone": item.timezone,
-        "starts_at": item.starts_at,
-        "ends_at": item.ends_at,
+        "starts_at": _utc(item.starts_at),
+        "ends_at": _utc(item.ends_at),
         "notice_channel_id": item.notice_channel_id,
         "notice_message_id": item.notice_message_id,
         "notice_reference": item.notice_reference,
@@ -154,7 +154,7 @@ def cycle_dict(item: MetaCycle) -> dict[str, Any]:
                 "display_name": value.display_name,
                 "role_ids": list(value.role_ids or []),
                 "active": value.active,
-                "removed_at": value.removed_at,
+                "removed_at": _utc(value.removed_at) if value.removed_at else None,
                 "removal_reason": value.removal_reason.value if value.removal_reason else None,
             }
             for value in item.participants

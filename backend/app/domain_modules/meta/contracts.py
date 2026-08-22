@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -88,6 +88,12 @@ def _freeze(value: Any) -> Any:
     return value
 
 
+def _utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 async def get_cycle(
     session: AsyncSession, *, guild_id: str, cycle_id: int
 ) -> GoalCycleSnapshot | None:
@@ -107,8 +113,8 @@ async def get_cycle(
         guild_id=cycle.guild_id,
         name=cycle.name,
         state=cycle.state.value,
-        starts_at=cycle.starts_at,
-        ends_at=cycle.ends_at,
+        starts_at=_utc(cycle.starts_at),
+        ends_at=_utc(cycle.ends_at),
         timezone=cycle.timezone,
         config_version_id=cycle.config_version_id,
     )
@@ -208,7 +214,7 @@ async def read_goal_events(
             sequence=item.sequence,
             event_type=item.event_type,
             event_version=item.event_version,
-            occurred_at=item.occurred_at,
+            occurred_at=_utc(item.occurred_at),
             causation_id=item.causation_id,
             deduplication_key=item.deduplication_key,
             payload=_freeze(dict(item.payload or {})),
