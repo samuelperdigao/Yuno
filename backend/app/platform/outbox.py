@@ -4,8 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.platform.models import DeliveryAttempt, DeliveryOutbox, WorkState
 from app.platform.registry import module_registry
@@ -153,6 +153,7 @@ async def complete_delivery(
         session, guild_id=guild_id, delivery_id=delivery_id, worker_id=worker_id
     )
     delivery.state = WorkState.succeeded
+    delivery.last_error = None
     delivery.lease_owner = None
     delivery.lease_until = None
     attempt = (

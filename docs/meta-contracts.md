@@ -180,20 +180,20 @@ Emitido quando o aviso foi localizado/publicado e a ativação transacional do c
 Payload de encerramento normal:
 
 ```json
-{"goal_id": 12, "cycle_id": 91, "reason": "COMPLETED"}
+{"goal_id": 12, "cycle_id": 91, "reason": "completed"}
 ```
 
-No encerramento definitivo por substituição total inclui também `"recurrence_disabled": true` e `reason` igual a `REPLACED`. É emitido na transação que encerra o ciclo; a recorrência só é desabilitada de forma permanente nesse caso. Chaves: `cycle:{cycle_id}:ended:completed` ou `cycle:{cycle_id}:ended:replaced`.
+No encerramento definitivo por substituição total inclui também `"recurrence_disabled": true` e `reason` igual a `replaced`. É emitido na transação que encerra o ciclo; a recorrência só é desabilitada de forma permanente nesse caso. Chaves: `cycle:{cycle_id}:ended:completed` ou `cycle:{cycle_id}:ended:replaced`.
 
 ### `meta.participant_removed_from_cycle.v1`
 
 Payload por saída:
 
 ```json
-{"goal_id": 12, "cycle_id": 91, "member_id": "456", "reason": "LEFT_GUILD"}
+{"goal_id": 12, "cycle_id": 91, "member_id": "456", "reason": "left_guild"}
 ```
 
-Por conflito inclui `reason` igual a `MOVED_TO_ANOTHER_GOAL` e `destination_goal_id`. É emitido quando o participante ativo deixa o ciclo; não há evento de reentrada automática. Chave por saída: `cycle:{cycle_id}:member:{member_id}:left`; por conflito: `cycle:{cycle_id}:member:{member_id}:removed:goal:{destination_goal_id}`.
+Por conflito inclui `reason` igual a `moved_to_another_goal` e `destination_goal_id`. É emitido quando o participante ativo deixa o ciclo; não há evento de reentrada automática. Chave por saída: `cycle:{cycle_id}:member:{member_id}:left`; por conflito: `cycle:{cycle_id}:member:{member_id}:removed:goal:{destination_goal_id}`.
 
 ### `meta.participant_moved_to_another_goal.v1`
 

@@ -1,36 +1,39 @@
+
 import asyncio
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-
 
 os.environ.setdefault("DISCORD_BOT_TOKEN", "test-token")
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(ROOT / "bot"))
 
-import app.models  # noqa: E402,F401 -- registra legado e plataforma no Base
-from app.domain_modules.farm.definition import MODULE_DEFINITION as FARM_DEFINITION  # noqa: E402
-from app.api.platform.dependencies import require_platform_admin  # noqa: E402
-from app.db import Base  # noqa: E402
-from app.platform.audit import write_audit  # noqa: E402
-from app.platform.automation import claim_tasks, complete_task, schedule_task  # noqa: E402
-from app.platform.configuration import (  # noqa: E402
+import app.models  # noqa: F401 -- registra legado e plataforma no Base
+from app.api.platform.dependencies import require_platform_admin
+from app.db import Base
+from app.platform.audit import write_audit
+from app.platform.automation import (
+    claim_tasks,
+    complete_task,
+    schedule_task,
+)
+from app.platform.configuration import (
     effective_configuration,
     get_or_create_draft,
     publish,
     rollback,
     save_draft,
 )
-from app.platform.contracts import (  # noqa: E402
+from app.platform.contracts import (
     ActionContract,
     CapabilityDefinition,
     ConfigurationContract,
@@ -38,44 +41,62 @@ from app.platform.contracts import (  # noqa: E402
     ConfigurationFieldType,
     JobDefinition,
     LifecyclePolicy,
-    MigrationContract,
     ModuleDefinition,
     ModuleDependency,
     ModuleManifest,
     NotificationDefinition,
     PanelContract,
 )
-from app.platform.interactions import begin_interaction, finish_interaction  # noqa: E402
-from app.platform.lifecycle import ensure_module_instance, update_lifecycle  # noqa: E402
-from app.platform.migrations import (  # noqa: E402
+from app.platform.diagnostics import module_health
+from app.platform.interactions import (
+    begin_interaction,
+    finish_interaction,
+)
+from app.platform.lifecycle import (
+    ensure_module_instance,
+    update_lifecycle,
+)
+from app.platform.migrations import (
     cutover,
     rollback_cutover,
     start_migration,
     update_migration,
 )
-from app.platform.models import (  # noqa: E402
+from app.platform.models import (
     AuditEntry,
+    AutomationTask,
     MigrationState,
     ModuleLifecycle,
     PanelState,
     RuntimeMode,
     WorkState,
 )
-from app.platform.outbox import (  # noqa: E402
+from app.platform.outbox import (
     claim_deliveries,
     complete_delivery,
     enqueue_delivery,
 )
-from app.platform.panels import ensure_panel, get_panel, update_panel  # noqa: E402
-from app.platform.permissions import authorize  # noqa: E402
-from app.platform.registry import ModuleRegistry, discover_domain_modules, module_registry  # noqa: E402
-from app.platform.schemas import ActorContextIn, PermissionGrantIn  # noqa: E402
-from yuno_bot.platform.registry import UIRegistry, discover_ui_modules, verify_backend_manifest  # noqa: E402
-from yuno_bot.platform import coordinator as platform_coordinator  # noqa: E402
-from yuno_bot.platform.contracts import InteractionResult, ModuleUIAdapter  # noqa: E402
-from yuno_bot.platform.coordinator import PlatformCoordinator  # noqa: E402
-from yuno_bot.platform.router import InteractionRouter, custom_id, parse_custom_id  # noqa: E402
-from yuno_bot.domain_modules.farm import MODULE_UI as FARM_UI  # noqa: E402
+from app.platform.panels import ensure_panel, get_panel, update_panel
+from app.platform.permissions import authorize
+from app.platform.registry import (
+    ModuleRegistry,
+    discover_domain_modules,
+    module_registry,
+)
+from app.platform.schemas import ActorContextIn, PermissionGrantIn
+from yuno_bot.platform import coordinator as platform_coordinator
+from yuno_bot.platform.contracts import InteractionResult, ModuleUIAdapter
+from yuno_bot.platform.coordinator import PlatformCoordinator
+from yuno_bot.platform.registry import (
+    UIRegistry,
+    discover_ui_modules,
+    verify_backend_manifest,
+)
+from yuno_bot.platform.router import (
+    InteractionRouter,
+    custom_id,
+    parse_custom_id,
+)
 
 
 class SyntheticMigration:
@@ -143,12 +164,14 @@ def synthetic_definition() -> ModuleDefinition:
 
 def test_new_registry_discovers_only_domain_first_modules() -> None:
     definitions = discover_domain_modules().all()
-    assert [item.manifest.key for item in definitions] == ["meta", "registration", "tags"]
+    assert [item.manifest.key for item in definitions] == [
+        "farm_tickets", "meta", "registration", "tags"
+    ]
     adapters = discover_ui_modules().all()
-    assert [item.module_key for item in adapters] == ["meta", "registration", "tags"]
+    assert [item.module_key for item in adapters] == [
+        "farm_tickets", "meta", "registration", "tags"
+    ]
     by_key = {item.module_key: item for item in adapters}
-    assert FARM_DEFINITION.manifest.released is False
-    assert FARM_UI.released is False
     assert {item.key for item in by_key["registration"].panels} == {"public", "review"}
     assert {item.key for item in by_key["registration"].jobs} == {
         "registration.processing.recover",
@@ -162,7 +185,7 @@ def test_new_registry_discovers_only_domain_first_modules() -> None:
         "tags.retention",
     }
     legacy_keys = {
-        "farm_tickets", "set", "ticket", "ausencia", "parceria", "producao"
+        "set", "ticket", "ausencia", "parceria", "producao"
     }
     assert legacy_keys.isdisjoint(item.manifest.key for item in definitions)
     assert verify_backend_manifest({"modules": []}, UIRegistry()) == []
@@ -458,6 +481,8 @@ def test_platform_services_form_a_tenant_safe_vertical_foundation() -> None:
                 assert await claim_tasks(
                     session, worker_id="worker-2", limit=10, lease_seconds=60
                 ) == []
+                task.last_error = "erro transitorio anterior"
+                await session.commit()
                 await complete_task(
                     session,
                     guild_id="guild-a",
@@ -465,6 +490,7 @@ def test_platform_services_form_a_tenant_safe_vertical_foundation() -> None:
                     worker_id="worker-1",
                     result={"ok": True},
                 )
+                assert task.last_error is None
 
                 delivery = await enqueue_delivery(
                     session,
@@ -504,6 +530,8 @@ def test_platform_services_form_a_tenant_safe_vertical_foundation() -> None:
                     session, worker_id="worker-1", limit=10, lease_seconds=60
                 )
                 assert [item.id for item in claimed_delivery] == [delivery.id]
+                delivery.last_error = "erro transitorio anterior"
+                await session.commit()
                 await complete_delivery(
                     session,
                     guild_id="guild-a",
@@ -511,6 +539,7 @@ def test_platform_services_form_a_tenant_safe_vertical_foundation() -> None:
                     worker_id="worker-1",
                     external_id="discord-message-1",
                 )
+                assert delivery.last_error is None
 
                 receipt, duplicate = await begin_interaction(
                     session,
@@ -632,6 +661,124 @@ def test_platform_services_form_a_tenant_safe_vertical_foundation() -> None:
     asyncio.run(scenario())
 
 
+def test_module_health_keeps_failed_history_but_clears_recovered_alerts() -> None:
+    async def scenario() -> None:
+        engine = create_async_engine(
+            "sqlite+aiosqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        module_key = "health_recovery_test"
+        definition = ModuleDefinition(
+            manifest=ModuleManifest(
+                key=module_key,
+                name="Health recovery",
+                description="Valida falhas historicas recuperadas.",
+            ),
+            jobs=(JobDefinition("recover", max_attempts=3),),
+            notifications=(NotificationDefinition("log", ("channel",)),),
+        )
+        module_registry.register(definition)
+        first = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        recovered_at = first + timedelta(days=1)
+        try:
+            async with sessions() as session:
+                failed = await schedule_task(
+                    session,
+                    guild_id="guild-health",
+                    module_key=module_key,
+                    job_key="recover",
+                    resource_type="proof",
+                    resource_id="proof-1",
+                    payload={},
+                    due_at=first,
+                    idempotency_key="failed",
+                    correlation_id="failed",
+                    max_attempts=3,
+                    commit=False,
+                )
+                failed.state = WorkState.failed
+                failed.created_at = first
+                succeeded = await schedule_task(
+                    session,
+                    guild_id="guild-health",
+                    module_key=module_key,
+                    job_key="recover",
+                    resource_type="operation",
+                    resource_id="proof-1",
+                    payload={},
+                    due_at=recovered_at,
+                    idempotency_key="recovered",
+                    correlation_id="recovered",
+                    max_attempts=3,
+                    commit=False,
+                )
+                succeeded.state = WorkState.succeeded
+                succeeded.created_at = recovered_at
+                failed_delivery = await enqueue_delivery(
+                    session,
+                    guild_id="guild-health",
+                    module_key=module_key,
+                    renderer_key="log",
+                    destination_type="channel",
+                    destination_id="10",
+                    resource_type="proof",
+                    resource_id="proof-1",
+                    payload={},
+                    priority=100,
+                    available_at=first,
+                    idempotency_key="delivery-failed",
+                    correlation_id="delivery-failed",
+                    max_attempts=3,
+                )
+                failed_delivery.state = WorkState.failed
+                failed_delivery.created_at = first
+                succeeded_delivery = await enqueue_delivery(
+                    session,
+                    guild_id="guild-health",
+                    module_key=module_key,
+                    renderer_key="log",
+                    destination_type="channel",
+                    destination_id="10",
+                    resource_type="operation",
+                    resource_id="proof-1",
+                    payload={},
+                    priority=100,
+                    available_at=recovered_at,
+                    idempotency_key="delivery-recovered",
+                    correlation_id="delivery-recovered",
+                    max_attempts=3,
+                )
+                succeeded_delivery.state = WorkState.succeeded
+                succeeded_delivery.created_at = recovered_at
+                await session.commit()
+
+                checks = await module_health(
+                    session, guild_id="guild-health", module_key=module_key
+                )
+                background = next(
+                    item for item in checks if item.code == "module.background_work"
+                )
+                assert background.status == "OK"
+                assert background.summary == "0 job(s) e 0 entrega(s) com falha."
+                assert (
+                    await session.scalar(
+                        select(func.count())
+                        .select_from(AutomationTask)
+                        .where(AutomationTask.state == WorkState.failed)
+                    )
+                    == 1
+                )
+        finally:
+            module_registry.unregister(module_key)
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
 def test_interaction_ids_are_versioned_restart_safe_and_resource_free() -> None:
     value = custom_id("foundation_test", "public", "open")
     assert value == "yuno:v1:foundation_test:public:open"
@@ -730,6 +877,60 @@ def test_coordinator_keeps_polling_after_unexpected_cycle_failure(monkeypatch) -
     assert errors == [
         "Falha inesperada no ciclo da Yuno Platform; o worker continuara ativo"
     ]
+
+
+def test_coordinator_processes_claimed_jobs_when_delivery_claim_fails() -> None:
+    completed: list[str] = []
+    errors: list[str] = []
+
+    class Log:
+        def exception(self, message: str, *args) -> None:
+            del args
+            errors.append(message)
+
+    class Bot:
+        log = Log()
+
+    class API:
+        async def claim_tasks(self, worker_id: str) -> list[dict]:
+            return [
+                {
+                    "id": "task-1",
+                    "guild_id": "guild-a",
+                    "module_key": "foundation_test",
+                    "key": "expire",
+                }
+            ]
+
+        async def claim_deliveries(self, worker_id: str) -> list[dict]:
+            raise RuntimeError("outbox indisponivel")
+
+        async def complete_task(
+            self, item: dict, worker_id: str, result: dict
+        ) -> None:
+            completed.append(item["id"])
+
+    async def handler(bot, api, item) -> dict:
+        return {"ok": True}
+
+    class Registry:
+        def all(self) -> list[SimpleNamespace]:
+            return [SimpleNamespace(jobs=(object(),), deliveries=(object(),))]
+
+        def job(self, module_key: str, key: str) -> SimpleNamespace:
+            return SimpleNamespace(handler=handler)
+
+        def delivery(self, module_key: str, key: str):
+            return None
+
+    async def scenario() -> None:
+        coordinator = PlatformCoordinator(Bot(), API(), Registry())
+        await coordinator.run_once()
+
+    asyncio.run(scenario())
+
+    assert completed == ["task-1"]
+    assert errors == ["Falha ao buscar entregas da Yuno Platform"]
 
 
 def test_router_omits_empty_discord_response_fields() -> None:

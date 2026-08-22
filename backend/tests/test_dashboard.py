@@ -1,6 +1,6 @@
-import pytest
 from types import SimpleNamespace
 
+import pytest
 from yuno_bot import dashboard
 from yuno_bot.domain_modules.tags import ui as tags_ui
 from yuno_bot.modules import discover_modules
@@ -28,7 +28,7 @@ def test_central_uses_a_module_selector_with_stable_custom_id() -> None:
 def test_legacy_catalog_has_no_runtime_implementation() -> None:
     modules = discover_modules(force=True)
 
-    assert len(modules) == 16
+    assert len(modules) == 15
     for spec in modules.values():
         assert spec.cogs == ()
         assert spec.views == ()
@@ -36,7 +36,9 @@ def test_legacy_catalog_has_no_runtime_implementation() -> None:
         assert spec.dashboard_fields == ()
         assert spec.control_plane is None
         assert spec.retired is True
-    assert list(dashboard.dashboard_specs()) == ["registration", "tags", "meta"]
+    assert list(dashboard.dashboard_specs()) == [
+        "registration", "tags", "farm_tickets", "meta"
+    ]
 
 
 def test_module_navigation_switches_between_released_modules() -> None:
@@ -49,7 +51,7 @@ def test_module_navigation_switches_between_released_modules() -> None:
     assert options["registration"]["default"] is True
     assert options["tags"]["default"] is False
     assert options["meta"]["default"] is False
-    assert set(options) == {"registration", "tags", "meta"}
+    assert set(options) == {"registration", "tags", "farm_tickets", "meta"}
 
 
 def test_tags_primary_screen_keeps_only_the_simple_daily_flow() -> None:
@@ -227,7 +229,9 @@ async def test_startup_refresh_updates_only_the_registered_central(monkeypatch) 
     assert refreshed is True
     assert edited[0][1:3] == (10, 20)
     options = edited[0][3]["components"][0]["components"][1]["components"][0]["options"]
-    assert {item["value"] for item in options} == {"registration", "tags", "meta"}
+    assert {item["value"] for item in options} == {
+        "registration", "tags", "farm_tickets", "meta"
+    }
 
 
 def test_central_dynamic_patterns_do_not_compete_for_string_selects() -> None:

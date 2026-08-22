@@ -7,7 +7,14 @@ from yuno_bot.config import get_settings
 
 
 class ControlPlaneConflict(httpx.HTTPStatusError):
-    def __init__(self, message: str, *, request: httpx.Request, response: httpx.Response, current_revision: int):
+    def __init__(
+        self,
+        message: str,
+        *,
+        request: httpx.Request,
+        response: httpx.Response,
+        current_revision: int,
+    ):
         super().__init__(message, request=request, response=response)
         self.current_revision = current_revision
 
@@ -34,7 +41,9 @@ class YunoAPI:
             response.raise_for_status()
             return response.json()
 
-    async def get_guild_config(self, guild_id: int, *, force: bool = False) -> dict[str, Any]:
+    async def get_guild_config(
+        self, guild_id: int, *, force: bool = False
+    ) -> dict[str, Any]:
         """Config do servidor, servida do cache quando vigente.
 
         `force=True` para fluxos que precisam do estado real e nao do recente —
@@ -201,12 +210,17 @@ class YunoAPI:
             response = await client.get(
                 f"{self.base_url}/internal/guilds/{guild_id}/ausencias",
                 headers=self.headers,
-                params={"active_only": active_only, "pending_notice_only": pending_notice_only},
+                params={
+                    "active_only": active_only,
+                    "pending_notice_only": pending_notice_only,
+                },
             )
             response.raise_for_status()
             return response.json()
 
-    async def update_ausencia_message(self, *, guild_id: int, user_id: int, message_id: int | str | None) -> dict[str, Any]:
+    async def update_ausencia_message(
+        self, *, guild_id: int, user_id: int, message_id: int | str | None
+    ) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.patch(
                 f"{self.base_url}/internal/guilds/{guild_id}/ausencias/{user_id}/message",
@@ -216,7 +230,9 @@ class YunoAPI:
             response.raise_for_status()
             return response.json()
 
-    async def mark_ausencia_avisado(self, *, guild_id: int, user_id: int | str) -> dict[str, Any]:
+    async def mark_ausencia_avisado(
+        self, *, guild_id: int, user_id: int | str
+    ) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.patch(
                 f"{self.base_url}/internal/guilds/{guild_id}/ausencias/{user_id}/avisado",
@@ -286,7 +302,15 @@ class YunoAPI:
             response.raise_for_status()
             return response.json()
 
-    async def patch_record(self, *, module: str, record_id: int, status: str, reviewer_id: int, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def patch_record(
+        self,
+        *,
+        module: str,
+        record_id: int,
+        status: str,
+        reviewer_id: int,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.patch(
                 f"{self.base_url}/systems/{module}/records/{record_id}",
@@ -296,182 +320,6 @@ class YunoAPI:
                     "reviewer_id": str(reviewer_id),
                     "payload": payload or {},
                 },
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def save_farm_ticket_config(self, guild_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.put(
-                f"{self.base_url}/internal/farm-tickets/guilds/{guild_id}/config",
-                headers=self.headers,
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def get_farm_ticket_config(self, guild_id: int) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(
-                f"{self.base_url}/internal/farm-tickets/guilds/{guild_id}/config",
-                headers=self.headers,
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def get_farm_weekly_ranking(self, guild_id: int, week_id: str, *, limit: int = 10) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(
-                f"{self.base_url}/internal/farm-tickets/guilds/{guild_id}/ranking/{week_id}",
-                headers=self.headers,
-                params={"limit": limit},
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def get_active_farm_ticket(self, *, guild_id: int, week_id: str, user_id: int) -> dict[str, Any] | None:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(
-                f"{self.base_url}/internal/farm-tickets/guilds/{guild_id}/tickets/active",
-                headers=self.headers,
-                params={"week_id": week_id, "user_id": str(user_id)},
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def get_farm_ticket(self, ticket_id: int) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(
-                f"{self.base_url}/internal/farm-tickets/tickets/{ticket_id}",
-                headers=self.headers,
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def set_farm_ticket_channel(self, ticket_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.patch(
-                f"{self.base_url}/internal/farm-tickets/tickets/{ticket_id}/channel",
-                headers=self.headers,
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def cancel_farm_ticket(self, ticket_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.post(
-                f"{self.base_url}/internal/farm-tickets/tickets/{ticket_id}/cancel",
-                headers=self.headers,
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def create_farm_ticket_entry(self, ticket_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.post(
-                f"{self.base_url}/internal/farm-tickets/tickets/{ticket_id}/entries",
-                headers=self.headers,
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def assign_farm_ticket(self, ticket_id: int, actor_id: int) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.post(
-                f"{self.base_url}/internal/farm-tickets/tickets/{ticket_id}/assign",
-                headers=self.headers,
-                json={"actor_id": str(actor_id)},
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def review_farm_ticket_entry(self, ticket_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.post(
-                f"{self.base_url}/internal/farm-tickets/tickets/{ticket_id}/review",
-                headers=self.headers,
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def approve_farm_ticket(self, ticket_id: int, actor_id: int) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.post(
-                f"{self.base_url}/internal/farm-tickets/tickets/{ticket_id}/approve",
-                headers=self.headers,
-                json={"actor_id": str(actor_id)},
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def finalize_farm_ticket(self, ticket_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.post(
-                f"{self.base_url}/internal/farm-tickets/tickets/{ticket_id}/finalize",
-                headers=self.headers,
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def delete_farm_ticket(self, ticket_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.post(
-                f"{self.base_url}/internal/farm-tickets/tickets/{ticket_id}/delete",
-                headers=self.headers,
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def get_pending_farm_ticket_logs(self) -> list[dict[str, Any]]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(
-                f"{self.base_url}/internal/farm-tickets/actions/pending-logs",
-                headers=self.headers,
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def mark_farm_ticket_log_sent(self, action_id: int, log_message_id: int | None) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.post(
-                f"{self.base_url}/internal/farm-tickets/actions/{action_id}/log-sent",
-                headers=self.headers,
-                json={"log_message_id": str(log_message_id) if log_message_id else None},
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def mark_farm_ticket_log_failed(self, action_id: int) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.post(
-                f"{self.base_url}/internal/farm-tickets/actions/{action_id}/log-failed",
-                headers=self.headers,
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def get_stale_farm_tickets(self, current_week_id: str) -> list[dict[str, Any]]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(
-                f"{self.base_url}/internal/farm-tickets/maintenance/stale-tickets",
-                headers=self.headers,
-                params={"current_week_id": current_week_id},
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def get_deletable_farm_tickets(self, current_week_id: str) -> list[dict[str, Any]]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(
-                f"{self.base_url}/internal/farm-tickets/maintenance/deletable-tickets",
-                headers=self.headers,
-                params={"current_week_id": current_week_id},
             )
             response.raise_for_status()
             return response.json()

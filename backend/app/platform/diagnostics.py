@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select, text
+from sqlalchemy import exists, func, select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.platform.lifecycle import ensure_module_instance
 from app.platform.models import (
@@ -34,7 +36,7 @@ async def platform_health(session: AsyncSession) -> list[HealthCheckOut]:
     try:
         await session.execute(text("SELECT 1"))
         checks.append(check("OK", "platform.database", "PostgreSQL/SQLAlchemy acessivel."))
-    except Exception:
+    except SQLAlchemyError:
         await session.rollback()
         checks.append(check("ERROR", "platform.database", "Banco indisponivel.", action="Verifique a conexao."))
         checks.append(check("UNKNOWN", "platform.redis", "Redis nao verificado porque o banco esta indisponivel."))
@@ -51,7 +53,7 @@ async def platform_health(session: AsyncSession) -> list[HealthCheckOut]:
                 else "",
             )
         )
-    except Exception:
+    except SQLAlchemyError:
         await session.rollback()
         checks.append(
             check(
@@ -132,22 +134,47 @@ async def module_health(
             action="Reconcilie os paineis pela Central." if missing_panels else "",
         )
     )
+    recovered_task = aliased(AutomationTask)
     failed_work = int(
         await session.scalar(
             select(func.count()).select_from(AutomationTask).where(
                 AutomationTask.guild_id == guild_id,
                 AutomationTask.module_key == module_key,
                 AutomationTask.state == WorkState.failed,
+                ~exists(
+                    select(1).where(
+                        recovered_task.guild_id == AutomationTask.guild_id,
+                        recovered_task.module_key == AutomationTask.module_key,
+                        recovered_task.job_key == AutomationTask.job_key,
+                        recovered_task.resource_id == AutomationTask.resource_id,
+                        recovered_task.state == WorkState.succeeded,
+                        recovered_task.created_at > AutomationTask.created_at,
+                    )
+                ),
             )
         )
         or 0
     )
+    recovered_delivery = aliased(DeliveryOutbox)
     failed_delivery = int(
         await session.scalar(
             select(func.count()).select_from(DeliveryOutbox).where(
                 DeliveryOutbox.guild_id == guild_id,
                 DeliveryOutbox.module_key == module_key,
                 DeliveryOutbox.state == WorkState.failed,
+                ~exists(
+                    select(1).where(
+                        recovered_delivery.guild_id == DeliveryOutbox.guild_id,
+                        recovered_delivery.module_key == DeliveryOutbox.module_key,
+                        recovered_delivery.renderer_key == DeliveryOutbox.renderer_key,
+                        recovered_delivery.destination_type
+                        == DeliveryOutbox.destination_type,
+                        recovered_delivery.destination_id == DeliveryOutbox.destination_id,
+                        recovered_delivery.resource_id == DeliveryOutbox.resource_id,
+                        recovered_delivery.state == WorkState.succeeded,
+                        recovered_delivery.created_at > DeliveryOutbox.created_at,
+                    )
+                ),
             )
         )
         or 0
@@ -181,6 +208,6 @@ async def module_health(
     for contributor in definition.health_checks:
         try:
             checks.extend(HealthCheckOut.model_validate(item) for item in await contributor(session, guild_id))
-        except Exception:
+        except Exception:  # noqa: BLE001 -- health contributors are isolation boundaries.
             checks.append(check("ERROR", f"module.health.{contributor.key}", "Health check do modulo falhou."))
     return checks

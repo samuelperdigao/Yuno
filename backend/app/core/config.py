@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import AnyHttpUrl, Field
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,6 +11,15 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite+aiosqlite:///./yuno.db"
     redis_url: str = "redis://localhost:6379/0"
+
+    object_storage_endpoint: str = ""
+    object_storage_region: str = "us-east-1"
+    object_storage_bucket: str = ""
+    object_storage_access_key: str = ""
+    object_storage_secret_key: str = ""
+    object_storage_path_style: bool = True
+    object_storage_sse: str = ""
+    object_storage_presign_seconds: int = 300
 
     secret_key: str = "development-secret"
     admin_token: str = "development-admin"

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Awaitable, Callable
 
@@ -47,6 +47,7 @@ class InteractionResult:
     embed: discord.Embed | None = None
     modal: discord.ui.Modal | None = None
     view: discord.ui.View | None = None
+    components_v2: "ComponentsV2Payload | None" = None
     edit_message: bool = False
 
 
@@ -63,6 +64,11 @@ ActionHandler = Callable[[RoutedContext], Awaitable[InteractionResult]]
 ResourceOwnerResolver = Callable[[discord.Interaction, dict[str, Any], Any], Awaitable[str | None]]
 JobHandler = Callable[[discord.Client, Any, dict[str, Any]], Awaitable[dict[str, Any]]]
 DeliveryHandler = Callable[[discord.Client, dict[str, Any]], Awaitable[str | None]]
+MessageHandler = Callable[[discord.Client, Any, discord.Message], Awaitable[None]]
+ResourceDeleteHandler = Callable[
+    [discord.Client, Any, int, int, str | None], Awaitable[None]
+]
+StartupHandler = Callable[[discord.Client, Any, discord.Guild], Awaitable[None]]
 @dataclass(frozen=True)
 class ComponentsV2Payload:
     data: dict[str, Any]
@@ -132,3 +138,6 @@ class ModuleUIAdapter:
     actions: tuple[ActionDefinition, ...] = ()
     jobs: tuple[JobHandlerDefinition, ...] = ()
     deliveries: tuple[DeliveryRendererDefinition, ...] = ()
+    message_handler: MessageHandler | None = None
+    resource_delete_handler: ResourceDeleteHandler | None = None
+    startup_handler: StartupHandler | None = None

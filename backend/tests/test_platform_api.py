@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-
 os.environ.setdefault("DISCORD_BOT_TOKEN", "test-token")
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
@@ -30,8 +29,8 @@ from app.platform.contracts import (  # noqa: E402
     ModuleManifest,
     PanelContract,
 )
-from app.platform.registry import module_registry  # noqa: E402
 from app.platform.models import WorkState  # noqa: E402
+from app.platform.registry import module_registry  # noqa: E402
 
 
 def test_platform_api_revalidates_actor_and_tenant() -> None:
@@ -249,3 +248,26 @@ def test_delivery_contract_exposes_destination_and_body_to_renderer() -> None:
     assert result.destination_type == "panel"
     assert result.destination_id == "channel-100"
     assert result.payload == {"request_id": "request-1"}
+
+
+def test_delivery_contract_accepts_thread_destinations() -> None:
+    item = SimpleNamespace(
+        id="delivery-thread-1",
+        guild_id="guild-a",
+        module_key="farm_tickets",
+        renderer_key="farm_tickets.proof_copy",
+        destination_type="thread",
+        destination_id="thread-100",
+        resource_type="farm_ticket_proof",
+        resource_id="proof-1",
+        payload={"ticket_id": "ticket-1", "proof_id": "proof-1"},
+        state=WorkState.claimed,
+        attempts=1,
+        max_attempts=10,
+        correlation_id="proof-thread-copy",
+    )
+
+    result = delivery_out(item)
+
+    assert result.destination_type == "thread"
+    assert result.destination_id == "thread-100"

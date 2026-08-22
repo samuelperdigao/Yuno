@@ -5,12 +5,16 @@ from uuid import uuid4
 
 import discord
 
+from yuno_bot.platform.components_v2 import edit_interaction_message
 from yuno_bot.platform.contracts import ActorContext, InteractionResult, RoutedContext
 from yuno_bot.platform.registry import UIRegistry, ui_registry
 
-
 CUSTOM_ID_PATTERN = re.compile(
     r"^yuno:v(?P<version>\d+):(?P<module>[a-z0-9_]{1,32}):"
+    r"(?P<surface>[a-z0-9_]{1,32}):(?P<action>[a-z0-9_]{1,32})$"
+)
+MODULE_FIRST_CUSTOM_ID_PATTERN = re.compile(
+    r"^yuno:(?P<module>[a-z0-9_]{1,32}):v(?P<version>\d+):"
     r"(?P<surface>[a-z0-9_]{1,32}):(?P<action>[a-z0-9_]{1,32})$"
 )
 
@@ -22,8 +26,19 @@ def custom_id(module_key: str, surface: str, action: str, *, version: int = 1) -
     return value
 
 
+def module_custom_id(
+    module_key: str, surface: str, action: str, *, version: int = 1
+) -> str:
+    """Build the module-first ID used by contract-v2 operational panels."""
+
+    value = f"yuno:{module_key}:v{version}:{surface}:{action}"
+    if len(value) > 100 or MODULE_FIRST_CUSTOM_ID_PATTERN.fullmatch(value) is None:
+        raise ValueError("custom_id invalido para o Interaction Router.")
+    return value
+
+
 def parse_custom_id(value: str) -> dict[str, str | int] | None:
-    match = CUSTOM_ID_PATTERN.fullmatch(value)
+    match = CUSTOM_ID_PATTERN.fullmatch(value) or MODULE_FIRST_CUSTOM_ID_PATTERN.fullmatch(value)
     if match is None:
         return None
     return {
@@ -43,10 +58,14 @@ class InteractionRouter:
         """Route a raw Components V2 interaction by its stable custom ID."""
 
         data = interaction.data or {}
-        parsed = parse_custom_id(str(data.get("custom_id") or ""))
-        if parsed is None:
+        value = str(data.get("custom_id") or "")
+        # IDs v1 continuam sob o DynamicItem do discord.py. Somente o formato
+        # module-first v2 precisa do dispatcher bruto de Components V2.
+        if MODULE_FIRST_CUSTOM_ID_PATTERN.fullmatch(value) is None:
             return False
-        if parsed["version"] != 1:
+        parsed = parse_custom_id(value)
+        assert parsed is not None
+        if parsed["version"] not in {1, 2}:
             await self._deny(interaction, "Versao desta interacao nao e mais suportada.")
             return True
         await self.dispatch(
@@ -183,6 +202,11 @@ class InteractionRouter:
 
     @staticmethod
     async def _render(interaction: discord.Interaction, result: InteractionResult) -> None:
+        if result.components_v2 is not None:
+            await edit_interaction_message(
+                interaction, result.components_v2.data, ephemeral=result.ephemeral
+            )
+            return
         if result.modal is not None:
             if interaction.response.is_done():
                 raise RuntimeError("Modal nao pode ser aberto depois de responder/deferir.")
