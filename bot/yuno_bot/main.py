@@ -172,13 +172,15 @@ class YunoBot(commands.Bot):
                 )
         await self.process_commands(message)
 
-    async def _dispatch_resource_delete(self, guild_id: int, resource_id: int) -> None:
+    async def _dispatch_resource_delete(
+        self, guild_id: int, resource_id: int, resource_type: str | None = None
+    ) -> None:
         for adapter in self.platform_ui_registry.all():
             if adapter.resource_delete_handler is None:
                 continue
             try:
                 await adapter.resource_delete_handler(
-                    self, self.platform_api, guild_id, resource_id
+                    self, self.platform_api, guild_id, resource_id, resource_type
                 )
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code not in {403, 404, 409}:
@@ -195,14 +197,23 @@ class YunoBot(commands.Bot):
                 )
 
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel) -> None:
-        await self._dispatch_resource_delete(channel.guild.id, channel.id)
+        resource_type = (
+            "category" if isinstance(channel, discord.CategoryChannel) else "channel"
+        )
+        await self._dispatch_resource_delete(
+            channel.guild.id, channel.id, resource_type
+        )
 
     async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
         if payload.guild_id is not None:
-            await self._dispatch_resource_delete(payload.guild_id, payload.message_id)
+            await self._dispatch_resource_delete(
+                payload.guild_id, payload.message_id, "message"
+            )
 
     async def on_raw_thread_delete(self, payload: discord.RawThreadDeleteEvent) -> None:
-        await self._dispatch_resource_delete(payload.guild_id, payload.thread_id)
+        await self._dispatch_resource_delete(
+            payload.guild_id, payload.thread_id, "thread"
+        )
 
     async def refresh_published_central_once(self) -> None:
         """Reconciliacao segura: edita somente a mensagem ja registrada."""

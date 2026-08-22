@@ -214,6 +214,7 @@ class FarmTicketsAPI:
         guild_id: int,
         resource_id: int,
         observed_at: str,
+        resource_type: str | None = None,
         *,
         actor: dict[str, Any],
     ) -> dict:
@@ -221,7 +222,11 @@ class FarmTicketsAPI:
             "POST",
             f"/guilds/{guild_id}/modules/farm_tickets/resources/deleted",
             actor=actor,
-            payload={"resource_id": str(resource_id), "observed_at": observed_at},
+            payload={
+                "resource_id": str(resource_id),
+                "resource_type": resource_type,
+                "observed_at": observed_at,
+            },
         )
 
     async def _mutation(

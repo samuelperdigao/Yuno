@@ -236,7 +236,9 @@ class FakeTicketsAPI:
         existing["state"] = "ACTIVE"
         return existing
 
-    async def resource_deleted(self, guild_id, resource_id, observed_at, *, actor):
+    async def resource_deleted(
+        self, guild_id, resource_id, observed_at, resource_type=None, *, actor
+    ):
         for item in self.rows:
             if item["resource_id"] == str(resource_id):
                 item["state"] = "MISSING"
@@ -417,9 +419,12 @@ def test_raw_thread_delete_is_dispatched_to_module_recovery() -> None:
             self.deleted: list[tuple[int, int]] = []
 
         async def _dispatch_resource_delete(
-            self, guild_id: int, resource_id: int
+            self,
+            guild_id: int,
+            resource_id: int,
+            resource_type: str | None = None,
         ) -> None:
-            self.deleted.append((guild_id, resource_id))
+            self.deleted.append((guild_id, resource_id, resource_type))
 
     async def scenario() -> None:
         bot = Bot()
@@ -427,7 +432,7 @@ def test_raw_thread_delete_is_dispatched_to_module_recovery() -> None:
 
         await bot_main.YunoBot.on_raw_thread_delete(bot, payload)
 
-        assert bot.deleted == [(123, 456)]
+        assert bot.deleted == [(123, 456, "thread")]
 
     asyncio.run(scenario())
 

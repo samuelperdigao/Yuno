@@ -142,6 +142,9 @@ class AutomationIn(BaseModel):
 class ResourceDeletedIn(BaseModel):
     actor: ActorContextIn
     resource_id: str = Field(min_length=1, max_length=32)
+    resource_type: str | None = Field(
+        default=None, pattern="^(channel|category|message|thread)$"
+    )
     observed_at: datetime
 
 

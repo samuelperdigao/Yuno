@@ -663,6 +663,7 @@ async def resource_deleted(
             session,
             guild_id=guild_id,
             resource_id=data.resource_id,
+            resource_type=data.resource_type,
             observed_at=data.observed_at,
         )
     )

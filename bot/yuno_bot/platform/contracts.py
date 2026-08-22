@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Awaitable, Callable
 
@@ -65,7 +65,9 @@ ResourceOwnerResolver = Callable[[discord.Interaction, dict[str, Any], Any], Awa
 JobHandler = Callable[[discord.Client, Any, dict[str, Any]], Awaitable[dict[str, Any]]]
 DeliveryHandler = Callable[[discord.Client, dict[str, Any]], Awaitable[str | None]]
 MessageHandler = Callable[[discord.Client, Any, discord.Message], Awaitable[None]]
-ResourceDeleteHandler = Callable[[discord.Client, Any, int, int], Awaitable[None]]
+ResourceDeleteHandler = Callable[
+    [discord.Client, Any, int, int, str | None], Awaitable[None]
+]
 StartupHandler = Callable[[discord.Client, Any, discord.Guild], Awaitable[None]]
 @dataclass(frozen=True)
 class ComponentsV2Payload:

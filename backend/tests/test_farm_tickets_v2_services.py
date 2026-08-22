@@ -1147,7 +1147,7 @@ def test_external_and_planned_deletions_keep_historical_result(monkeypatch) -> N
                     FarmTicketDiscordBinding(
                         ticket_id=ticket.id,
                         guild_id=ticket.guild_id,
-                        kind=ResourceKind.TICKET_CHANNEL,
+                        kind=ResourceKind.TICKET_MAIN_MESSAGE,
                         resource_id="700",
                         ownership=BindingOwnership.MANAGED,
                         state=BindingState.ACTIVE,
@@ -1169,6 +1169,7 @@ def test_external_and_planned_deletions_keep_historical_result(monkeypatch) -> N
                     session,
                     guild_id=ticket.guild_id,
                     resource_id="700",
+                    resource_type="thread",
                     observed_at=datetime.now(timezone.utc),
                 )
                 await session.refresh(ticket)
@@ -1190,13 +1191,16 @@ def test_external_and_planned_deletions_keep_historical_result(monkeypatch) -> N
                     .all()
                 )
                 assert len(same_snowflake) == 2
-                assert all(
-                    item.state == BindingState.DELETED for item in same_snowflake
-                )
+                states = {item.kind: item.state for item in same_snowflake}
+                assert states == {
+                    ResourceKind.TICKET_MAIN_MESSAGE: BindingState.ACTIVE,
+                    ResourceKind.TICKET_THREAD: BindingState.DELETED,
+                }
 
                 binding = await session.scalar(
                     select(FarmTicketDiscordBinding).where(
-                        FarmTicketDiscordBinding.resource_id == "700"
+                        FarmTicketDiscordBinding.resource_id == "700",
+                        FarmTicketDiscordBinding.kind == ResourceKind.TICKET_THREAD,
                     )
                 )
                 binding.state = BindingState.DELETE_PENDING
@@ -1207,6 +1211,7 @@ def test_external_and_planned_deletions_keep_historical_result(monkeypatch) -> N
                     session,
                     guild_id=ticket.guild_id,
                     resource_id="700",
+                    resource_type="thread",
                     observed_at=datetime.now(timezone.utc),
                 )
                 assert planned["action"] == "planned_delete"

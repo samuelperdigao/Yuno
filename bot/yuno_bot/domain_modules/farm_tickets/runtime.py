@@ -86,6 +86,16 @@ async def _mark_missing(
         guild_id,
         int(binding["resource_id"]),
         datetime.now(timezone.utc).isoformat(),
+        {
+            "CATEGORY": "category",
+            "GLOBAL_PANEL_CHANNEL": "channel",
+            "LOG_CHANNEL": "channel",
+            "TICKET_CHANNEL": "channel",
+            "GLOBAL_PANEL_MESSAGE": "message",
+            "TICKET_PANEL_MESSAGE": "message",
+            "TICKET_MAIN_MESSAGE": "message",
+            "TICKET_THREAD": "thread",
+        }.get(binding["kind"]),
         actor=actor.as_payload(),
     )
 
@@ -959,12 +969,14 @@ async def handle_resource_delete(
     platform_api: Any,
     guild_id: int,
     resource_id: int,
+    resource_type: str | None,
 ) -> None:
     actor = _system_actor(bot, guild_id, f"discord-delete:{guild_id}:{resource_id}")
     await FarmTicketsAPI(platform_api).resource_deleted(
         guild_id,
         resource_id,
         datetime.now(timezone.utc).isoformat(),
+        resource_type,
         actor=actor.as_payload(),
     )
 

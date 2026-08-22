@@ -2745,17 +2745,35 @@ async def record_external_resource_deletion(
     *,
     guild_id: str,
     resource_id: str,
+    resource_type: str | None = None,
     observed_at: datetime,
 ) -> dict[str, Any]:
+    resource_kinds = {
+        "category": {ResourceKind.CATEGORY},
+        "channel": {
+            ResourceKind.GLOBAL_PANEL_CHANNEL,
+            ResourceKind.LOG_CHANNEL,
+            ResourceKind.TICKET_CHANNEL,
+        },
+        "message": {
+            ResourceKind.GLOBAL_PANEL_MESSAGE,
+            ResourceKind.TICKET_PANEL_MESSAGE,
+            ResourceKind.TICKET_MAIN_MESSAGE,
+        },
+        "thread": {ResourceKind.TICKET_THREAD},
+    }
+    query = select(FarmTicketDiscordBinding).where(
+        FarmTicketDiscordBinding.guild_id == guild_id,
+        FarmTicketDiscordBinding.resource_id == resource_id,
+    )
+    if resource_type is not None:
+        query = query.where(
+            FarmTicketDiscordBinding.kind.in_(resource_kinds[resource_type])
+        )
     bindings = (
         (
             await session.execute(
-                select(FarmTicketDiscordBinding)
-                .where(
-                    FarmTicketDiscordBinding.guild_id == guild_id,
-                    FarmTicketDiscordBinding.resource_id == resource_id,
-                )
-                .with_for_update()
+                query.with_for_update()
             )
         )
         .scalars()
@@ -2808,7 +2826,8 @@ async def record_external_resource_deletion(
             },
             due_at=utc_now(),
             idempotency_key=(
-                f"resource:{resource_id}:recover:{_utc(observed_at).isoformat()}"
+                f"resource:{resource_type or 'unknown'}:{resource_id}:recover:"
+                f"{_utc(observed_at).isoformat()}"
             ),
             correlation_id=f"resource-delete:{resource_id}"[:80],
             max_attempts=10,
@@ -2829,7 +2848,11 @@ async def record_external_resource_deletion(
             event_type="resource.external_delete_detected",
             actor_id=None,
             deduplication_key=f"resource:{resource_id}:missing:{_utc(observed_at).isoformat()}",
-            payload={"kinds": kinds, "recovery_required": True},
+            payload={
+                "kinds": kinds,
+                "resource_type": resource_type,
+                "recovery_required": True,
+            },
         )
         action = "recover"
     else:
@@ -2847,6 +2870,7 @@ async def record_external_resource_deletion(
             payload={
                 "historical_status": ticket.status.value,
                 "resource_reason": "MANUAL_DELETE",
+                "resource_type": resource_type,
                 "kinds": kinds,
             },
         )
@@ -2866,7 +2890,8 @@ async def record_external_resource_deletion(
             },
             due_at=utc_now(),
             idempotency_key=(
-                f"resource:{resource_id}:recover:{_utc(observed_at).isoformat()}"
+                f"resource:{resource_type or 'unknown'}:{resource_id}:recover:"
+                f"{_utc(observed_at).isoformat()}"
             ),
             correlation_id=f"resource-delete:{resource_id}"[:80],
             max_attempts=10,
