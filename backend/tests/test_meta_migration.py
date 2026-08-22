@@ -34,7 +34,7 @@ def test_meta_migration_on_empty_sqlite(tmp_path: Path) -> None:
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
         }
-        assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "c5d6e7f8a9b0"
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "d6e7f8a9b0c1"
         assert len([name for name in tables if name.startswith("meta_")]) == 11
         assert "farm_weekly_goals" not in tables
 
@@ -101,6 +101,17 @@ def test_representative_migration_removes_only_legacy_meta_and_preserves_tickets
         assert connection.execute("SELECT COUNT(*) FROM farm_tickets").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM farm_ticket_entries").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM farm_ticket_actions").fetchone()[0] == 1
+        archive = connection.execute(
+            "SELECT payload, checksum_sha256 FROM farm_ticket_v2_legacy_archive "
+            "WHERE source_namespace = 'yuno.legacy.farm_tickets' AND source_id = ?",
+            (str(ticket_id),),
+        ).fetchone()
+        assert archive is not None
+        archived_payload = json.loads(archive[0])
+        assert archived_payload["ticket"]["member_name"] == "Ana"
+        assert len(archived_payload["entries"]) == 1
+        assert len(archived_payload["actions"]) == 1
+        assert len(archive[1]) == 64
         modules, permissions, messages, settings = connection.execute(
             "SELECT modules, command_permissions, messages, settings FROM guild_configs WHERE guild_id = 'guild-1'"
         ).fetchone()

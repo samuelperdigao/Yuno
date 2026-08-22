@@ -56,6 +56,7 @@ class YunoBot(commands.Bot):
         self._tag_role_debounce: dict[int, asyncio.Task] = {}
         self._tag_hierarchy_fingerprints: dict[int, str] = {}
         self._central_refreshed_guilds: set[int] = set()
+        self._platform_startup_completed: set[tuple[int, str]] = set()
 
     async def setup_hook(self) -> None:
         await self.add_cog(YunoAdminCog(self))
@@ -137,8 +138,68 @@ class YunoBot(commands.Bot):
         self.log.info("Yuno conectado como %s. Servidores: %s", self.user, guilds)
         for guild in self.guilds:
             self._tag_hierarchy_fingerprints[guild.id] = self._role_hierarchy_fingerprint(guild)
+            for adapter in self.platform_ui_registry.all():
+                marker = (guild.id, adapter.module_key)
+                if adapter.startup_handler is None or marker in self._platform_startup_completed:
+                    continue
+                try:
+                    await adapter.startup_handler(self, self.platform_api, guild)
+                    self._platform_startup_completed.add(marker)
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code not in {403, 404, 409}:
+                        self.log.exception(
+                            "Falha no startup de %s na guild %s", adapter.module_key, guild.id
+                        )
+                except Exception:
+                    self.log.exception(
+                        "Falha no startup de %s na guild %s", adapter.module_key, guild.id
+                    )
         if get_settings().control_plane_enabled:
             await self.refresh_published_central_once()
+
+    async def on_message(self, message: discord.Message) -> None:
+        for adapter in self.platform_ui_registry.all():
+            if adapter.message_handler is None:
+                continue
+            try:
+                await adapter.message_handler(self, self.platform_api, message)
+            except Exception:
+                self.log.exception(
+                    "Falha no evento de mensagem do modulo %s guild=%s channel=%s",
+                    adapter.module_key,
+                    getattr(message.guild, "id", None),
+                    message.channel.id,
+                )
+        await self.process_commands(message)
+
+    async def _dispatch_resource_delete(self, guild_id: int, resource_id: int) -> None:
+        for adapter in self.platform_ui_registry.all():
+            if adapter.resource_delete_handler is None:
+                continue
+            try:
+                await adapter.resource_delete_handler(
+                    self, self.platform_api, guild_id, resource_id
+                )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code not in {403, 404, 409}:
+                    self.log.exception(
+                        "Falha ao registrar delecao para %s resource=%s",
+                        adapter.module_key,
+                        resource_id,
+                    )
+            except Exception:
+                self.log.exception(
+                    "Falha ao registrar delecao para %s resource=%s",
+                    adapter.module_key,
+                    resource_id,
+                )
+
+    async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel) -> None:
+        await self._dispatch_resource_delete(channel.guild.id, channel.id)
+
+    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
+        if payload.guild_id is not None:
+            await self._dispatch_resource_delete(payload.guild_id, payload.message_id)
 
     async def refresh_published_central_once(self) -> None:
         """Reconciliacao segura: edita somente a mensagem ja registrada."""
@@ -553,7 +614,7 @@ class YunoAdminCog(commands.Cog):
             channels=resultado.channels,
         )
         try:
-            saved_setup = await self.bot.api.save_guild_config(
+            await self.bot.api.save_guild_config(
                 interaction.guild.id,
                 setup_config,
                 actor_id=interaction.user.id,

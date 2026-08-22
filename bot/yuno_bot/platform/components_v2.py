@@ -16,6 +16,8 @@ THUMBNAIL = 11
 MEDIA_GALLERY = 12
 SEPARATOR = 14
 CONTAINER = 17
+LABEL = 18
+TEXT_INPUT = 4
 FLAG_COMPONENTS_V2 = 1 << 15
 
 
@@ -129,8 +131,74 @@ def action_row(*components: dict[str, Any]) -> dict[str, Any]:
     return {"type": ACTION_ROW, "components": list(components)}
 
 
+def media_gallery(urls: list[str] | tuple[str, ...]) -> dict[str, Any]:
+    """Build a Discord media gallery without exceeding its ten-item limit."""
+
+    return {
+        "type": MEDIA_GALLERY,
+        "items": [{"media": {"url": url}} for url in urls[:10]],
+    }
+
+
 def media(url: str) -> dict[str, Any]:
-    return {"type": MEDIA_GALLERY, "items": [{"media": {"url": url}}]}
+    return media_gallery([url])
+
+
+def modal_text_input(
+    *,
+    custom_id: str,
+    style: int = 1,
+    required: bool = True,
+    min_length: int | None = None,
+    max_length: int | None = None,
+    placeholder: str | None = None,
+    value: str | None = None,
+) -> dict[str, Any]:
+    component: dict[str, Any] = {
+        "type": TEXT_INPUT,
+        "custom_id": custom_id,
+        "style": style,
+        "required": required,
+    }
+    if min_length is not None:
+        component["min_length"] = min_length
+    if max_length is not None:
+        component["max_length"] = max_length
+    if placeholder:
+        component["placeholder"] = placeholder
+    if value is not None:
+        component["value"] = value
+    return component
+
+
+def modal_label(
+    *,
+    label: str,
+    component: dict[str, Any],
+    description: str | None = None,
+) -> dict[str, Any]:
+    value: dict[str, Any] = {
+        "type": LABEL,
+        "label": label[:45],
+        "component": component,
+    }
+    if description:
+        value["description"] = description[:100]
+    return value
+
+
+def modal_payload(
+    *, title: str, custom_id: str, labels: list[dict[str, Any]]
+) -> dict[str, Any]:
+    if not 1 <= len(labels) <= 5:
+        raise ValueError("Modal deve conter entre um e cinco campos Label.")
+    if any(item.get("type") != LABEL for item in labels):
+        raise ValueError("Modal aceita somente componentes Label no primeiro nivel.")
+    return {
+        "title": title[:45],
+        "custom_id": custom_id,
+        "components": labels,
+    }
 
 
 def container(

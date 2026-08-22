@@ -23,6 +23,7 @@ from app.domain_modules.meta.domain import (  # noqa: E402
     EVENT_PARTICIPANT_REMOVED,
     GoalEndReason,
     GoalState,
+    ParticipantRemovalReason,
 )
 from app.domain_modules.meta.models import (  # noqa: E402
     MetaCycle,
@@ -362,6 +363,9 @@ def test_four_events_are_ordered_correlated_and_deduplicated() -> None:
                 assert EVENT_PARTICIPANT_REMOVED in types
                 assert EVENT_PARTICIPANT_MOVED in types
                 assert EVENT_GOAL_CYCLE_ENDED in types
+                events_by_type = {item.event_type: item for item in page.events}
+                assert events_by_type[EVENT_PARTICIPANT_REMOVED].payload["reason"] == "moved_to_another_goal"
+                assert events_by_type[EVENT_GOAL_CYCLE_ENDED].payload["reason"] == "replaced"
                 assert [item.sequence for item in page.events] == list(range(1, len(page.events) + 1))
                 assert all(item.occurred_at.utcoffset() == timedelta(0) for item in page.events)
                 count = int(await session.scalar(select(func.count(MetaIntegrationEvent.event_id))) or 0)
@@ -379,6 +383,13 @@ def test_four_events_are_ordered_correlated_and_deduplicated() -> None:
             await engine.dispose()
 
     asyncio.run(run())
+
+
+def test_meta_v1_event_reasons_are_stable_lowercase_contract_values() -> None:
+    assert GoalEndReason.completed.value == "completed"
+    assert GoalEndReason.replaced.value == "replaced"
+    assert ParticipantRemovalReason.left_guild.value == "left_guild"
+    assert ParticipantRemovalReason.moved_to_another_goal.value == "moved_to_another_goal"
 
 
 def test_scheduled_custom_is_editable_but_active_custom_is_read_only() -> None:

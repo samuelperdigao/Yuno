@@ -1,4 +1,6 @@
 from datetime import datetime
+from uuid import uuid4
+
 try:
     from enum import StrEnum
 except ImportError:
@@ -6,9 +8,19 @@ except ImportError:
 
     class StrEnum(str, Enum):
         pass
-from uuid import uuid4
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, func, text
+
+from sqlalchemy import (
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base, JsonType
@@ -239,8 +251,12 @@ class FarmTicket(Base):
     finalization_reason: Mapped[str | None] = mapped_column(Text)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    entries: Mapped[list["FarmTicketEntry"]] = relationship(back_populates="ticket")
-    actions: Mapped[list["FarmTicketAction"]] = relationship(back_populates="ticket")
+    entries: Mapped[list["FarmTicketEntry"]] = relationship(
+        "app.models.FarmTicketEntry", back_populates="ticket"
+    )
+    actions: Mapped[list["FarmTicketAction"]] = relationship(
+        "app.models.FarmTicketAction", back_populates="ticket"
+    )
 
 
 class FarmTicketEntry(Base):
@@ -261,7 +277,9 @@ class FarmTicketEntry(Base):
     review_reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
-    ticket: Mapped[FarmTicket] = relationship(back_populates="entries")
+    ticket: Mapped[FarmTicket] = relationship(
+        "app.models.FarmTicket", back_populates="entries"
+    )
 
 
 class FarmTicketAction(Base):
@@ -279,13 +297,20 @@ class FarmTicketAction(Base):
     log_message_id: Mapped[str | None] = mapped_column(String(32))
     log_attempts: Mapped[int] = mapped_column(Integer, default=0)
 
-    ticket: Mapped[FarmTicket | None] = relationship(back_populates="actions")
+    ticket: Mapped[FarmTicket | None] = relationship(
+        "app.models.FarmTicket", back_populates="actions"
+    )
 
 
 # Registra as tabelas transversais novas no mesmo Base sem misturar seus
 # conceitos com os modelos legados deste arquivo.
-from app.platform import models as platform_models  # noqa: E402,F401
 from app.domain_modules.farm import models as farm_domain_models  # noqa: E402,F401
-from app.domain_modules.registration import models as registration_domain_models  # noqa: E402,F401
-from app.domain_modules.tags import models as tags_domain_models  # noqa: E402,F401
+from app.domain_modules.farm_tickets import (  # noqa: E402
+    models as farm_ticket_v2_models,  # noqa: F401
+)
 from app.domain_modules.meta import models as meta_domain_models  # noqa: E402,F401
+from app.domain_modules.registration import (  # noqa: E402
+    models as registration_domain_models,  # noqa: F401
+)
+from app.domain_modules.tags import models as tags_domain_models  # noqa: E402,F401
+from app.platform import models as platform_models  # noqa: E402,F401

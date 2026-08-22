@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import unicodedata
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
-import unicodedata
 
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
@@ -12,12 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain_modules.meta.domain import (
-    CycleState,
-    EligibleMember,
     EVENT_GOAL_CYCLE_ENDED,
     EVENT_GOAL_CYCLE_STARTED,
     EVENT_PARTICIPANT_MOVED,
     EVENT_PARTICIPANT_REMOVED,
+    CycleState,
+    EligibleMember,
     GoalEndReason,
     GoalState,
     ObjectiveKind,
@@ -39,7 +39,10 @@ from app.domain_modules.meta.models import (
     MetaIntegrationEvent,
     MetaProduct,
 )
-from app.domain_modules.meta.schemas import MetaGoalConfigurationIn, MetaMemberSnapshotIn
+from app.domain_modules.meta.schemas import (
+    MetaGoalConfigurationIn,
+    MetaMemberSnapshotIn,
+)
 from app.platform.audit import write_audit
 from app.platform.automation import schedule_task
 from app.platform.lifecycle import ensure_module_instance

@@ -7,7 +7,10 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain_modules.registration.domain import OrganizationMemberStatus, render_nickname
+from app.domain_modules.registration.domain import (
+    OrganizationMemberStatus,
+    render_nickname,
+)
 from app.domain_modules.registration.models import OrganizationMember
 from app.domain_modules.registration.schemas import RegistrationConfig
 from app.platform.models import ModuleConfigVersion, ModuleInstance
@@ -18,6 +21,8 @@ class BaseMemberIdentity:
     identity_id: str
     guild_id: str
     discord_user_id: str
+    registered_name: str
+    player_id: str
     status: OrganizationMemberStatus
     base_nickname: str
     config_version: int
@@ -77,6 +82,8 @@ async def read_base_member_identity(
         identity_id=member.id,
         guild_id=guild_id,
         discord_user_id=discord_user_id,
+        registered_name=member.name,
+        player_id=member.player_id_original,
         status=member.status,
         base_nickname=base_nickname,
         config_version=version.version,

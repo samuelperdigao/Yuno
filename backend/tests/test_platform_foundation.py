@@ -143,9 +143,13 @@ def synthetic_definition() -> ModuleDefinition:
 
 def test_new_registry_discovers_only_domain_first_modules() -> None:
     definitions = discover_domain_modules().all()
-    assert [item.manifest.key for item in definitions] == ["meta", "registration", "tags"]
+    assert [item.manifest.key for item in definitions] == [
+        "farm_tickets", "meta", "registration", "tags"
+    ]
     adapters = discover_ui_modules().all()
-    assert [item.module_key for item in adapters] == ["meta", "registration", "tags"]
+    assert [item.module_key for item in adapters] == [
+        "farm_tickets", "meta", "registration", "tags"
+    ]
     by_key = {item.module_key: item for item in adapters}
     assert FARM_DEFINITION.manifest.released is False
     assert FARM_UI.released is False
@@ -162,7 +166,7 @@ def test_new_registry_discovers_only_domain_first_modules() -> None:
         "tags.retention",
     }
     legacy_keys = {
-        "farm_tickets", "set", "ticket", "ausencia", "parceria", "producao"
+        "set", "ticket", "ausencia", "parceria", "producao"
     }
     assert legacy_keys.isdisjoint(item.manifest.key for item in definitions)
     assert verify_backend_manifest({"modules": []}, UIRegistry()) == []

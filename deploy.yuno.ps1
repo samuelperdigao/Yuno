@@ -60,6 +60,8 @@ set -euo pipefail
 cd $RemoteDir
 database_kind=""
 db_path=""
+db_url=""
+pg_url=""
 backup_path=""
 stamp=`$(date +%Y%m%d-%H%M%S)
 
@@ -73,6 +75,15 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 &
 elif test -f .env; then
   db_url=`$(grep -m1 '^DATABASE_URL=' .env | cut -d= -f2- || true)
   case "`$db_url" in
+    postgresql+asyncpg://*)
+      database_kind="postgresql-host"
+      pg_url="postgresql://`${db_url#postgresql+asyncpg://}"
+      mkdir -p backups
+      backup_path="$RemoteDir/backups/yuno-predeploy-`$stamp.sql"
+      pg_dump "`$pg_url" > "`$backup_path"
+      test -s "`$backup_path"
+      echo "Backup PostgreSQL pre-deploy criado: `$backup_path"
+      ;;
     sqlite+aiosqlite:///*|sqlite:///*)
       database_kind="sqlite"
       db_path="`${db_url#*///}"
@@ -107,6 +118,10 @@ git cat-file -e '$ResolvedSha^{commit}'
 git checkout --detach '$ResolvedSha'
 test "`$(git rev-parse HEAD)" = '$ResolvedSha'
 
+if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+  .venv/bin/pip install -q -r backend/requirements.txt -r bot/requirements.txt
+fi
+
 if test "`$database_kind" = "sqlite"; then
   test -n "`$db_path"
   test -s "`$backup_path"
@@ -135,7 +150,7 @@ with sqlite3.connect(sys.argv[1]) as backup, sqlite3.connect(sys.argv[2]) as mig
     if before != after:
         raise SystemExit(f"Contagens protegidas divergiram: {before} != {after}")
     head = migrated.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-    if head != "c5d6e7f8a9b0":
+    if head != "d6e7f8a9b0c1":
         raise SystemExit(f"Head inesperado na copia migrada: {head}")
     legacy = migrated.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='farm_weekly_goals'"
@@ -147,6 +162,17 @@ with sqlite3.connect(sys.argv[1]) as backup, sqlite3.connect(sys.argv[2]) as mig
     ).fetchone()[0]
     if meta_tables != 11:
         raise SystemExit(f"Quantidade inesperada de tabelas Meta: {meta_tables}")
+    ticket_v2_tables = migrated.execute(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name LIKE 'farm_ticket_v2_%'"
+    ).fetchone()[0]
+    if ticket_v2_tables != 18:
+        raise SystemExit(f"Quantidade inesperada de tabelas Tickets V2: {ticket_v2_tables}")
+    legacy_count = count(migrated, "farm_tickets")
+    archive_count = count(migrated, "farm_ticket_v2_legacy_archive")
+    if archive_count != legacy_count:
+        raise SystemExit(
+            f"Arquivo legado divergente: farm_tickets={legacy_count}, archive={archive_count}"
+        )
     print(f"RESTORE_REHEARSAL_OK={sys.argv[2]}")
     print(f"MIGRATION_REHEARSAL_HEAD={head}")
     print(f"PROTECTED_COUNTS={after}")
@@ -155,15 +181,54 @@ print(f"RESTORE_COMMAND=cp -- '{sys.argv[1]}' '{sys.argv[3]}'")
 PY
 fi
 
+if test "`$database_kind" = "postgresql-host"; then
+  test -s "`$backup_path"
+  rehearsal_db="yuno_rehearsal_`$(date +%Y%m%d%H%M%S)"
+  db_owner=`$(.venv/bin/python - "`$db_url" <<'PY'
+import sys
+from urllib.parse import urlsplit
+print(urlsplit(sys.argv[1].replace("postgresql+asyncpg://", "postgresql://", 1)).username or "")
+PY
+  )
+  test -n "`$db_owner"
+  cleanup_rehearsal() {
+    sudo -u postgres dropdb --if-exists "`$rehearsal_db" >/dev/null 2>&1 || true
+  }
+  trap cleanup_rehearsal EXIT
+  cleanup_rehearsal
+  sudo -u postgres createdb -O "`$db_owner" "`$rehearsal_db"
+  sudo -u postgres psql -v ON_ERROR_STOP=1 -d "`$rehearsal_db" < "`$backup_path" >/dev/null
+  rehearsal_url=`$(.venv/bin/python - "`$db_url" "`$rehearsal_db" <<'PY'
+import sys
+from urllib.parse import urlsplit, urlunsplit
+value = urlsplit(sys.argv[1])
+print(urlunsplit((value.scheme, value.netloc, "/" + sys.argv[2], value.query, value.fragment)))
+PY
+  )
+  DATABASE_URL="`$rehearsal_url" .venv/bin/python -m alembic -c backend/alembic.ini upgrade head
+  rehearsal_head=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c 'select version_num from alembic_version')
+  test "`$rehearsal_head" = "d6e7f8a9b0c1"
+  legacy_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_tickets")
+  archive_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_legacy_archive")
+  test "`$legacy_count" = "`$archive_count"
+  echo "POSTGRES_RESTORE_REHEARSAL_OK=`$rehearsal_db"
+  echo "POSTGRES_MIGRATION_REHEARSAL_HEAD=`$rehearsal_head"
+  cleanup_rehearsal
+  trap - EXIT
+fi
+
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  docker compose up -d --build
+  docker compose up -d postgres redis minio minio-init
+  docker compose build api bot dashboard
+  docker compose run --rm api python -m alembic -c alembic.ini upgrade head
+  docker compose up -d
   sleep 10
   docker compose ps
   curl -fsS http://127.0.0.1:8000/health
   curl -fsSI http://127.0.0.1:5173/ >/dev/null
 else
   echo "Docker nao encontrado; usando deploy systemd atual."
-  .venv/bin/pip install -q -r backend/requirements.txt -r bot/requirements.txt
+  .venv/bin/python -m alembic -c backend/alembic.ini upgrade head
   sudo systemctl restart yuno-api.service yuno-bot.service
 
   api_ok=0
@@ -178,6 +243,20 @@ else
   test "`$api_ok" = "1"
   systemctl is-active yuno-api.service yuno-bot.service
 fi
+
+if grep -q '^OBJECT_STORAGE_ENDPOINT=..*' .env 2>/dev/null; then
+  storage_endpoint=`$(grep -m1 '^OBJECT_STORAGE_ENDPOINT=' .env | cut -d= -f2-)
+  curl -fsS "`${storage_endpoint%/}/minio/health/live" >/dev/null
+  echo "OBJECT_STORAGE_HEALTH=ok"
+fi
+
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+  actual_head=`$(docker compose run --rm api python -m alembic -c alembic.ini current | tail -n 1 | awk '{print `$1}')
+else
+  actual_head=`$(.venv/bin/python -m alembic -c backend/alembic.ini current | tail -n 1 | awk '{print `$1}')
+fi
+test "`$actual_head" = "d6e7f8a9b0c1"
+echo "ALEMBIC_HEAD=`$actual_head"
 
 echo "DEPLOYED_SHA=`$(git rev-parse HEAD)"
 "@
