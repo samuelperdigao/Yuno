@@ -132,7 +132,12 @@ if test "`$database_kind" = "sqlite"; then
 import sqlite3
 import sys
 
-protected = ("farm_tickets", "farm_ticket_entries", "farm_ticket_actions")
+protected = (
+    "farm_ticket_v2_tickets",
+    "farm_ticket_v2_entries",
+    "farm_ticket_v2_proofs",
+    "farm_ticket_v2_allocations",
+)
 
 def count(connection, table):
     exists = connection.execute(
@@ -147,10 +152,12 @@ with sqlite3.connect(sys.argv[1]) as backup, sqlite3.connect(sys.argv[2]) as mig
         raise SystemExit("Copia migrada falhou no integrity_check")
     before = {table: count(backup, table) for table in protected}
     after = {table: count(migrated, table) for table in protected}
+    legacy_before = count(backup, "farm_tickets")
+    configs_before = count(backup, "farm_ticket_configs")
     if before != after:
         raise SystemExit(f"Contagens protegidas divergiram: {before} != {after}")
     head = migrated.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-    if head != "e7f8a9b0c1d2":
+    if head != "f8a9b0c1d2e3":
         raise SystemExit(f"Head inesperado na copia migrada: {head}")
     legacy = migrated.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='farm_weekly_goals'"
@@ -167,11 +174,21 @@ with sqlite3.connect(sys.argv[1]) as backup, sqlite3.connect(sys.argv[2]) as mig
     ).fetchone()[0]
     if ticket_v2_tables != 18:
         raise SystemExit(f"Quantidade inesperada de tabelas Tickets V2: {ticket_v2_tables}")
-    legacy_count = count(migrated, "farm_tickets")
-    archive_count = count(migrated, "farm_ticket_v2_legacy_archive")
-    if archive_count != legacy_count:
+    if count(migrated, "farm_tickets") or count(migrated, "farm_ticket_configs"):
+        raise SystemExit("Tabelas legadas de tickets permaneceram apos o cutover")
+    archive_count = migrated.execute(
+        "SELECT count(*) FROM farm_ticket_v2_legacy_archive "
+        "WHERE source_namespace='yuno.legacy.farm_tickets.cutover'"
+    ).fetchone()[0]
+    config_archive_count = migrated.execute(
+        "SELECT count(*) FROM farm_ticket_v2_legacy_archive "
+        "WHERE source_namespace='yuno.legacy.farm_ticket_configs'"
+    ).fetchone()[0]
+    if archive_count != legacy_before or config_archive_count != configs_before:
         raise SystemExit(
-            f"Arquivo legado divergente: farm_tickets={legacy_count}, archive={archive_count}"
+            "Arquivo legado divergente: "
+            f"tickets={legacy_before}/{archive_count}, "
+            f"configs={configs_before}/{config_archive_count}"
         )
     print(f"RESTORE_REHEARSAL_OK={sys.argv[2]}")
     print(f"MIGRATION_REHEARSAL_HEAD={head}")
@@ -205,12 +222,22 @@ value = urlsplit(sys.argv[1])
 print(urlunsplit((value.scheme, value.netloc, "/" + sys.argv[2], value.query, value.fragment)))
 PY
   )
+  legacy_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_tickets")
+  config_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_configs")
+  v2_ticket_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_tickets")
+  v2_event_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_events")
   DATABASE_URL="`$rehearsal_url" .venv/bin/python -m alembic -c backend/alembic.ini upgrade head
   rehearsal_head=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c 'select version_num from alembic_version')
-  test "`$rehearsal_head" = "e7f8a9b0c1d2"
-  legacy_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_tickets")
-  archive_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_legacy_archive")
+  test "`$rehearsal_head" = "f8a9b0c1d2e3"
+  test "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select to_regclass('public.farm_tickets') is null")" = "t"
+  test "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select to_regclass('public.farm_cycles') is null")" = "t"
+  archive_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_legacy_archive where source_namespace='yuno.legacy.farm_tickets.cutover'")
+  config_archive_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_legacy_archive where source_namespace='yuno.legacy.farm_ticket_configs'")
   test "`$legacy_count" = "`$archive_count"
+  test "`$config_count" = "`$config_archive_count"
+  test "`$v2_ticket_count" = "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_tickets")"
+  test "`$v2_event_count" = "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_events")"
+  test "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_legacy_archive where length(checksum_sha256) <> 64")" = "0"
   echo "POSTGRES_RESTORE_REHEARSAL_OK=`$rehearsal_db"
   echo "POSTGRES_MIGRATION_REHEARSAL_HEAD=`$rehearsal_head"
   cleanup_rehearsal
@@ -229,7 +256,8 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
 else
   echo "Docker nao encontrado; usando deploy systemd atual."
   .venv/bin/python -m alembic -c backend/alembic.ini upgrade head
-  sudo systemctl restart yuno-api.service yuno-bot.service
+  sudo systemctl stop yuno-bot.service
+  sudo systemctl restart yuno-api.service
 
   api_ok=0
   for attempt in `$(seq 1 20); do
@@ -241,6 +269,16 @@ else
   done
 
   test "`$api_ok" = "1"
+  sudo systemctl restart yuno-bot.service
+  bot_ok=0
+  for attempt in `$(seq 1 20); do
+    if systemctl is-active --quiet yuno-bot.service; then
+      bot_ok=1
+      break
+    fi
+    sleep 1
+  done
+  test "`$bot_ok" = "1"
   systemctl is-active yuno-api.service yuno-bot.service
 fi
 
@@ -255,7 +293,7 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
 else
   actual_head=`$(.venv/bin/python -m alembic -c backend/alembic.ini current | tail -n 1 | awk '{print `$1}')
 fi
-test "`$actual_head" = "e7f8a9b0c1d2"
+test "`$actual_head" = "f8a9b0c1d2e3"
 echo "ALEMBIC_HEAD=`$actual_head"
 
 echo "DEPLOYED_SHA=`$(git rev-parse HEAD)"

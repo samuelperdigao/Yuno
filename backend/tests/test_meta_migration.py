@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "backend"
 PYTHON = Path(sys.executable)
@@ -35,13 +37,16 @@ def test_meta_migration_on_empty_sqlite(tmp_path: Path) -> None:
         }
         assert (
             connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-            == "e7f8a9b0c1d2"
+            == "f8a9b0c1d2e3"
         )
         assert len([name for name in tables if name.startswith("meta_")]) == 11
         assert "farm_weekly_goals" not in tables
+        assert "farm_tickets" not in tables
+        assert "farm_ticket_configs" not in tables
+        assert "farm_cycles" not in tables
 
 
-def test_representative_migration_removes_only_legacy_meta_and_preserves_tickets(
+def test_representative_migration_archives_then_removes_legacy_farm_domains(
     tmp_path: Path,
 ) -> None:
     database = tmp_path / "representative.db"
@@ -105,6 +110,34 @@ def test_representative_migration_removes_only_legacy_meta_and_preserves_tickets
             "INSERT INTO farm_ticket_actions (ticket_id, guild_id, action, payload, log_attempts) VALUES (?, ?, ?, ?, 0)",
             (ticket_id, "guild-1", "ticket_aberto", "{}"),
         )
+        connection.execute(
+            "INSERT INTO farm_ticket_configs "
+            "(guild_id, category_ids, admin_role_ids, log_channel_id, panel_channel_id, participant_role_ids) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("guild-1", "[]", "[]", "30", "40", "[]"),
+        )
+        connection.commit()
+
+    _alembic(database, "e7f8a9b0c1d2")
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM farm_tickets").fetchone()[0] == 1
+        additive_archive = connection.execute(
+            "SELECT payload, checksum_sha256 FROM farm_ticket_v2_legacy_archive "
+            "WHERE source_namespace = 'yuno.legacy.farm_tickets' AND source_id = ?",
+            (str(ticket_id),),
+        ).fetchone()
+        assert additive_archive is not None
+        assert len(additive_archive[1]) == 64
+
+    with pytest.raises(subprocess.CalledProcessError):
+        _alembic(database, "head")
+
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "UPDATE farm_tickets SET status = 'finalizado', finalized_at = CURRENT_TIMESTAMP "
+            "WHERE id = ?",
+            (ticket_id,),
+        )
         connection.commit()
 
     _alembic(database, "head")
@@ -122,20 +155,14 @@ def test_representative_migration_removes_only_legacy_meta_and_preserves_tickets
             ).fetchone()[0]
             == 0
         )
-        assert (
-            connection.execute("SELECT COUNT(*) FROM farm_tickets").fetchone()[0] == 1
-        )
-        assert (
-            connection.execute("SELECT COUNT(*) FROM farm_ticket_entries").fetchone()[0]
-            == 1
-        )
-        assert (
-            connection.execute("SELECT COUNT(*) FROM farm_ticket_actions").fetchone()[0]
-            == 1
-        )
+        assert "farm_tickets" not in tables
+        assert "farm_ticket_entries" not in tables
+        assert "farm_ticket_actions" not in tables
+        assert "farm_ticket_configs" not in tables
+        assert "farm_cycles" not in tables
         archive = connection.execute(
             "SELECT payload, checksum_sha256 FROM farm_ticket_v2_legacy_archive "
-            "WHERE source_namespace = 'yuno.legacy.farm_tickets' AND source_id = ?",
+            "WHERE source_namespace = 'yuno.legacy.farm_tickets.cutover' AND source_id = ?",
             (str(ticket_id),),
         ).fetchone()
         assert archive is not None
@@ -144,6 +171,13 @@ def test_representative_migration_removes_only_legacy_meta_and_preserves_tickets
         assert len(archived_payload["entries"]) == 1
         assert len(archived_payload["actions"]) == 1
         assert len(archive[1]) == 64
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM farm_ticket_v2_legacy_archive "
+                "WHERE source_namespace = 'yuno.legacy.farm_ticket_configs'"
+            ).fetchone()[0]
+            == 1
+        )
         modules, permissions, messages, settings = connection.execute(
             "SELECT modules, command_permissions, messages, settings FROM guild_configs WHERE guild_id = 'guild-1'"
         ).fetchone()

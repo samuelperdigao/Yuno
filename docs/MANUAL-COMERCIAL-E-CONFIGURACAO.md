@@ -177,24 +177,25 @@ Configuração: `/meta painel canal_painel:#canal canal_resultado:#canal cargo_d
 
 O bot precisa de permissão para mencionar `@everyone` no canal de resultado.
 
-### 7.3 Tickets semanais de farm
+### 7.3 Tickets de Farm V2
 
-Configure nesta ordem:
+Configure e publique **Tickets de Farm** pela Central aberta com
+`/yuno configurar`. A publicação define categoria principal, canal do painel,
+canal de logs e cargos administradores. O runtime nunca usa um rascunho ainda
+não publicado.
 
-```text
-/setup_farm_tickets categorias_tickets:IDS cargos_admin:IDS cargos_participantes:IDS canal_log:#canal canal_painel:#canal categoria_pastas:CATEGORIA
-/setup_farm_meta definicao:"Item A: 100, Item B: 50"
-/setup_farm_painel
-```
+O painel global contém **Abrir Ticket**, **Abrir para Membro** e **Excluir
+Ticket**. Cada ticket recebe um canal privado com lançamento e edição mediante
+novo comprovante, histórico de comprovantes, recolhimento FIFO, atribuição,
+aprovação e finalização.
 
-`categorias_tickets`, `cargos_admin` e `cargos_participantes` aceitam IDs ou menções.
+O ticket copia a Meta ativa do membro no momento da abertura. O comprovante
+deve ser recebido em até cinco minutos; depois de recebido no prazo, falhas de
+download ou storage entram em retry sem expirar a operação. Fim de ciclo ou
+troca de Meta preserva os totais reais, inclusive saldo ainda não recolhido.
 
-- **Abrir Ticket Semanal** reserva um ticket aberto por membro/semana e cria o canal privado.
-- **Ver Meu Farm** mostra o progresso.
-- **Ranking Semanal** ou `/farm ranking` agrega entregas e mostra os dez primeiros.
-- **Lançar Farm**, **Ver Comprovantes**, **Assumir Ticket**, **Revisar**, **Aprovar Meta**, **Finalizar Ticket** e **Excluir Ticket** controlam o ciclo.
-
-O backend possui testes de configuração, meta, reserva sem duplicidade, lançamento, ranking, atribuição, fila de logs e finalização.
+O legado semanal, seus comandos de setup e `/farm ranking` foram removidos. A
+matriz de comportamento e validação está em `docs/tickets-v2-acceptance.md`.
 
 ### 7.4 Tickets gerais
 

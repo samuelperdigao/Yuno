@@ -1,4 +1,7 @@
-# Farm V2 — validação, cutover e rollback
+# Farm V2 — validação histórica do módulo retirado
+
+> Este documento não descreve o runtime atual. O módulo `farm` não lançado foi
+> removido no cutover; use `docs/tickets-v2-acceptance.md`.
 
 ## Pré-condições
 

@@ -1,6 +1,7 @@
 # Farm V2 — plano funcional e técnico fechado
 
-Status: MVP implementado localmente; validação online e cutover pendentes
+Status: RETIRADO. Este módulo `farm` não lançado foi removido; Metas é dona de
+ciclos/objetivos/participantes e `farm_tickets` V2 é o domínio operacional.
 Data: 11 de agosto de 2026
 Escopo: primeiro módulo domain-first do Yuno
 

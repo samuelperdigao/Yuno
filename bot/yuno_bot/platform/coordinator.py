@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import socket
 
-from yuno_bot.platform.registry import UIRegistry, ui_registry
 from yuno_bot.platform.contracts import RetryableJobError
+from yuno_bot.platform.registry import UIRegistry, ui_registry
 
 
 class PlatformCoordinator:
@@ -55,12 +55,16 @@ class PlatformCoordinator:
                 pass
 
     async def run_once(self) -> None:
+        tasks: list[dict] = []
+        deliveries: list[dict] = []
         try:
             tasks = await self.api.claim_tasks(self.worker_id)
+        except Exception:
+            self.bot.log.exception("Falha ao buscar jobs da Yuno Platform")
+        try:
             deliveries = await self.api.claim_deliveries(self.worker_id)
         except Exception:
-            self.bot.log.exception("Falha ao buscar trabalho da Yuno Platform")
-            return
+            self.bot.log.exception("Falha ao buscar entregas da Yuno Platform")
         for item in tasks:
             handler = self.registry.job(item["module_key"], item["key"])
             if handler is None:

@@ -1,12 +1,11 @@
 from fastapi import APIRouter
 
 from app.api.platform import (
-    automation,
     audits,
+    automation,
     configuration,
     deliveries,
     diagnostics,
-    farm,
     farm_tickets,
     interactions,
     meta,
@@ -18,7 +17,6 @@ from app.api.platform import (
     tags,
     tenancy,
 )
-
 
 router = APIRouter(prefix="/internal/platform", tags=["yuno-platform"])
 for child in (
@@ -33,7 +31,6 @@ for child in (
     migrations.router,
     diagnostics.router,
     meta.router,
-    farm.router,
     farm_tickets.router,
     registration.router,
     tags.router,

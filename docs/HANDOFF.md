@@ -1,4 +1,8 @@
-# Handoff — continuar o Yuno no Claude Code
+# Handoff histórico — fundação inicial do Yuno
+
+> Documento preservado como histórico de agosto de 2026. O estado atual de
+> Tickets está em `docs/tickets-v2-acceptance.md`; o runtime semanal legado e o
+> módulo `farm` não lançado foram removidos no cutover de Tickets V2.
 
 ## Atualização Codex — 2026-08-02
 

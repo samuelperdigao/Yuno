@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 
 import asyncio
 import os
@@ -18,26 +17,23 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(ROOT / "bot"))
 
-import app.models  # noqa: E402,F401 -- registra legado e plataforma no Base
-from app.api.platform.dependencies import require_platform_admin  # noqa: E402
-from app.db import Base  # noqa: E402
-from app.domain_modules.farm.definition import (
-    MODULE_DEFINITION as FARM_DEFINITION,  # noqa: E402
-)
-from app.platform.audit import write_audit  # noqa: E402
-from app.platform.automation import (  # noqa: E402
+import app.models  # noqa: F401 -- registra legado e plataforma no Base
+from app.api.platform.dependencies import require_platform_admin
+from app.db import Base
+from app.platform.audit import write_audit
+from app.platform.automation import (
     claim_tasks,
     complete_task,
     schedule_task,
 )
-from app.platform.configuration import (  # noqa: E402
+from app.platform.configuration import (
     effective_configuration,
     get_or_create_draft,
     publish,
     rollback,
     save_draft,
 )
-from app.platform.contracts import (  # noqa: E402
+from app.platform.contracts import (
     ActionContract,
     CapabilityDefinition,
     ConfigurationContract,
@@ -51,21 +47,21 @@ from app.platform.contracts import (  # noqa: E402
     NotificationDefinition,
     PanelContract,
 )
-from app.platform.interactions import (  # noqa: E402
+from app.platform.interactions import (
     begin_interaction,
     finish_interaction,
 )
-from app.platform.lifecycle import (  # noqa: E402
+from app.platform.lifecycle import (
     ensure_module_instance,
     update_lifecycle,
 )
-from app.platform.migrations import (  # noqa: E402
+from app.platform.migrations import (
     cutover,
     rollback_cutover,
     start_migration,
     update_migration,
 )
-from app.platform.models import (  # noqa: E402
+from app.platform.models import (
     AuditEntry,
     MigrationState,
     ModuleLifecycle,
@@ -73,29 +69,28 @@ from app.platform.models import (  # noqa: E402
     RuntimeMode,
     WorkState,
 )
-from app.platform.outbox import (  # noqa: E402
+from app.platform.outbox import (
     claim_deliveries,
     complete_delivery,
     enqueue_delivery,
 )
-from app.platform.panels import ensure_panel, get_panel, update_panel  # noqa: E402
-from app.platform.permissions import authorize  # noqa: E402
-from app.platform.registry import (  # noqa: E402
+from app.platform.panels import ensure_panel, get_panel, update_panel
+from app.platform.permissions import authorize
+from app.platform.registry import (
     ModuleRegistry,
     discover_domain_modules,
     module_registry,
 )
-from app.platform.schemas import ActorContextIn, PermissionGrantIn  # noqa: E402
-from yuno_bot.domain_modules.farm import MODULE_UI as FARM_UI  # noqa: E402
-from yuno_bot.platform import coordinator as platform_coordinator  # noqa: E402
-from yuno_bot.platform.contracts import InteractionResult, ModuleUIAdapter  # noqa: E402
-from yuno_bot.platform.coordinator import PlatformCoordinator  # noqa: E402
-from yuno_bot.platform.registry import (  # noqa: E402
+from app.platform.schemas import ActorContextIn, PermissionGrantIn
+from yuno_bot.platform import coordinator as platform_coordinator
+from yuno_bot.platform.contracts import InteractionResult, ModuleUIAdapter
+from yuno_bot.platform.coordinator import PlatformCoordinator
+from yuno_bot.platform.registry import (
     UIRegistry,
     discover_ui_modules,
     verify_backend_manifest,
 )
-from yuno_bot.platform.router import (  # noqa: E402
+from yuno_bot.platform.router import (
     InteractionRouter,
     custom_id,
     parse_custom_id,
@@ -175,8 +170,6 @@ def test_new_registry_discovers_only_domain_first_modules() -> None:
         "farm_tickets", "meta", "registration", "tags"
     ]
     by_key = {item.module_key: item for item in adapters}
-    assert FARM_DEFINITION.manifest.released is False
-    assert FARM_UI.released is False
     assert {item.key for item in by_key["registration"].panels} == {"public", "review"}
     assert {item.key for item in by_key["registration"].jobs} == {
         "registration.processing.recover",
@@ -764,6 +757,60 @@ def test_coordinator_keeps_polling_after_unexpected_cycle_failure(monkeypatch) -
     assert errors == [
         "Falha inesperada no ciclo da Yuno Platform; o worker continuara ativo"
     ]
+
+
+def test_coordinator_processes_claimed_jobs_when_delivery_claim_fails() -> None:
+    completed: list[str] = []
+    errors: list[str] = []
+
+    class Log:
+        def exception(self, message: str, *args) -> None:
+            del args
+            errors.append(message)
+
+    class Bot:
+        log = Log()
+
+    class API:
+        async def claim_tasks(self, worker_id: str) -> list[dict]:
+            return [
+                {
+                    "id": "task-1",
+                    "guild_id": "guild-a",
+                    "module_key": "foundation_test",
+                    "key": "expire",
+                }
+            ]
+
+        async def claim_deliveries(self, worker_id: str) -> list[dict]:
+            raise RuntimeError("outbox indisponivel")
+
+        async def complete_task(
+            self, item: dict, worker_id: str, result: dict
+        ) -> None:
+            completed.append(item["id"])
+
+    async def handler(bot, api, item) -> dict:
+        return {"ok": True}
+
+    class Registry:
+        def all(self) -> list[SimpleNamespace]:
+            return [SimpleNamespace(jobs=(object(),), deliveries=(object(),))]
+
+        def job(self, module_key: str, key: str) -> SimpleNamespace:
+            return SimpleNamespace(handler=handler)
+
+        def delivery(self, module_key: str, key: str):
+            return None
+
+    async def scenario() -> None:
+        coordinator = PlatformCoordinator(Bot(), API(), Registry())
+        await coordinator.run_once()
+
+    asyncio.run(scenario())
+
+    assert completed == ["task-1"]
+    assert errors == ["Falha ao buscar entregas da Yuno Platform"]
 
 
 def test_router_omits_empty_discord_response_fields() -> None:

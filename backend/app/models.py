@@ -212,105 +212,14 @@ class Ausencia(Base):
     message_id: Mapped[str | None] = mapped_column(String(32))
 
 
-class FarmTicketConfig(Base):
-    __tablename__ = "farm_ticket_configs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    guild_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
-    category_ids: Mapped[list[str]] = mapped_column(JsonType, default=list)
-    admin_role_ids: Mapped[list[str]] = mapped_column(JsonType, default=list)
-    log_channel_id: Mapped[str] = mapped_column(String(32))
-    panel_channel_id: Mapped[str] = mapped_column(String(32))
-    folders_category_id: Mapped[str | None] = mapped_column(String(32))
-    participant_role_ids: Mapped[list[str]] = mapped_column(JsonType, default=list)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-
-class FarmTicket(Base):
-    __tablename__ = "farm_tickets"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    guild_id: Mapped[str] = mapped_column(String(32), index=True)
-    week_id: Mapped[str] = mapped_column(String(12), index=True)
-    user_id: Mapped[str] = mapped_column(String(32), index=True)
-    member_name: Mapped[str] = mapped_column(String(120))
-    folder_channel_id: Mapped[str | None] = mapped_column(String(32))
-    folder_slot: Mapped[int | None] = mapped_column(Integer)
-    game_id: Mapped[str | None] = mapped_column(String(32))
-    folder_nickname: Mapped[str | None] = mapped_column(String(120))
-    channel_id: Mapped[str | None] = mapped_column(String(32), index=True)
-    panel_message_id: Mapped[str | None] = mapped_column(String(32))
-    status: Mapped[str] = mapped_column(String(40), default="reservado", index=True)
-    assigned_to: Mapped[str | None] = mapped_column(String(32), index=True)
-    goal_items: Mapped[list[dict]] = mapped_column(JsonType, default=list)
-    progress: Mapped[dict] = mapped_column(JsonType, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    finalized_by: Mapped[str | None] = mapped_column(String(32))
-    finalization_reason: Mapped[str | None] = mapped_column(Text)
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-    entries: Mapped[list["FarmTicketEntry"]] = relationship(
-        "app.models.FarmTicketEntry", back_populates="ticket"
-    )
-    actions: Mapped[list["FarmTicketAction"]] = relationship(
-        "app.models.FarmTicketAction", back_populates="ticket"
-    )
-
-
-class FarmTicketEntry(Base):
-    __tablename__ = "farm_ticket_entries"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    ticket_id: Mapped[int] = mapped_column(ForeignKey("farm_tickets.id"), index=True)
-    guild_id: Mapped[str] = mapped_column(String(32), index=True)
-    values: Mapped[dict] = mapped_column(JsonType, default=dict)
-    proof_channel_id: Mapped[str] = mapped_column(String(32))
-    proof_message_id: Mapped[str] = mapped_column(String(32))
-    proof_url: Mapped[str] = mapped_column(Text)
-    log_proof_url: Mapped[str | None] = mapped_column(Text)
-    observacao: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(40), default="registrado", index=True)
-    reviewed_by: Mapped[str | None] = mapped_column(String(32))
-    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    review_reason: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
-
-    ticket: Mapped[FarmTicket] = relationship(
-        "app.models.FarmTicket", back_populates="entries"
-    )
-
-
-class FarmTicketAction(Base):
-    __tablename__ = "farm_ticket_actions"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    ticket_id: Mapped[int | None] = mapped_column(ForeignKey("farm_tickets.id"), index=True)
-    guild_id: Mapped[str] = mapped_column(String(32), index=True)
-    action: Mapped[str] = mapped_column(String(80), index=True)
-    actor_id: Mapped[str | None] = mapped_column(String(32), index=True)
-    event_id: Mapped[str | None] = mapped_column(String(80), index=True)
-    payload: Mapped[dict] = mapped_column(JsonType, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
-    log_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    log_message_id: Mapped[str | None] = mapped_column(String(32))
-    log_attempts: Mapped[int] = mapped_column(Integer, default=0)
-
-    ticket: Mapped[FarmTicket | None] = relationship(
-        "app.models.FarmTicket", back_populates="actions"
-    )
-
-
 # Registra as tabelas transversais novas no mesmo Base sem misturar seus
 # conceitos com os modelos legados deste arquivo.
-from app.domain_modules.farm import models as farm_domain_models  # noqa: E402,F401
-from app.domain_modules.farm_tickets import (  # noqa: E402
+from app.domain_modules.farm_tickets import (
     models as farm_ticket_v2_models,  # noqa: F401
 )
-from app.domain_modules.meta import models as meta_domain_models  # noqa: E402,F401
-from app.domain_modules.registration import (  # noqa: E402
+from app.domain_modules.meta import models as meta_domain_models  # noqa: F401
+from app.domain_modules.registration import (
     models as registration_domain_models,  # noqa: F401
 )
-from app.domain_modules.tags import models as tags_domain_models  # noqa: E402,F401
-from app.platform import models as platform_models  # noqa: E402,F401
+from app.domain_modules.tags import models as tags_domain_models  # noqa: F401
+from app.platform import models as platform_models  # noqa: F401

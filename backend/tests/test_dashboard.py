@@ -1,6 +1,6 @@
-import pytest
 from types import SimpleNamespace
 
+import pytest
 from yuno_bot import dashboard
 from yuno_bot.domain_modules.tags import ui as tags_ui
 from yuno_bot.modules import discover_modules
@@ -28,7 +28,7 @@ def test_central_uses_a_module_selector_with_stable_custom_id() -> None:
 def test_legacy_catalog_has_no_runtime_implementation() -> None:
     modules = discover_modules(force=True)
 
-    assert len(modules) == 16
+    assert len(modules) == 15
     for spec in modules.values():
         assert spec.cogs == ()
         assert spec.views == ()
