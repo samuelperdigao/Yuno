@@ -2,13 +2,13 @@
 import asyncio
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -47,6 +47,7 @@ from app.platform.contracts import (
     NotificationDefinition,
     PanelContract,
 )
+from app.platform.diagnostics import module_health
 from app.platform.interactions import (
     begin_interaction,
     finish_interaction,
@@ -63,6 +64,7 @@ from app.platform.migrations import (
 )
 from app.platform.models import (
     AuditEntry,
+    AutomationTask,
     MigrationState,
     ModuleLifecycle,
     PanelState,
@@ -654,6 +656,124 @@ def test_platform_services_form_a_tenant_safe_vertical_foundation() -> None:
                 assert current.runtime_mode == RuntimeMode.legacy
         finally:
             module_registry.unregister("foundation_test")
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_module_health_keeps_failed_history_but_clears_recovered_alerts() -> None:
+    async def scenario() -> None:
+        engine = create_async_engine(
+            "sqlite+aiosqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        module_key = "health_recovery_test"
+        definition = ModuleDefinition(
+            manifest=ModuleManifest(
+                key=module_key,
+                name="Health recovery",
+                description="Valida falhas historicas recuperadas.",
+            ),
+            jobs=(JobDefinition("recover", max_attempts=3),),
+            notifications=(NotificationDefinition("log", ("channel",)),),
+        )
+        module_registry.register(definition)
+        first = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        recovered_at = first + timedelta(days=1)
+        try:
+            async with sessions() as session:
+                failed = await schedule_task(
+                    session,
+                    guild_id="guild-health",
+                    module_key=module_key,
+                    job_key="recover",
+                    resource_type="proof",
+                    resource_id="proof-1",
+                    payload={},
+                    due_at=first,
+                    idempotency_key="failed",
+                    correlation_id="failed",
+                    max_attempts=3,
+                    commit=False,
+                )
+                failed.state = WorkState.failed
+                failed.created_at = first
+                succeeded = await schedule_task(
+                    session,
+                    guild_id="guild-health",
+                    module_key=module_key,
+                    job_key="recover",
+                    resource_type="proof",
+                    resource_id="proof-1",
+                    payload={},
+                    due_at=recovered_at,
+                    idempotency_key="recovered",
+                    correlation_id="recovered",
+                    max_attempts=3,
+                    commit=False,
+                )
+                succeeded.state = WorkState.succeeded
+                succeeded.created_at = recovered_at
+                failed_delivery = await enqueue_delivery(
+                    session,
+                    guild_id="guild-health",
+                    module_key=module_key,
+                    renderer_key="log",
+                    destination_type="channel",
+                    destination_id="10",
+                    resource_type="proof",
+                    resource_id="proof-1",
+                    payload={},
+                    priority=100,
+                    available_at=first,
+                    idempotency_key="delivery-failed",
+                    correlation_id="delivery-failed",
+                    max_attempts=3,
+                )
+                failed_delivery.state = WorkState.failed
+                failed_delivery.created_at = first
+                succeeded_delivery = await enqueue_delivery(
+                    session,
+                    guild_id="guild-health",
+                    module_key=module_key,
+                    renderer_key="log",
+                    destination_type="channel",
+                    destination_id="10",
+                    resource_type="proof",
+                    resource_id="proof-1",
+                    payload={},
+                    priority=100,
+                    available_at=recovered_at,
+                    idempotency_key="delivery-recovered",
+                    correlation_id="delivery-recovered",
+                    max_attempts=3,
+                )
+                succeeded_delivery.state = WorkState.succeeded
+                succeeded_delivery.created_at = recovered_at
+                await session.commit()
+
+                checks = await module_health(
+                    session, guild_id="guild-health", module_key=module_key
+                )
+                background = next(
+                    item for item in checks if item.code == "module.background_work"
+                )
+                assert background.status == "OK"
+                assert background.summary == "0 job(s) e 0 entrega(s) com falha."
+                assert (
+                    await session.scalar(
+                        select(func.count())
+                        .select_from(AutomationTask)
+                        .where(AutomationTask.state == WorkState.failed)
+                    )
+                    == 1
+                )
+        finally:
+            module_registry.unregister(module_key)
             await engine.dispose()
 
     asyncio.run(scenario())
