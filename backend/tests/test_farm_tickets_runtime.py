@@ -6,6 +6,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "bot"))
 
+from yuno_bot import main as bot_main  # noqa: E402
 from yuno_bot.domain_modules.farm_tickets import runtime  # noqa: E402
 from yuno_bot.platform.contracts import ActorContext  # noqa: E402
 
@@ -32,7 +33,7 @@ class FakeThread:
         self.sent.append(kwargs)
         return SimpleNamespace(id=9000 + len(self.sent))
 
-    async def delete(self) -> None:
+    async def delete(self, **kwargs) -> None:
         self.deleted = True
 
 
@@ -54,7 +55,7 @@ class FakeMessage:
         self.channel.guild.resources[thread.id] = thread
         return thread
 
-    async def delete(self, **kwargs) -> None:
+    async def delete(self) -> None:
         self.deleted = True
 
 
@@ -91,6 +92,9 @@ class FakeTextChannel:
 
     async def edit(self, **kwargs) -> None:
         self.edits.append(kwargs)
+        category = kwargs.get("category")
+        if category is not None:
+            self.category_id = category.id
 
     async def delete(self, **kwargs) -> None:
         self.deleted = True
@@ -367,6 +371,63 @@ def test_runtime_creates_numbered_category_only_after_real_fifty_channel_limit(
         assert selected.name == "TICKETS DE FARM 2"
         assert len(primary.channels) == 50
         assert selected.channels == []
+
+    asyncio.run(scenario())
+
+
+def test_runtime_reparents_adopted_channels_when_category_is_recovered(
+    monkeypatch,
+) -> None:
+    async def scenario() -> None:
+        guild = FakeGuild()
+        platform_api = FakePlatformAPI()
+        api = FakeTicketsAPI(_ticket())
+        bot = SimpleNamespace(user=SimpleNamespace(id=999))
+        monkeypatch.setattr(runtime.discord, "CategoryChannel", FakeCategory)
+        monkeypatch.setattr(runtime.discord, "TextChannel", FakeTextChannel)
+        monkeypatch.setattr(runtime, "FarmTicketsAPI", lambda platform: api)
+        monkeypatch.setattr(runtime, "PanelPublisher", FakePublisher)
+
+        original, panel, log = await runtime._ensure_global_resources(
+            bot, platform_api, guild, _actor()
+        )
+        guild.resources.pop(original.id)
+        for binding in api.rows:
+            if binding["kind"] == "CATEGORY":
+                binding["state"] = "MISSING"
+
+        recovered, same_panel, same_log = await runtime._ensure_global_resources(
+            bot, platform_api, guild, _actor()
+        )
+
+        assert recovered.id != original.id
+        assert same_panel is panel
+        assert same_log is log
+        assert panel.category_id == recovered.id
+        assert log.category_id == recovered.id
+        assert panel.edits[-1]["category"] is recovered
+        assert log.edits[-1]["category"] is recovered
+
+    asyncio.run(scenario())
+
+
+def test_raw_thread_delete_is_dispatched_to_module_recovery() -> None:
+    class Bot:
+        def __init__(self) -> None:
+            self.deleted: list[tuple[int, int]] = []
+
+        async def _dispatch_resource_delete(
+            self, guild_id: int, resource_id: int
+        ) -> None:
+            self.deleted.append((guild_id, resource_id))
+
+    async def scenario() -> None:
+        bot = Bot()
+        payload = SimpleNamespace(guild_id=123, thread_id=456)
+
+        await bot_main.YunoBot.on_raw_thread_delete(bot, payload)
+
+        assert bot.deleted == [(123, 456)]
 
     asyncio.run(scenario())
 

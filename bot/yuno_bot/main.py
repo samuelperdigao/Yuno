@@ -201,6 +201,9 @@ class YunoBot(commands.Bot):
         if payload.guild_id is not None:
             await self._dispatch_resource_delete(payload.guild_id, payload.message_id)
 
+    async def on_raw_thread_delete(self, payload: discord.RawThreadDeleteEvent) -> None:
+        await self._dispatch_resource_delete(payload.guild_id, payload.thread_id)
+
     async def refresh_published_central_once(self) -> None:
         """Reconciliacao segura: edita somente a mensagem ja registrada."""
 

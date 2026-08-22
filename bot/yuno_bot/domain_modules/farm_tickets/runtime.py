@@ -199,6 +199,11 @@ async def _ensure_global_resources(
                     reason=f"Yuno Tickets V2: recovery de {kind}",
                 )
                 resource_ownership = "MANAGED"
+        if current.category_id != category.id:
+            await current.edit(
+                category=category,
+                reason=f"Yuno Tickets V2: recovery da categoria de {kind}",
+            )
         await _record_binding(
             api,
             guild_id=guild.id,
