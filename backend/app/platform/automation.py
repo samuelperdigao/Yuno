@@ -4,11 +4,17 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.platform.lifecycle import ensure_module_instance
-from app.platform.models import AutomationRun, AutomationTask, ModuleInstance, ModuleLifecycle, WorkState
+from app.platform.models import (
+    AutomationRun,
+    AutomationTask,
+    ModuleInstance,
+    ModuleLifecycle,
+    WorkState,
+)
 from app.platform.registry import module_registry
 
 
@@ -153,6 +159,7 @@ async def complete_task(
     task = await _claimed_task(session, guild_id=guild_id, task_id=task_id, worker_id=worker_id)
     task.state = WorkState.succeeded
     task.result = result
+    task.last_error = None
     task.lease_owner = None
     task.lease_until = None
     run = (

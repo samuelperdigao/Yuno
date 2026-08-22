@@ -77,7 +77,7 @@ def _inspect_image(path: Path) -> tuple[str, int, str]:
             width, height = image.size
             if width < 1 or height < 1:
                 raise InvalidProofImage("Imagem sem dimensoes validas.")
-    except UnidentifiedImageError as exc:
+    except (UnidentifiedImageError, OSError, SyntaxError) as exc:
         raise InvalidProofImage("O arquivo nao e uma imagem valida.") from exc
     checksum = hashlib.sha256()
     size = 0

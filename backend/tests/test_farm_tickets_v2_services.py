@@ -585,7 +585,15 @@ def test_deeply_invalid_image_releases_claim_without_resetting_deadline(
     async def run() -> None:
         engine, sessions = await _database()
         invalid_path = tmp_path / "not-an-image.png"
-        invalid_path.write_bytes(b"not an image")
+        # Assinatura PNG valida, mas IDAT corrompido: Pillow levanta SyntaxError
+        # durante verify(), nao UnidentifiedImageError.
+        invalid_path.write_bytes(
+            bytes.fromhex(
+                "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+                "0000000d49444154789c6360f8cfc00000040101005fe5c34b0000000049454e44"
+                "ae426082"
+            )
+        )
 
         async def downloaded(url: str):
             return invalid_path

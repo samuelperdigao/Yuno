@@ -1,3 +1,5 @@
+# ruff: noqa: E402
+
 import asyncio
 import os
 import sys
@@ -11,18 +13,23 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-
 os.environ.setdefault("DISCORD_BOT_TOKEN", "test-token")
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(ROOT / "bot"))
 
 import app.models  # noqa: E402,F401 -- registra legado e plataforma no Base
-from app.domain_modules.farm.definition import MODULE_DEFINITION as FARM_DEFINITION  # noqa: E402
 from app.api.platform.dependencies import require_platform_admin  # noqa: E402
 from app.db import Base  # noqa: E402
+from app.domain_modules.farm.definition import (
+    MODULE_DEFINITION as FARM_DEFINITION,  # noqa: E402
+)
 from app.platform.audit import write_audit  # noqa: E402
-from app.platform.automation import claim_tasks, complete_task, schedule_task  # noqa: E402
+from app.platform.automation import (  # noqa: E402
+    claim_tasks,
+    complete_task,
+    schedule_task,
+)
 from app.platform.configuration import (  # noqa: E402
     effective_configuration,
     get_or_create_draft,
@@ -38,15 +45,20 @@ from app.platform.contracts import (  # noqa: E402
     ConfigurationFieldType,
     JobDefinition,
     LifecyclePolicy,
-    MigrationContract,
     ModuleDefinition,
     ModuleDependency,
     ModuleManifest,
     NotificationDefinition,
     PanelContract,
 )
-from app.platform.interactions import begin_interaction, finish_interaction  # noqa: E402
-from app.platform.lifecycle import ensure_module_instance, update_lifecycle  # noqa: E402
+from app.platform.interactions import (  # noqa: E402
+    begin_interaction,
+    finish_interaction,
+)
+from app.platform.lifecycle import (  # noqa: E402
+    ensure_module_instance,
+    update_lifecycle,
+)
 from app.platform.migrations import (  # noqa: E402
     cutover,
     rollback_cutover,
@@ -68,14 +80,26 @@ from app.platform.outbox import (  # noqa: E402
 )
 from app.platform.panels import ensure_panel, get_panel, update_panel  # noqa: E402
 from app.platform.permissions import authorize  # noqa: E402
-from app.platform.registry import ModuleRegistry, discover_domain_modules, module_registry  # noqa: E402
+from app.platform.registry import (  # noqa: E402
+    ModuleRegistry,
+    discover_domain_modules,
+    module_registry,
+)
 from app.platform.schemas import ActorContextIn, PermissionGrantIn  # noqa: E402
-from yuno_bot.platform.registry import UIRegistry, discover_ui_modules, verify_backend_manifest  # noqa: E402
+from yuno_bot.domain_modules.farm import MODULE_UI as FARM_UI  # noqa: E402
 from yuno_bot.platform import coordinator as platform_coordinator  # noqa: E402
 from yuno_bot.platform.contracts import InteractionResult, ModuleUIAdapter  # noqa: E402
 from yuno_bot.platform.coordinator import PlatformCoordinator  # noqa: E402
-from yuno_bot.platform.router import InteractionRouter, custom_id, parse_custom_id  # noqa: E402
-from yuno_bot.domain_modules.farm import MODULE_UI as FARM_UI  # noqa: E402
+from yuno_bot.platform.registry import (  # noqa: E402
+    UIRegistry,
+    discover_ui_modules,
+    verify_backend_manifest,
+)
+from yuno_bot.platform.router import (  # noqa: E402
+    InteractionRouter,
+    custom_id,
+    parse_custom_id,
+)
 
 
 class SyntheticMigration:
@@ -462,6 +486,8 @@ def test_platform_services_form_a_tenant_safe_vertical_foundation() -> None:
                 assert await claim_tasks(
                     session, worker_id="worker-2", limit=10, lease_seconds=60
                 ) == []
+                task.last_error = "erro transitorio anterior"
+                await session.commit()
                 await complete_task(
                     session,
                     guild_id="guild-a",
@@ -469,6 +495,7 @@ def test_platform_services_form_a_tenant_safe_vertical_foundation() -> None:
                     worker_id="worker-1",
                     result={"ok": True},
                 )
+                assert task.last_error is None
 
                 delivery = await enqueue_delivery(
                     session,
@@ -508,6 +535,8 @@ def test_platform_services_form_a_tenant_safe_vertical_foundation() -> None:
                     session, worker_id="worker-1", limit=10, lease_seconds=60
                 )
                 assert [item.id for item in claimed_delivery] == [delivery.id]
+                delivery.last_error = "erro transitorio anterior"
+                await session.commit()
                 await complete_delivery(
                     session,
                     guild_id="guild-a",
@@ -515,6 +544,7 @@ def test_platform_services_form_a_tenant_safe_vertical_foundation() -> None:
                     worker_id="worker-1",
                     external_id="discord-message-1",
                 )
+                assert delivery.last_error is None
 
                 receipt, duplicate = await begin_interaction(
                     session,
