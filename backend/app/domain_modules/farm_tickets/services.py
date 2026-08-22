@@ -2166,7 +2166,7 @@ async def withdraw(
                 FarmTicketEntryRevision.status == EntryRevisionStatus.CURRENT,
             )
             .order_by(FarmTicketEntry.number, FarmTicketEntryItem.id)
-            .with_for_update()
+            .with_for_update(of=FarmTicketEntryItem)
         )
         remaining = amount
         for entry_item, entry_number, allocated in fifo_rows:
