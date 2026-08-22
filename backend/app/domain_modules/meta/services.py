@@ -625,7 +625,7 @@ async def submit_draft(
         goal = MetaGoal(
             guild_id=guild_id,
             created_sequence=sequence,
-            creation_key=draft.id,
+            creation_key=f"{draft.id}:{draft.revision}",
             name=data.name,
             state=GoalState.scheduled,
             recurrence=data.recurrence,

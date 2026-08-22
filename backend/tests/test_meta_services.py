@@ -243,7 +243,9 @@ def test_partial_conflict_moves_only_overlap_and_keeps_old_recurring() -> None:
             async with sessions() as session:
                 old = await _create_goal(session, admin_id="900", name="Antiga")
                 old_active = await _activate(session, old, _members("1", "2"))
-                new = await _create_goal(session, admin_id="901", name="Nova")
+                # O rascunho e persistente por administrador, mas cada abertura
+                # para uma nova Meta precisa gerar uma chave de criacao distinta.
+                new = await _create_goal(session, admin_id="900", name="Nova")
                 new_active = await _activate(session, new, _members("1"))
                 old_goal = await session.get(MetaGoal, old["id"])
                 assert old_goal.state == GoalState.active
