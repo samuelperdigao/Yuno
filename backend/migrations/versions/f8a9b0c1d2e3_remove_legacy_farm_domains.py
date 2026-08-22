@@ -20,7 +20,6 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-
 revision: str = "f8a9b0c1d2e3"
 down_revision: str | Sequence[str] | None = "e7f8a9b0c1d2"
 branch_labels: str | Sequence[str] | None = None

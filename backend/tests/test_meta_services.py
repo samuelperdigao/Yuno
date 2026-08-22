@@ -1,7 +1,7 @@
 import asyncio
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-import sys
 
 import pytest
 from fastapi import HTTPException
@@ -9,11 +9,11 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 
 import app.models  # noqa: E402,F401
+from app.api.platform.meta import _event_out  # noqa: E402
 from app.db import Base  # noqa: E402
 from app.domain_modules.meta import contracts, services  # noqa: E402
 from app.domain_modules.meta.domain import (  # noqa: E402
@@ -27,14 +27,12 @@ from app.domain_modules.meta.domain import (  # noqa: E402
 )
 from app.domain_modules.meta.models import (  # noqa: E402
     MetaCycle,
-    MetaCycleParticipant,
     MetaGoal,
     MetaIntegrationEvent,
 )
 from app.domain_modules.meta.schemas import MetaMemberSnapshotIn  # noqa: E402
-from app.api.platform.meta import _event_out  # noqa: E402
-from app.platform.registry import discover_domain_modules  # noqa: E402
 from app.platform.models import AutomationTask  # noqa: E402
+from app.platform.registry import discover_domain_modules  # noqa: E402
 
 
 async def _database():

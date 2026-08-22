@@ -9,7 +9,6 @@ from yuno_bot.platform.components_v2 import edit_interaction_message
 from yuno_bot.platform.contracts import ActorContext, InteractionResult, RoutedContext
 from yuno_bot.platform.registry import UIRegistry, ui_registry
 
-
 CUSTOM_ID_PATTERN = re.compile(
     r"^yuno:v(?P<version>\d+):(?P<module>[a-z0-9_]{1,32}):"
     r"(?P<surface>[a-z0-9_]{1,32}):(?P<action>[a-z0-9_]{1,32})$"
