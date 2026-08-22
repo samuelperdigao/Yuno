@@ -523,7 +523,12 @@ class FarmTicketEvent(Base):
 class FarmTicketDiscordBinding(Base):
     __tablename__ = "farm_ticket_v2_discord_bindings"
     __table_args__ = (
-        UniqueConstraint("guild_id", "resource_id", name="uq_ftv2_binding_resource"),
+        UniqueConstraint(
+            "guild_id",
+            "kind",
+            "resource_id",
+            name="uq_ftv2_binding_resource_kind",
+        ),
         UniqueConstraint("ticket_id", "kind", name="uq_ftv2_ticket_binding_kind"),
     )
 

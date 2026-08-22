@@ -393,6 +393,17 @@ async def _sync_ticket_log(
         if thread_binding is not None
         else None
     )
+    if thread is None and thread_binding is None:
+        # Threads publicas iniciadas por mensagem reutilizam o snowflake da
+        # mensagem inicial. Um crash entre o create e o binding deve adotar a
+        # thread existente, nao tentar cria-la novamente.
+        thread = guild.get_thread(message.id)
+        if thread is None:
+            try:
+                fetched = await guild.fetch_channel(message.id)
+                thread = fetched if isinstance(fetched, discord.Thread) else None
+            except (discord.NotFound, KeyError):
+                thread = None
     if thread is None and thread_binding is not None:
         try:
             fetched = await guild.fetch_channel(int(thread_binding["resource_id"]))

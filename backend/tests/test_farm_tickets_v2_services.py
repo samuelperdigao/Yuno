@@ -193,6 +193,8 @@ async def _confirm(
         size_bytes=100,
         content_type="image/png",
     )
+
+
 def test_progress_caps_each_objective_but_preserves_real_excess() -> None:
     result = calculate_progress(
         [("a", Decimal("130"), Decimal("100")), ("b", Decimal("25"), Decimal("100"))]
@@ -1083,6 +1085,17 @@ def test_external_and_planned_deletions_keep_historical_result(monkeypatch) -> N
                         state=BindingState.ACTIVE,
                     )
                 )
+                session.add(
+                    FarmTicketDiscordBinding(
+                        ticket_id=ticket.id,
+                        guild_id=ticket.guild_id,
+                        kind=ResourceKind.TICKET_THREAD,
+                        resource_id="700",
+                        parent_resource_id="700",
+                        ownership=BindingOwnership.MANAGED,
+                        state=BindingState.ACTIVE,
+                    )
+                )
                 await session.commit()
                 result = await services.record_external_resource_deletion(
                     session,
@@ -1096,6 +1109,21 @@ def test_external_and_planned_deletions_keep_historical_result(monkeypatch) -> N
                 assert (
                     ticket.last_resource_removal_reason
                     == ResourceRemovalReason.MANUAL_DELETE
+                )
+                same_snowflake = (
+                    (
+                        await session.execute(
+                            select(FarmTicketDiscordBinding).where(
+                                FarmTicketDiscordBinding.resource_id == "700"
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                assert len(same_snowflake) == 2
+                assert all(
+                    item.state == BindingState.DELETED for item in same_snowflake
                 )
 
                 binding = await session.scalar(

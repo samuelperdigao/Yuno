@@ -49,7 +49,8 @@ class FakeMessage:
 
     async def create_thread(self, **kwargs) -> FakeThread:
         self.thread_creations += 1
-        thread = FakeThread(self.id + 10000)
+        # O Discord reutiliza o ID da mensagem inicial para a thread publica.
+        thread = FakeThread(self.id)
         self.channel.guild.resources[thread.id] = thread
         return thread
 
@@ -316,6 +317,10 @@ def test_runtime_recovers_category_panel_log_ticket_channel_and_thread_idempoten
             bot, platform_api, guild, "ticket-a", _actor()
         )
         created = (guild.created_categories, guild.created_text_channels)
+        # Simula crash depois de criar a thread e antes de persistir o binding.
+        tickets_api.rows = [
+            item for item in tickets_api.rows if item["kind"] != "TICKET_THREAD"
+        ]
         second = await runtime._provision_ticket(
             bot, platform_api, guild, "ticket-a", _actor()
         )

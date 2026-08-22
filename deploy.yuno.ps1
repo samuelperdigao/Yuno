@@ -150,7 +150,7 @@ with sqlite3.connect(sys.argv[1]) as backup, sqlite3.connect(sys.argv[2]) as mig
     if before != after:
         raise SystemExit(f"Contagens protegidas divergiram: {before} != {after}")
     head = migrated.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-    if head != "d6e7f8a9b0c1":
+    if head != "e7f8a9b0c1d2":
         raise SystemExit(f"Head inesperado na copia migrada: {head}")
     legacy = migrated.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='farm_weekly_goals'"
@@ -207,7 +207,7 @@ PY
   )
   DATABASE_URL="`$rehearsal_url" .venv/bin/python -m alembic -c backend/alembic.ini upgrade head
   rehearsal_head=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c 'select version_num from alembic_version')
-  test "`$rehearsal_head" = "d6e7f8a9b0c1"
+  test "`$rehearsal_head" = "e7f8a9b0c1d2"
   legacy_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_tickets")
   archive_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_legacy_archive")
   test "`$legacy_count" = "`$archive_count"
@@ -255,7 +255,7 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
 else
   actual_head=`$(.venv/bin/python -m alembic -c backend/alembic.ini current | tail -n 1 | awk '{print `$1}')
 fi
-test "`$actual_head" = "d6e7f8a9b0c1"
+test "`$actual_head" = "e7f8a9b0c1d2"
 echo "ALEMBIC_HEAD=`$actual_head"
 
 echo "DEPLOYED_SHA=`$(git rev-parse HEAD)"

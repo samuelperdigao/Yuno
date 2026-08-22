@@ -565,7 +565,9 @@ async def _resolve_concurrent_open(
         raise FarmTicketConflict(
             "A participacao neste ciclo ja possui ticket encerrado e nao sera reativada."
         )
-    raise FarmTicketConflict("A abertura concorrente do ticket nao pôde ser consolidada.")
+    raise FarmTicketConflict(
+        "A abertura concorrente do ticket nao pôde ser consolidada."
+    )
 
 
 async def open_ticket(
@@ -2745,40 +2747,77 @@ async def record_external_resource_deletion(
     resource_id: str,
     observed_at: datetime,
 ) -> dict[str, Any]:
-    binding = (
-        await session.execute(
-            select(FarmTicketDiscordBinding)
-            .where(
-                FarmTicketDiscordBinding.guild_id == guild_id,
-                FarmTicketDiscordBinding.resource_id == resource_id,
+    bindings = (
+        (
+            await session.execute(
+                select(FarmTicketDiscordBinding)
+                .where(
+                    FarmTicketDiscordBinding.guild_id == guild_id,
+                    FarmTicketDiscordBinding.resource_id == resource_id,
+                )
+                .with_for_update()
             )
-            .with_for_update()
         )
-    ).scalar_one_or_none()
-    if binding is None:
+        .scalars()
+        .all()
+    )
+    if not bindings:
         return {"known": False, "action": "ignore"}
-    if binding.deletion_intent_at is not None or binding.state in {
-        BindingState.DELETE_PENDING,
-        BindingState.DELETED,
-    }:
-        binding.state = BindingState.DELETED
-        binding.last_error = None
+
+    unexpected: list[FarmTicketDiscordBinding] = []
+    for binding in bindings:
+        if binding.deletion_intent_at is not None or binding.state in {
+            BindingState.DELETE_PENDING,
+            BindingState.DELETED,
+        }:
+            binding.state = BindingState.DELETED
+            binding.last_error = None
+        else:
+            binding.state = BindingState.MISSING
+            binding.last_error = "Recurso removido externamente."
+            unexpected.append(binding)
+
+    ticket_ids = {item.ticket_id for item in bindings if item.ticket_id is not None}
+    if len(ticket_ids) > 1:
+        raise FarmTicketConflict("Snowflake Discord associado a tickets diferentes.")
+    ticket_id = next(iter(ticket_ids), None)
+    if not unexpected:
         await session.commit()
         return {
             "known": True,
             "action": "planned_delete",
             "ticket_status": (
-                (await session.get(FarmTicket, binding.ticket_id)).status.value
-                if binding.ticket_id is not None
+                (await session.get(FarmTicket, ticket_id)).status.value
+                if ticket_id is not None
                 else None
             ),
         }
-    binding.state = BindingState.MISSING
-    binding.last_error = "Recurso removido externamente."
-    if binding.ticket_id is None:
+
+    kinds = sorted({item.kind.value for item in unexpected})
+    if ticket_id is None:
+        await _schedule_ticket_task(
+            session,
+            guild_id=guild_id,
+            job_key="farm_tickets.reconcile",
+            resource_type="guild",
+            resource_id=guild_id,
+            payload={
+                "reason": "resource_deleted",
+                "binding_ids": [item.id for item in unexpected],
+                "kinds": kinds,
+            },
+            due_at=utc_now(),
+            idempotency_key=(
+                f"resource:{resource_id}:recover:{_utc(observed_at).isoformat()}"
+            ),
+            correlation_id=f"resource-delete:{resource_id}"[:80],
+            max_attempts=10,
+            commit=False,
+        )
         await session.commit()
         return {"known": True, "action": "recover"}
-    ticket = await _lock_ticket(session, guild_id=guild_id, ticket_id=binding.ticket_id)
+
+    ticket = await _lock_ticket(session, guild_id=guild_id, ticket_id=ticket_id)
     _, _, available, _ = await _totals(session, ticket_id=ticket.id)
     actions_remaining = ticket.status == TicketStatus.IN_PROGRESS or (
         ticket.withdrawals_open and any(value > 0 for value in available.values())
@@ -2790,12 +2829,13 @@ async def record_external_resource_deletion(
             event_type="resource.external_delete_detected",
             actor_id=None,
             deduplication_key=f"resource:{resource_id}:missing:{_utc(observed_at).isoformat()}",
-            payload={"kind": binding.kind.value, "recovery_required": True},
+            payload={"kinds": kinds, "recovery_required": True},
         )
         action = "recover"
     else:
-        binding.state = BindingState.DELETED
-        binding.deletion_reason = ResourceRemovalReason.MANUAL_DELETE
+        for binding in unexpected:
+            binding.state = BindingState.DELETED
+            binding.deletion_reason = ResourceRemovalReason.MANUAL_DELETE
         ticket.last_resource_removal_reason = ResourceRemovalReason.MANUAL_DELETE
         ticket.revision += 1
         await _event(
@@ -2807,29 +2847,28 @@ async def record_external_resource_deletion(
             payload={
                 "historical_status": ticket.status.value,
                 "resource_reason": "MANUAL_DELETE",
+                "kinds": kinds,
             },
         )
         action = "accept_removed"
     if action == "recover":
-        job_key = (
-            "farm_tickets.provision" if binding.ticket_id else "farm_tickets.reconcile"
-        )
-        resource_type = "farm_ticket" if binding.ticket_id else "guild"
-        resource_id_for_job = binding.ticket_id or guild_id
         await _schedule_ticket_task(
             session,
             guild_id=guild_id,
-            job_key=job_key,
-            resource_type=resource_type,
-            resource_id=resource_id_for_job,
+            job_key="farm_tickets.provision",
+            resource_type="farm_ticket",
+            resource_id=ticket.id,
             payload={
-                "ticket_id": binding.ticket_id,
+                "ticket_id": ticket.id,
                 "reason": "resource_deleted",
-                "binding_id": binding.id,
+                "binding_ids": [item.id for item in unexpected],
+                "kinds": kinds,
             },
             due_at=utc_now(),
-            idempotency_key=f"resource:{binding.id}:recover:{_utc(observed_at).isoformat()}",
-            correlation_id=f"resource-delete:{binding.id}",
+            idempotency_key=(
+                f"resource:{resource_id}:recover:{_utc(observed_at).isoformat()}"
+            ),
+            correlation_id=f"resource-delete:{resource_id}"[:80],
             max_attempts=10,
             commit=False,
         )
