@@ -6,8 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import FarmTicket, FarmTicketAction, FarmTicketConfig, FarmTicketEntry, FarmWeeklyGoal
-from app.schemas import FarmTicketConfigIn, FarmWeeklyGoalIn
+from app.models import FarmTicket, FarmTicketAction, FarmTicketConfig, FarmTicketEntry
+from app.schemas import FarmTicketConfigIn
 from app.services import get_or_create_config
 
 
@@ -143,90 +143,6 @@ async def upsert_config(session: AsyncSession, guild_id: str, data: FarmTicketCo
     }
     guild_config.settings = settings
     return config
-
-
-async def upsert_goal(session: AsyncSession, guild_id: str, data: FarmWeeklyGoalIn) -> FarmWeeklyGoal:
-    result = await session.execute(select(FarmWeeklyGoal).where(FarmWeeklyGoal.guild_id == guild_id, FarmWeeklyGoal.week_id == data.week_id))
-    goal = result.scalar_one_or_none()
-    if not goal:
-        goal = FarmWeeklyGoal(guild_id=guild_id, week_id=data.week_id, created_by=data.created_by)
-        session.add(goal)
-    goal.items = data.items
-    goal.active = True
-    goal.created_by = data.created_by or goal.created_by
-    return goal
-
-
-async def active_goal(session: AsyncSession, guild_id: str, week_id: str) -> FarmWeeklyGoal:
-    result = await session.execute(
-        select(FarmWeeklyGoal).where(FarmWeeklyGoal.guild_id == guild_id, FarmWeeklyGoal.week_id == week_id, FarmWeeklyGoal.active.is_(True))
-    )
-    goal = result.scalar_one_or_none()
-    if not goal:
-        raise HTTPException(status_code=404, detail="Nao existe meta ativa para esta semana.")
-    return goal
-
-
-async def reserve_ticket(
-    session: AsyncSession,
-    *,
-    guild_id: str,
-    week_id: str,
-    user_id: str,
-    member_name: str,
-    open_payload: dict | None = None,
-    folder_channel_id: str | None = None,
-    folder_slot: int | None = None,
-    game_id: str | None = None,
-    folder_nickname: str | None = None,
-) -> tuple[FarmTicket, bool]:
-    result = await session.execute(
-        select(FarmTicket)
-        .where(
-            FarmTicket.guild_id == guild_id,
-            FarmTicket.week_id == week_id,
-            FarmTicket.user_id == user_id,
-            FarmTicket.status.in_(ACTIVE_TICKET_STATUSES),
-            FarmTicket.deleted_at.is_(None),
-        )
-        .options(selectinload(FarmTicket.entries))
-    )
-    existing = result.scalar_one_or_none()
-    if existing:
-        return existing, True
-
-    goal = await active_goal(session, guild_id, week_id)
-    ticket = FarmTicket(
-        guild_id=guild_id,
-        week_id=week_id,
-        user_id=user_id,
-        member_name=member_name,
-        folder_channel_id=folder_channel_id,
-        folder_slot=folder_slot,
-        game_id=game_id,
-        folder_nickname=folder_nickname,
-        status="reservado",
-        goal_items=goal.items,
-        progress=progress_from_entries(goal.items, []),
-    )
-    session.add(ticket)
-    await session.flush()
-    await add_action(
-        session,
-        ticket,
-        "ticket_aberto",
-        actor_id=user_id,
-        payload={
-            "member_name": member_name,
-            "week_id": week_id,
-            "open_payload": open_payload or {},
-            "folder_channel_id": folder_channel_id,
-            "folder_slot": folder_slot,
-            "game_id": game_id,
-            "folder_nickname": folder_nickname,
-        },
-    )
-    return ticket, False
 
 
 async def add_action(

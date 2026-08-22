@@ -893,7 +893,6 @@ async def legacy_inventory(session: AsyncSession, *, guild_id: str) -> dict[str,
 
     tables = (
         "farm_ticket_configs",
-        "farm_weekly_goals",
         "farm_tickets",
         "farm_ticket_entries",
         "farm_ticket_actions",

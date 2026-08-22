@@ -10,16 +10,13 @@ from app.db import get_session
 from app.farm_tickets import (
     ACTIVE_TICKET_STATUSES,
     add_action,
-    active_goal,
     finalize_ticket,
     get_config,
     get_ticket,
     has_pending_review,
     refresh_ticket_progress,
-    reserve_ticket,
     weekly_ranking,
     upsert_config,
-    upsert_goal,
 )
 from app.models import FarmTicket, FarmTicketAction, FarmTicketEntry
 from app.schemas import (
@@ -33,12 +30,8 @@ from app.schemas import (
     FarmTicketEntryIn,
     FarmTicketFinalizeIn,
     FarmTicketOut,
-    FarmTicketReserveIn,
-    FarmTicketReserveOut,
     FarmTicketReviewIn,
     FarmRankingOut,
-    FarmWeeklyGoalIn,
-    FarmWeeklyGoalOut,
 )
 from app.services import active_license_for_guild
 
@@ -59,18 +52,6 @@ def config_out(config) -> FarmTicketConfigOut:
         panel_channel_id=config.panel_channel_id,
         folders_category_id=config.folders_category_id,
         participant_role_ids=config.participant_role_ids or [],
-    )
-
-
-def goal_out(goal) -> FarmWeeklyGoalOut:
-    return FarmWeeklyGoalOut(
-        id=goal.id,
-        guild_id=goal.guild_id,
-        week_id=goal.week_id,
-        items=goal.items or [],
-        active=goal.active,
-        created_by=goal.created_by,
-        created_at=goal.created_at,
     )
 
 
@@ -149,20 +130,6 @@ async def read_config(guild_id: str, session: AsyncSession = Depends(get_session
     return config_out(await get_config(session, guild_id))
 
 
-@router.put("/guilds/{guild_id}/goals", response_model=FarmWeeklyGoalOut)
-async def save_goal(guild_id: str, data: FarmWeeklyGoalIn, session: AsyncSession = Depends(get_session)) -> FarmWeeklyGoalOut:
-    await assert_license(session, guild_id)
-    goal = await upsert_goal(session, guild_id, data)
-    await session.commit()
-    return goal_out(goal)
-
-
-@router.get("/guilds/{guild_id}/goals/{week_id}", response_model=FarmWeeklyGoalOut)
-async def read_goal(guild_id: str, week_id: str, session: AsyncSession = Depends(get_session)) -> FarmWeeklyGoalOut:
-    await assert_license(session, guild_id)
-    return goal_out(await active_goal(session, guild_id, week_id))
-
-
 @router.get("/guilds/{guild_id}/ranking/{week_id}", response_model=FarmRankingOut)
 async def read_ranking(
     guild_id: str,
@@ -188,25 +155,6 @@ async def read_ranking(
         participants=len({ticket.user_id for ticket in tickets}),
         ranking=weekly_ranking(tickets, limit=safe_limit),
     )
-
-
-@router.post("/guilds/{guild_id}/tickets/reserve", response_model=FarmTicketReserveOut)
-async def reserve(guild_id: str, data: FarmTicketReserveIn, session: AsyncSession = Depends(get_session)) -> FarmTicketReserveOut:
-    await assert_license(session, guild_id)
-    ticket, existing = await reserve_ticket(
-        session,
-        guild_id=guild_id,
-        week_id=data.week_id,
-        user_id=data.user_id,
-        member_name=data.member_name,
-        open_payload=data.open_payload,
-        folder_channel_id=data.folder_channel_id,
-        folder_slot=data.folder_slot,
-        game_id=data.game_id,
-        folder_nickname=data.folder_nickname,
-    )
-    await session.commit()
-    return FarmTicketReserveOut(ticket=ticket_out(ticket), existing=existing)
 
 
 @router.patch("/tickets/{ticket_id}/channel", response_model=FarmTicketOut)

@@ -12,12 +12,19 @@ from app.schemas import MODULES, ModuleConfigDraftIn, ModuleConfigPublishIn
 from app.services import audit, get_or_create_config
 
 
-CONTROL_PLANE_SCHEMA_VERSIONS = {"meta": 1}
+# A Central transitória não possui mais módulos suportados. O domínio `meta`
+# agora é integralmente atendido por /internal/platform/.../modules/meta.
+CONTROL_PLANE_SCHEMA_VERSIONS: dict[str, int] = {}
 
 
 def assert_module_key(module_key: str) -> None:
     if module_key not in MODULES:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Modulo desconhecido.")
+    if module_key == "meta":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Metas usa exclusivamente o dominio /internal/platform.",
+        )
 
 
 def assert_schema_version(module_key: str, schema_version: int) -> None:

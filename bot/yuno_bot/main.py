@@ -52,6 +52,7 @@ class YunoBot(commands.Bot):
         self.module_context: ModuleContext | None = None
         self._registration_recovery_task: asyncio.Task | None = None
         self._tags_periodic_task: asyncio.Task | None = None
+        self._meta_recovery_task: asyncio.Task | None = None
         self._tag_role_debounce: dict[int, asyncio.Task] = {}
         self._tag_hierarchy_fingerprints: dict[int, str] = {}
         self._central_refreshed_guilds: set[int] = set()
@@ -102,6 +103,11 @@ class YunoBot(commands.Bot):
             self._tags_periodic_task = asyncio.create_task(
                 self._run_tags_periodic_sweeper(),
                 name="yuno-tags-periodic-sweeper",
+            )
+        if self.platform_ui_registry.get("meta") is not None:
+            self._meta_recovery_task = asyncio.create_task(
+                self._run_meta_recovery_sweeper(),
+                name="yuno-meta-recovery-sweeper",
             )
 
         settings = get_settings()
@@ -286,7 +292,7 @@ class YunoBot(commands.Bot):
             self._tag_role_debounce.pop(guild_id, None)
 
     async def on_raw_member_remove(self, payload: discord.RawMemberRemoveEvent) -> None:
-        if self.platform_ui_registry.get("registration") is None or self.user is None:
+        if self.user is None:
             return
         user_id = payload.user.id
         correlation = f"member-remove:{payload.guild_id}:{user_id}"
@@ -294,12 +300,17 @@ class YunoBot(commands.Bot):
         if actor is None:
             return
         try:
-            await self.platform_api.registration_deactivate_member(
-                payload.guild_id, user_id, actor=actor
-            )
+            if self.platform_ui_registry.get("registration") is not None:
+                await self.platform_api.registration_deactivate_member(
+                    payload.guild_id, user_id, actor=actor
+                )
             if self.platform_ui_registry.get("tags") is not None:
                 await self.platform_api.tags_cancel_member(
                     payload.guild_id, user_id, actor=actor
+                )
+            if self.platform_ui_registry.get("meta") is not None:
+                await self.platform_api.meta_remove_member(
+                    payload.guild_id, user_id, correlation
                 )
         except httpx.HTTPError:
             self.log.exception(
@@ -378,12 +389,40 @@ class YunoBot(commands.Bot):
             except asyncio.CancelledError:
                 return
 
+    async def sweep_meta_recovery_once(self) -> None:
+        boundary = datetime.now(timezone.utc).replace(second=0, microsecond=0).isoformat()
+        for guild in self.guilds:
+            try:
+                await self.platform_api.meta_recovery(
+                    guild.id, f"meta-recovery:{guild.id}:{boundary}"
+                )
+            except httpx.HTTPError:
+                self.log.exception(
+                    "Falha ao reconciliar transicoes de Metas na guild %s", guild.id
+                )
+
+    async def _run_meta_recovery_sweeper(self) -> None:
+        await self.wait_until_ready()
+        while not self.is_closed():
+            await self.sweep_meta_recovery_once()
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                return
+
     async def close(self) -> None:
         for task in tuple(self._tag_role_debounce.values()):
             task.cancel()
         if self._tag_role_debounce:
             await asyncio.gather(*self._tag_role_debounce.values(), return_exceptions=True)
         self._tag_role_debounce.clear()
+        if self._meta_recovery_task is not None:
+            self._meta_recovery_task.cancel()
+            try:
+                await self._meta_recovery_task
+            except asyncio.CancelledError:
+                pass
+            self._meta_recovery_task = None
         if self._tags_periodic_task is not None:
             self._tags_periodic_task.cancel()
             try:

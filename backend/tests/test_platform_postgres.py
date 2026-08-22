@@ -29,6 +29,10 @@ from app.domain_modules.registration.schemas import RegistrationConfig, Registra
 from app.domain_modules.tags import services as tag_services  # noqa: E402
 from app.domain_modules.tags.domain import TagSyncRunMode, TagSyncRunStatus  # noqa: E402
 from app.domain_modules.tags.models import TagSyncRun  # noqa: E402
+from app.domain_modules.meta import contracts as meta_contracts  # noqa: E402
+from app.domain_modules.meta import services as meta_services  # noqa: E402
+from app.domain_modules.meta.models import MetaCycleParticipant, MetaIntegrationEvent  # noqa: E402
+from app.domain_modules.meta.schemas import MetaMemberSnapshotIn  # noqa: E402
 from app.platform.configuration import publish  # noqa: E402
 from app.platform.models import ModuleConfigVersion, ModuleInstance, RuntimeMode  # noqa: E402
 
@@ -109,6 +113,149 @@ def test_postgres_claim_is_exclusive_between_workers() -> None:
             assert len(first) + len(second) == 1
         finally:
             module_registry.unregister("pg_claim_test")
+            await engine.dispose()
+            async with admin_engine.begin() as connection:
+                await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+            await admin_engine.dispose()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.skipif(
+    not POSTGRES_URL,
+    reason="Defina YUNO_TEST_POSTGRES_URL para validar locks, indice parcial e eventos de Metas.",
+)
+def test_postgres_meta_serializes_conflicts_and_keeps_event_sequence_unique() -> None:
+    async def scenario() -> None:
+        assert POSTGRES_URL is not None
+        discover_domain_modules()
+        schema = f"yuno_meta_test_{uuid4().hex}"
+        admin_engine = create_async_engine(POSTGRES_URL)
+        async with admin_engine.begin() as connection:
+            await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        engine = create_async_engine(
+            POSTGRES_URL,
+            connect_args={"server_settings": {"search_path": schema}},
+        )
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+
+        async def create_goal(session, *, name: str, admin_id: str) -> dict:
+            draft = await meta_services.open_draft(
+                session, guild_id="meta-pg-guild", admin_id=admin_id, goal_id=None
+            )
+            draft = await meta_services.patch_draft(
+                session,
+                guild_id="meta-pg-guild",
+                admin_id=admin_id,
+                expected_revision=draft["revision"],
+                step="review",
+                patch={
+                    "name": name,
+                    "recurrence": "daily",
+                    "timezone": "America/Sao_Paulo",
+                    "daily_time": "23:55",
+                    "participation": "all_members",
+                    "role_ids": [],
+                    "objectives": [
+                        {
+                            "kind": "money",
+                            "name": "Dinheiro",
+                            "money_amount": "100.00",
+                            "item_quantity": None,
+                            "unit": None,
+                        }
+                    ],
+                    "notice_text": "Aviso PostgreSQL",
+                },
+            )
+            return await meta_services.submit_draft(
+                session,
+                guild_id="meta-pg-guild",
+                admin_id=admin_id,
+                expected_revision=draft["revision"],
+                correlation_id=f"create:{admin_id}",
+            )
+
+        member = [
+            MetaMemberSnapshotIn(
+                member_id="42", display_name="Membro 42", role_ids=["10"]
+            )
+        ]
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with sessions() as session:
+                older = await create_goal(session, name="Antiga", admin_id="900")
+                newer = await create_goal(session, name="Nova", admin_id="901")
+                older_prepared = await meta_services.prepare_launch(
+                    session,
+                    guild_id="meta-pg-guild",
+                    goal_id=older["id"],
+                    members=member,
+                    notice_channel_id="500",
+                    causation_id="prepare:old",
+                )
+                newer_prepared = await meta_services.prepare_launch(
+                    session,
+                    guild_id="meta-pg-guild",
+                    goal_id=newer["id"],
+                    members=member,
+                    notice_channel_id="500",
+                    causation_id="prepare:new",
+                )
+
+            async def activate(cycle_id: int, message_id: str, causation_id: str):
+                async with sessions() as session:
+                    return await meta_services.activate_cycle(
+                        session,
+                        guild_id="meta-pg-guild",
+                        cycle_id=cycle_id,
+                        members=member,
+                        notice_channel_id="500",
+                        notice_message_id=message_id,
+                        causation_id=causation_id,
+                    )
+
+            await asyncio.gather(
+                activate(older_prepared["cycle"]["id"], "600", "activate:old"),
+                activate(newer_prepared["cycle"]["id"], "601", "activate:new"),
+            )
+
+            async with sessions() as session:
+                active = await meta_contracts.get_active_goal_for_member(
+                    session, guild_id="meta-pg-guild", member_id="42"
+                )
+                assert active and active.goal_id == newer["id"]
+                active_count = int(
+                    await session.scalar(
+                        select(func.count(MetaCycleParticipant.id)).where(
+                            MetaCycleParticipant.guild_id == "meta-pg-guild",
+                            MetaCycleParticipant.member_id == "42",
+                            MetaCycleParticipant.active.is_(True),
+                        )
+                    )
+                    or 0
+                )
+                assert active_count == 1
+                sequences = list(
+                    (
+                        await session.execute(
+                            select(MetaIntegrationEvent.sequence)
+                            .where(MetaIntegrationEvent.guild_id == "meta-pg-guild")
+                            .order_by(MetaIntegrationEvent.sequence)
+                        )
+                    ).scalars()
+                )
+                assert sequences == list(range(1, len(sequences) + 1))
+                index_definition = await session.scalar(
+                    text(
+                        "SELECT indexdef FROM pg_indexes "
+                        "WHERE schemaname = current_schema() "
+                        "AND indexname = 'uq_meta_active_participant'"
+                    )
+                )
+                assert index_definition and "WHERE (active = true)" in index_definition
+        finally:
             await engine.dispose()
             async with admin_engine.begin() as connection:
                 await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))

@@ -130,6 +130,16 @@ def payload(*components: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def meta_notice_payload(*components: dict[str, Any]) -> dict[str, Any]:
+    """Unica superficie que pode interpretar @everyone no Yuno."""
+
+    return {
+        "flags": FLAG_COMPONENTS_V2,
+        "components": list(components),
+        "allowed_mentions": {"parse": ["everyone"], "replied_user": False},
+    }
+
+
 async def send_message(bot: discord.Client, channel_id: int, data: dict[str, Any]) -> int:
     route = discord.http.Route("POST", "/channels/{channel_id}/messages", channel_id=channel_id)
     response = await bot.http.request(route, json=_restricted(data))
@@ -148,8 +158,68 @@ async def edit_message(
     await bot.http.request(route, json=_restricted(data))
 
 
+async def send_meta_notice(bot: discord.Client, channel_id: int, data: dict[str, Any]) -> int:
+    route = discord.http.Route("POST", "/channels/{channel_id}/messages", channel_id=channel_id)
+    response = await bot.http.request(route, json=_meta_restricted(data))
+    return int(response["id"])
+
+
+async def edit_meta_notice(
+    bot: discord.Client, channel_id: int, message_id: int, data: dict[str, Any]
+) -> None:
+    route = discord.http.Route(
+        "PATCH",
+        "/channels/{channel_id}/messages/{message_id}",
+        channel_id=channel_id,
+        message_id=message_id,
+    )
+    await bot.http.request(route, json=_meta_restricted(data))
+
+
+async def edit_interaction_message(
+    interaction: discord.Interaction, data: dict[str, Any], *, ephemeral: bool = True
+) -> None:
+    if not interaction.response.is_done():
+        source_is_ephemeral = bool(
+            interaction.message is not None and interaction.message.flags.ephemeral
+        )
+        await interaction.response.defer(
+            ephemeral=ephemeral and not source_is_ephemeral,
+            thinking=not source_is_ephemeral,
+        )
+    await edit_webhook_message(
+        interaction.client,
+        application_id=int(interaction.application_id),
+        interaction_token=interaction.token,
+        data=data,
+    )
+
+
+async def edit_webhook_message(
+    bot: discord.Client,
+    *,
+    application_id: int,
+    interaction_token: str,
+    data: dict[str, Any],
+) -> None:
+    route = discord.http.Route(
+        "PATCH",
+        "/webhooks/{webhook_id}/{webhook_token}/messages/@original",
+        webhook_id=application_id,
+        webhook_token=interaction_token,
+    )
+    await bot.http.request(route, json=_restricted(data))
+
+
 def _restricted(data: dict[str, Any]) -> dict[str, Any]:
     return {
         **data,
         "allowed_mentions": {"parse": [], "replied_user": False},
+    }
+
+
+def _meta_restricted(data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **data,
+        "allowed_mentions": {"parse": ["everyone"], "replied_user": False},
     }

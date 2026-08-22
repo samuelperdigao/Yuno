@@ -278,30 +278,6 @@ class FarmTicketConfigOut(FarmTicketConfigIn):
     guild_id: str
 
 
-class FarmWeeklyGoalIn(BaseModel):
-    week_id: str
-    items: list[dict[str, Any]] = Field(min_length=1, max_length=5)
-    created_by: str | None = None
-
-
-class FarmWeeklyGoalOut(FarmWeeklyGoalIn):
-    id: int
-    guild_id: str
-    active: bool
-    created_at: datetime
-
-
-class FarmTicketReserveIn(BaseModel):
-    week_id: str
-    user_id: str
-    member_name: str
-    open_payload: dict[str, Any] = Field(default_factory=dict)
-    folder_channel_id: str | None = None
-    folder_slot: int | None = None
-    game_id: str | None = None
-    folder_nickname: str | None = None
-
-
 class FarmTicketChannelPatch(BaseModel):
     channel_id: str
     panel_message_id: str | None = None
@@ -380,11 +356,6 @@ class FarmTicketOut(BaseModel):
     finalization_reason: str | None = None
     deleted_at: datetime | None = None
     entries: list[FarmTicketEntryOut] = Field(default_factory=list)
-
-
-class FarmTicketReserveOut(BaseModel):
-    ticket: FarmTicketOut
-    existing: bool = False
 
 
 class FarmTicketActionOut(BaseModel):

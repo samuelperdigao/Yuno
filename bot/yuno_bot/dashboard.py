@@ -288,8 +288,9 @@ async def _central_config(interaction: discord.Interaction) -> dict | None:
         or channel_id != interaction.channel_id
         or message_id != interaction.message.id
     ):
-        await _deny(interaction, "Esta mensagem nao e a Central ativa desta guild.")
-        return None
+        if interaction.message is None or not interaction.message.flags.ephemeral:
+            await _deny(interaction, "Esta mensagem nao e a Central ativa desta guild.")
+            return None
     return config
 
 
@@ -342,7 +343,9 @@ async def dispatch_components_v2(interaction: discord.Interaction) -> bool:
         await _dispatch_page(interaction, str(values[0]))
         return True
 
-    if component_type in _SELECT_COMPONENT_TYPES:
+    if component_type in _SELECT_COMPONENT_TYPES and not (
+        module_key == "meta" and action_key == "select_goal"
+    ):
         await _acknowledge_select(interaction)
     await _dispatch_action(interaction, module_key, action_key)
     return True

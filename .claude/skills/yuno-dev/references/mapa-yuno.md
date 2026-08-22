@@ -68,13 +68,13 @@ set, meta, farm_tickets, ticket, parceria, encomenda, ausencia, radio,
 producao, adv, anuncio, hierarquia, membros, acao, mod, disparo
 ```
 
-Somente `meta` possui integração com o `ControlPlaneSpec` atual. Os outros módulos aparecem como migração pendente e dependem das interfaces operacionais já publicadas quando independentes de slash.
+`meta`, `registration` e `tags` usam o registry domain-first. A rota transitória de Control Plane para `meta` foi encerrada; os demais módulos de catálogo continuam indisponíveis até uma fatia de produto aprovada.
 
 ## Estado transitório que não deve ser replicado
 
 - `ModuleSpec.dashboard_fields` descreve valores espalhados em schemas legados.
 - `dashboard.module_values()` conhece formatos específicos de módulos.
-- Metas usa `seed_from_legacy()` e `project_to_legacy()`.
+- Metas V2 usa exclusivamente `backend/app/domain_modules/meta` e `bot/yuno_bot/domain_modules/meta`.
 - Publicação atual ainda projeta configuração em `GuildConfig` para o Runtime antigo.
 - Comandos antigos de configuração/publicação permanecem no código, embora ocultos pela árvore reduzida.
 - O setup inicial ainda parte de categorias e canais canônicos, enquanto a arquitetura nova deve permitir selecionar estrutura existente e criar nova estrutura opcionalmente.
@@ -83,7 +83,7 @@ Esses pontos são candidatos a remoção por fatia de módulo após a nova arqui
 
 ## Farm atual
 
-O domínio existente possui configurações, metas semanais, tickets, entradas e ações. A API cliente concentra muitos métodos específicos. Use essa implementação para inventariar dados e casos de borda, nunca como limite para Farm v2.
+O legado de Farm mantém tickets, entradas e ações persistidos para leitura, revisão e finalização. `farm_weekly_goals` e a abertura/reserva que dependia dele foram removidos. Metas V2 não importa `farm.*` nem `tickets.*`; Tickets futuros consomem os DTOs imutáveis documentados em `docs/meta-contracts.md`.
 
 Arquivos de investigação:
 

@@ -214,20 +214,6 @@ class FarmTicketConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
-class FarmWeeklyGoal(Base):
-    __tablename__ = "farm_weekly_goals"
-    __table_args__ = (UniqueConstraint("guild_id", "week_id", name="uq_farm_weekly_goal_guild_week"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    guild_id: Mapped[str] = mapped_column(String(32), index=True)
-    week_id: Mapped[str] = mapped_column(String(12), index=True)
-    items: Mapped[list[dict]] = mapped_column(JsonType, default=list)
-    active: Mapped[bool] = mapped_column(default=True, index=True)
-    created_by: Mapped[str | None] = mapped_column(String(32))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-
 class FarmTicket(Base):
     __tablename__ = "farm_tickets"
 
@@ -302,3 +288,4 @@ from app.platform import models as platform_models  # noqa: E402,F401
 from app.domain_modules.farm import models as farm_domain_models  # noqa: E402,F401
 from app.domain_modules.registration import models as registration_domain_models  # noqa: E402,F401
 from app.domain_modules.tags import models as tags_domain_models  # noqa: E402,F401
+from app.domain_modules.meta import models as meta_domain_models  # noqa: E402,F401

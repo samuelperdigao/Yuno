@@ -215,6 +215,30 @@ def activate_test_guild(client: TestClient, guild_id: str) -> None:
     assert activation.status_code == 200
 
 
+def seed_persisted_farm_ticket(guild_id: str, *, user_id: str = "42") -> int:
+    import asyncio
+
+    from app.db import SessionLocal
+    from app.models import FarmTicket
+
+    async def seed() -> int:
+        async with SessionLocal() as session:
+            ticket = FarmTicket(
+                guild_id=guild_id,
+                week_id="2026-W30",
+                user_id=user_id,
+                member_name="Ana",
+                status="reservado",
+                goal_items=[{"name": "Item", "quantity": 10}],
+                progress={},
+            )
+            session.add(ticket)
+            await session.commit()
+            return ticket.id
+
+    return asyncio.run(seed())
+
+
 def test_internal_ausencias_upsert_list_message_and_notice(client: TestClient) -> None:
     activate_test_guild(client, "ausencia-a")
     now = datetime.now(timezone.utc)
@@ -306,6 +330,19 @@ def test_farm_ticket_config_goal_ticket_progress_and_finalize(client: TestClient
     activate_test_guild(client, "farm-a")
     activate_test_guild(client, "farm-b")
 
+    removed_goal = client.put(
+        "/internal/farm-tickets/guilds/farm-a/goals",
+        headers={"x-yuno-bot-token": "bot-test"},
+        json={"week_id": "2026-W30", "items": [{"name": "Item", "quantity": 10}]},
+    )
+    removed_reserve = client.post(
+        "/internal/farm-tickets/guilds/farm-a/tickets/reserve",
+        headers={"x-yuno-bot-token": "bot-test"},
+        json={"week_id": "2026-W30", "user_id": "42", "member_name": "Ana"},
+    )
+    assert removed_goal.status_code == 404
+    assert removed_reserve.status_code == 404
+
     config_a = client.put(
         "/internal/farm-tickets/guilds/farm-a/config",
         headers={"x-yuno-bot-token": "bot-test"},
@@ -336,30 +373,7 @@ def test_farm_ticket_config_goal_ticket_progress_and_finalize(client: TestClient
     read_a = client.get("/internal/farm-tickets/guilds/farm-a/config", headers={"x-yuno-bot-token": "bot-test"})
     assert read_a.json()["category_ids"] == ["10", "11"]
 
-    goal = client.put(
-        "/internal/farm-tickets/guilds/farm-a/goals",
-        headers={"x-yuno-bot-token": "bot-test"},
-        json={"week_id": "2026-W30", "items": [{"name": "Item", "quantity": 10}], "created_by": "999"},
-    )
-    assert goal.status_code == 200
-
-    reserve = client.post(
-        "/internal/farm-tickets/guilds/farm-a/tickets/reserve",
-        headers={"x-yuno-bot-token": "bot-test"},
-        json={"week_id": "2026-W30", "user_id": "42", "member_name": "Ana"},
-    )
-    assert reserve.status_code == 200
-    assert reserve.json()["existing"] is False
-    ticket_id = reserve.json()["ticket"]["id"]
-
-    duplicate = client.post(
-        "/internal/farm-tickets/guilds/farm-a/tickets/reserve",
-        headers={"x-yuno-bot-token": "bot-test"},
-        json={"week_id": "2026-W30", "user_id": "42", "member_name": "Ana"},
-    )
-    assert duplicate.status_code == 200
-    assert duplicate.json()["existing"] is True
-    assert duplicate.json()["ticket"]["id"] == ticket_id
+    ticket_id = seed_persisted_farm_ticket("farm-a")
 
     entry = client.post(
         f"/internal/farm-tickets/tickets/{ticket_id}/entries",
@@ -403,17 +417,27 @@ def test_farm_ticket_config_goal_ticket_progress_and_finalize(client: TestClient
     assert finalize.status_code == 200
     assert finalize.json()["status"] == "aprovado_parcial"
 
-    new_ticket_same_week = client.post(
-        "/internal/farm-tickets/guilds/farm-a/tickets/reserve",
+    active_after = client.get(
+        "/internal/farm-tickets/guilds/farm-a/tickets/active",
         headers={"x-yuno-bot-token": "bot-test"},
-        json={"week_id": "2026-W30", "user_id": "42", "member_name": "Ana"},
+        params={"week_id": "2026-W30", "user_id": "42"},
     )
-    assert new_ticket_same_week.status_code == 200
-    assert new_ticket_same_week.json()["existing"] is False
+    assert active_after.status_code == 200
+    assert active_after.json() is None
 
 
 def test_farm_ticket_admin_actions_and_log_queue(client: TestClient) -> None:
     activate_test_guild(client, "farm-log")
+    assert client.put(
+        "/internal/farm-tickets/guilds/farm-log/goals",
+        headers={"x-yuno-bot-token": "bot-test"},
+        json={"week_id": "2026-W30", "items": [{"name": "Item", "quantity": 10}]},
+    ).status_code == 404
+    assert client.post(
+        "/internal/farm-tickets/guilds/farm-log/tickets/reserve",
+        headers={"x-yuno-bot-token": "bot-test"},
+        json={"week_id": "2026-W30", "user_id": "42", "member_name": "Ana"},
+    ).status_code == 404
     client.put(
         "/internal/farm-tickets/guilds/farm-log/config",
         headers={"x-yuno-bot-token": "bot-test"},
@@ -426,16 +450,7 @@ def test_farm_ticket_admin_actions_and_log_queue(client: TestClient) -> None:
             "participant_role_ids": [],
         },
     )
-    client.put(
-        "/internal/farm-tickets/guilds/farm-log/goals",
-        headers={"x-yuno-bot-token": "bot-test"},
-        json={"week_id": "2026-W30", "items": [{"name": "Item", "quantity": 10}], "created_by": "999"},
-    )
-    ticket_id = client.post(
-        "/internal/farm-tickets/guilds/farm-log/tickets/reserve",
-        headers={"x-yuno-bot-token": "bot-test"},
-        json={"week_id": "2026-W30", "user_id": "42", "member_name": "Ana"},
-    ).json()["ticket"]["id"]
+    ticket_id = seed_persisted_farm_ticket("farm-log")
 
     assigned = client.post(
         f"/internal/farm-tickets/tickets/{ticket_id}/assign",
@@ -577,6 +592,16 @@ def test_control_plane_draft_publish_conflict_projection_and_audit(client: TestC
     assert client.get(
         "/internal/control-plane/guilds/missing/modules/meta", headers=base_headers
     ).status_code == 403
+
+    retired = client.get(state_url, headers=base_headers)
+    assert retired.status_code == 422
+    canonical = client.get(
+        "/internal/platform/guilds/cp-guild-a/modules/meta/settings",
+        headers={"x-yuno-bot-token": "bot-test"},
+    )
+    assert canonical.status_code == 200
+    assert canonical.json()["revision"] == 0
+    return
 
     initial = client.get(state_url, headers=base_headers)
     assert initial.status_code == 200

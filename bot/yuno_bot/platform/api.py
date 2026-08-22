@@ -565,6 +565,85 @@ class PlatformAPIClient:
         payload = {**(item.get("payload") or {}), "correlation_id": item.get("correlation_id") or item["id"]}
         return await self._request("POST", f"/guilds/{item['guild_id']}/modules/farm/jobs/{item['key']}", json=payload)
 
+    async def meta_settings(self, guild_id: int) -> dict:
+        return await self._request("GET", f"/guilds/{guild_id}/modules/meta/settings")
+
+    async def meta_save_settings(self, guild_id: int, payload: dict, *, actor: Any) -> dict:
+        return await self._request(
+            "PUT", f"/guilds/{guild_id}/modules/meta/settings",
+            json={**payload, "actor": actor.as_payload()}, actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def meta_goals(self, guild_id: int, *, page: int = 0) -> dict:
+        return await self._request(
+            "GET", f"/guilds/{guild_id}/modules/meta/goals", params={"page": page, "page_size": 23}
+        )
+
+    async def meta_goal(self, guild_id: int, goal_id: int) -> dict:
+        return await self._request("GET", f"/guilds/{guild_id}/modules/meta/goals/{goal_id}")
+
+    async def meta_draft(self, guild_id: int, *, actor: Any) -> dict:
+        return await self._request(
+            "GET", f"/guilds/{guild_id}/modules/meta/draft", actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def meta_open_draft(self, guild_id: int, goal_id: int | None, *, actor: Any) -> dict:
+        return await self._request(
+            "POST", f"/guilds/{guild_id}/modules/meta/draft/open",
+            json={"goal_id": goal_id, "actor": actor.as_payload()}, actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def meta_patch_draft(self, guild_id: int, payload: dict, *, actor: Any) -> dict:
+        return await self._request(
+            "PATCH", f"/guilds/{guild_id}/modules/meta/draft",
+            json={**payload, "actor": actor.as_payload()}, actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def meta_submit_draft(self, guild_id: int, revision: int, *, actor: Any) -> dict:
+        return await self._request(
+            "POST", f"/guilds/{guild_id}/modules/meta/draft/submit",
+            json={"expected_revision": revision, "actor": actor.as_payload()}, actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def meta_prepare_launch(self, guild_id: int, goal_id: int, payload: dict) -> dict:
+        return await self._request(
+            "POST", f"/guilds/{guild_id}/modules/meta/goals/{goal_id}/prepare-launch", json=payload
+        )
+
+    async def meta_record_notice(self, guild_id: int, cycle_id: int, channel_id: int, message_id: int) -> dict:
+        return await self._request(
+            "PATCH", f"/guilds/{guild_id}/modules/meta/cycles/{cycle_id}/notice",
+            json={"notice_channel_id": str(channel_id), "notice_message_id": str(message_id)},
+        )
+
+    async def meta_activate_cycle(self, guild_id: int, cycle_id: int, payload: dict) -> dict:
+        return await self._request(
+            "POST", f"/guilds/{guild_id}/modules/meta/cycles/{cycle_id}/activate",
+            json={**payload, "cycle_id": cycle_id},
+        )
+
+    async def meta_transition_cycle(self, guild_id: int, cycle_id: int, causation_id: str) -> dict:
+        return await self._request(
+            "POST", f"/guilds/{guild_id}/modules/meta/cycles/{cycle_id}/transition",
+            json={"cycle_id": cycle_id, "causation_id": causation_id},
+        )
+
+    async def meta_remove_member(self, guild_id: int, member_id: int, causation_id: str) -> dict:
+        return await self._request(
+            "POST", f"/guilds/{guild_id}/modules/meta/members/remove",
+            json={"member_id": str(member_id), "causation_id": causation_id},
+        )
+
+    async def meta_recovery(self, guild_id: int, causation_id: str) -> dict:
+        return await self._request(
+            "POST", f"/guilds/{guild_id}/modules/meta/recovery", json={"causation_id": causation_id}
+        )
+
     async def start_migration(self, guild_id: int, module_key: str, migration_key: str, *, actor: Any, target_mode: str = "domain") -> dict:
         return await self._request("POST", f"/guilds/{guild_id}/modules/{module_key}/migrations", json={"migration_key": migration_key, "target_mode": target_mode, "actor": actor.as_payload()}, actor_id=actor.user_id, correlation_id=actor.correlation_id)
 
