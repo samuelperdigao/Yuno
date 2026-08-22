@@ -146,7 +146,6 @@ async def module_health(
                         recovered_task.guild_id == AutomationTask.guild_id,
                         recovered_task.module_key == AutomationTask.module_key,
                         recovered_task.job_key == AutomationTask.job_key,
-                        recovered_task.resource_type == AutomationTask.resource_type,
                         recovered_task.resource_id == AutomationTask.resource_id,
                         recovered_task.state == WorkState.succeeded,
                         recovered_task.created_at > AutomationTask.created_at,
@@ -171,7 +170,6 @@ async def module_health(
                         recovered_delivery.destination_type
                         == DeliveryOutbox.destination_type,
                         recovered_delivery.destination_id == DeliveryOutbox.destination_id,
-                        recovered_delivery.resource_type == DeliveryOutbox.resource_type,
                         recovered_delivery.resource_id == DeliveryOutbox.resource_id,
                         recovered_delivery.state == WorkState.succeeded,
                         recovered_delivery.created_at > DeliveryOutbox.created_at,
