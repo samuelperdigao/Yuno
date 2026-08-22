@@ -580,6 +580,13 @@ class PlatformAPIClient:
             "GET", f"/guilds/{guild_id}/modules/meta/goals", params={"page": page, "page_size": 23}
         )
 
+    async def meta_products(self, guild_id: int, *, page: int = 0) -> dict:
+        return await self._request(
+            "GET",
+            f"/guilds/{guild_id}/modules/meta/products",
+            params={"page": page, "page_size": 23},
+        )
+
     async def meta_goal(self, guild_id: int, goal_id: int) -> dict:
         return await self._request("GET", f"/guilds/{guild_id}/modules/meta/goals/{goal_id}")
 

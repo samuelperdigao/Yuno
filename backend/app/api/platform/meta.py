@@ -119,6 +119,19 @@ async def goals(
     return await services.list_goals(session, guild_id=guild_id, page=page, page_size=page_size)
 
 
+@router.get("/guilds/{guild_id}/modules/meta/products")
+async def products(
+    guild_id: str,
+    page: int = Query(default=0, ge=0),
+    page_size: int = Query(default=23, ge=1, le=23),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    await require_active_license(session, guild_id)
+    return await services.list_products(
+        session, guild_id=guild_id, page=page, page_size=page_size
+    )
+
+
 @router.get("/guilds/{guild_id}/modules/meta/goals/{goal_id}")
 async def goal(guild_id: str, goal_id: int, session: AsyncSession = Depends(get_session)) -> dict:
     await require_active_license(session, guild_id)

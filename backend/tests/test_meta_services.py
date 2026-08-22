@@ -116,6 +116,26 @@ async def _create_goal(
     )
 
 
+def test_meta_product_catalog_is_paginated_and_tenant_safe() -> None:
+    async def scenario() -> None:
+        engine, factory = await _database()
+        async with factory() as session:
+            await _create_goal(session, guild_id="100")
+            catalog = await services.list_products(session, guild_id="100")
+            other = await services.list_products(session, guild_id="200")
+            assert catalog["total"] == 1
+            assert catalog["items"][0] == {
+                "id": catalog["items"][0]["id"],
+                "name": "Produto",
+                "unit": "unidade",
+                "last_suggested_quantity": "10.500",
+            }
+            assert other == {"items": [], "page": 0, "page_size": 23, "total": 0}
+        await engine.dispose()
+
+    asyncio.run(scenario())
+
+
 async def _activate(session, goal: dict, members: list[MetaMemberSnapshotIn]):
     prepared = await services.prepare_launch(
         session,

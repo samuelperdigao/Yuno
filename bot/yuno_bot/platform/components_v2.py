@@ -133,10 +133,16 @@ def media(url: str) -> dict[str, Any]:
     return {"type": MEDIA_GALLERY, "items": [{"media": {"url": url}}]}
 
 
-def container(*components: dict[str, Any], accent_color: int | None = None) -> dict[str, Any]:
+def container(
+    *components: dict[str, Any],
+    accent_color: int | None = None,
+    component_id: int | None = None,
+) -> dict[str, Any]:
     value: dict[str, Any] = {"type": CONTAINER, "components": list(components)}
     if accent_color is not None:
         value["accent_color"] = accent_color
+    if component_id is not None:
+        value["id"] = component_id
     return value
 
 
@@ -176,9 +182,18 @@ async def edit_message(
     await bot.http.request(route, json=_restricted(data))
 
 
-async def send_meta_notice(bot: discord.Client, channel_id: int, data: dict[str, Any]) -> int:
+async def send_meta_notice(
+    bot: discord.Client,
+    channel_id: int,
+    data: dict[str, Any],
+    *,
+    nonce: str | int | None = None,
+) -> int:
     route = discord.http.Route("POST", "/channels/{channel_id}/messages", channel_id=channel_id)
-    response = await bot.http.request(route, json=_meta_restricted(data))
+    body = _meta_restricted(data)
+    if nonce is not None:
+        body = {**body, "nonce": nonce, "enforce_nonce": True}
+    response = await bot.http.request(route, json=body)
     return int(response["id"])
 
 

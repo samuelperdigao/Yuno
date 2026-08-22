@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+import hashlib
 import logging
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -33,6 +34,9 @@ COLOR = 0xFFC72C
 log = logging.getLogger("yuno.meta")
 _goal_pages: dict[tuple[int, int], int] = {}
 _selected_goals: dict[tuple[int, int], int] = {}
+_product_pages: dict[tuple[int, int], int] = {}
+_objective_pages: dict[tuple[int, int], int] = {}
+_selected_objectives: dict[tuple[int, int], int] = {}
 
 
 def actor_from(interaction: discord.Interaction) -> ActorContext:
@@ -165,19 +169,134 @@ def _schedule_summary(data: dict[str, Any]) -> str:
     return "Nao definida"
 
 
-def _objective_lines(data: dict[str, Any]) -> str:
-    lines = []
-    for item in data.get("objectives") or []:
-        if item.get("kind") == "money":
-            lines.append(f"• {item.get('name', 'Dinheiro')}: R$ {item.get('money_amount')}")
+def _format_decimal_br(value: Any, *, places: int, fixed: bool = False) -> str:
+    amount = Decimal(str(value))
+    rendered = f"{amount:.{places}f}"
+    integer, _, fraction = rendered.partition(".")
+    grouped = f"{int(integer):,}".replace(",", ".")
+    if not fixed:
+        fraction = fraction.rstrip("0")
+    return f"{grouped},{fraction}" if fraction else grouped
+
+
+def _decimal_input(value: Any, *, places: int) -> str:
+    if value in (None, ""):
+        return ""
+    amount = Decimal(str(value))
+    rendered = f"{amount:.{places}f}"
+    integer, _, fraction = rendered.partition(".")
+    fraction = fraction.rstrip("0")
+    return f"{integer},{fraction}" if fraction else integer
+
+
+def _parse_decimal_br(value: str, *, places: int, allow_currency: bool = False) -> str:
+    raw = value.strip().replace("\u00a0", " ")
+    if allow_currency:
+        raw = raw.replace("R$", "").replace("r$", "")
+    raw = raw.replace(" ", "")
+    if not raw or raw.startswith(("+", "-")):
+        raise ValueError("Informe um valor positivo.")
+
+    if "," in raw:
+        if raw.count(",") != 1:
+            raise ValueError("Use apenas uma virgula decimal.")
+        integer, fraction = raw.split(",", 1)
+        groups = integer.split(".")
+        if len(groups) > 1 and not (
+            1 <= len(groups[0]) <= 3
+            and all(len(group) == 3 and group.isdigit() for group in groups[1:])
+        ):
+            raise ValueError("Separadores de milhar invalidos.")
+        if not groups[0].isdigit() or not fraction.isdigit() or len(fraction) > places:
+            raise ValueError(f"Use no maximo {places} casas decimais.")
+        normalized = "".join(groups) + "." + fraction
+    elif "." in raw:
+        groups = raw.split(".")
+        thousands = (
+            len(groups) > 1
+            and 1 <= len(groups[0]) <= 3
+            and groups[0].isdigit()
+            and all(len(group) == 3 and group.isdigit() for group in groups[1:])
+        )
+        if thousands:
+            normalized = "".join(groups)
+        elif (
+            len(groups) == 2
+            and groups[0].isdigit()
+            and groups[1].isdigit()
+            and 1 <= len(groups[1]) <= places
+        ):
+            normalized = raw
         else:
-            lines.append(
-                f"• {item.get('name')}: {item.get('item_quantity')} {item.get('unit')}"
-            )
+            raise ValueError("Valor numerico invalido.")
+    elif raw.isdigit():
+        normalized = raw
+    else:
+        raise ValueError("Valor numerico invalido.")
+
+    amount = Decimal(normalized)
+    if (
+        not amount.is_finite()
+        or amount <= 0
+        or amount.as_tuple().exponent < -places
+        or len(amount.as_tuple().digits) > 20
+    ):
+        raise ValueError("Valor fora do limite permitido.")
+    return format(amount, "f")
+
+
+def _display_unit(unit: Any, quantity: Any) -> str:
+    value = str(unit or "unidade").strip()
+    if Decimal(str(quantity)) == 1 or value.casefold().endswith("s"):
+        return value
+    plurals = {
+        "unidade": "unidades",
+        "caixa": "caixas",
+        "pacote": "pacotes",
+        "kit": "kits",
+        "item": "itens",
+    }
+    return plurals.get(value.casefold(), value)
+
+
+def _objective_line(item: dict[str, Any]) -> str:
+    if item.get("kind") == "money":
+        return (
+            f"💰 {item.get('name') or 'Dinheiro'} — "
+            f"R$ {_format_decimal_br(item.get('money_amount'), places=2, fixed=True)}"
+        )
+    quantity = item.get("item_quantity")
+    return (
+        f"📦 {item.get('name')} — {_format_decimal_br(quantity, places=3)} "
+        f"{_display_unit(item.get('unit'), quantity)}"
+    )
+
+
+def _objective_lines(data: dict[str, Any]) -> str:
+    lines = [f"• {_objective_line(item)}" for item in data.get("objectives") or []]
     return "\n".join(lines) or "_Nenhum objetivo definido._"
 
 
-def _editor_payload(draft: dict[str, Any], *, banner: str = "") -> dict[str, Any]:
+def _objectives_match_mode(data: dict[str, Any]) -> bool:
+    objectives = list(data.get("objectives") or [])
+    kinds = {str(item.get("kind")) for item in objectives}
+    mode = str(data.get("objective_mode") or "mixed")
+    if not objectives:
+        return False
+    if mode == "items":
+        return kinds == {"item"}
+    if mode == "money":
+        return kinds == {"money"}
+    return kinds.issubset({"item", "money"})
+
+
+def _editor_payload(
+    draft: dict[str, Any],
+    *,
+    banner: str = "",
+    products: dict[str, Any] | None = None,
+    objective_page: int = 0,
+) -> dict[str, Any]:
     step = draft["step"]
     data = draft["data"]
     title = "Editar Meta" if draft.get("goal_id") else "Criar Meta"
@@ -293,17 +412,102 @@ def _editor_payload(draft: dict[str, Any], *, banner: str = "") -> dict[str, Any
             ]
         )
     elif step == "objectives":
-        content.extend(
-            [
-                text_display(f"### 5. Itens/Dinheiro\n{_objective_lines(data)}"),
+        mode = str(data.get("objective_mode") or "mixed")
+        objectives = list(data.get("objectives") or [])
+        content.append(
+            text_display(
+                "### 5. Objetivos\nAdicione cada objetivo em campos separados. "
+                "Os valores abaixo ja estao no formato que sera publicado.\n\n"
+                + _objective_lines(data)
+            )
+        )
+        catalog = products or {"items": [], "page": 0, "page_size": 23, "total": 0}
+        catalog_options = [
+            {
+                "label": str(item["name"])[:100],
+                "value": f"product:{item['id']}",
+                "description": (
+                    f"Sugestao: {_format_decimal_br(item['last_suggested_quantity'], places=3)} "
+                    f"{item['unit']}"
+                    if item.get("last_suggested_quantity")
+                    else f"Unidade: {item['unit']}"
+                )[:100],
+                "emoji": {"name": "📦"},
+            }
+            for item in catalog.get("items") or []
+        ]
+        product_page = int(catalog.get("page") or 0)
+        if product_page > 0:
+            catalog_options.insert(0, {"label": "Pagina anterior", "value": "page:prev", "emoji": {"name": "⬅️"}})
+        if (product_page + 1) * int(catalog.get("page_size") or 23) < int(catalog.get("total") or 0):
+            catalog_options.append({"label": "Proxima pagina", "value": "page:next", "emoji": {"name": "➡️"}})
+        if mode in {"items", "mixed"} and catalog_options:
+            content.append(
                 action_row(
-                    button(
-                        custom_id=dashboard.central_custom_id("meta", "edit_objectives"),
-                        label="Informar objetivos",
-                        style=1,
+                    string_select(
+                        custom_id=dashboard.central_custom_id("meta", "select_product"),
+                        options=catalog_options,
+                        placeholder=f"Usar item cadastrado · pagina {product_page + 1}",
                     )
-                ),
-            ]
+                )
+            )
+
+        start = max(0, objective_page) * 23
+        visible = objectives[start : start + 23]
+        objective_options = [
+            {
+                "label": str(item.get("name") or "Objetivo")[:100],
+                "value": f"objective:{start + index}",
+                "description": _objective_line(item)[:100],
+                "emoji": {"name": "💰" if item.get("kind") == "money" else "📦"},
+            }
+            for index, item in enumerate(visible)
+        ]
+        if objective_page > 0:
+            objective_options.insert(0, {"label": "Pagina anterior", "value": "page:prev", "emoji": {"name": "⬅️"}})
+        if start + 23 < len(objectives):
+            objective_options.append({"label": "Proxima pagina", "value": "page:next", "emoji": {"name": "➡️"}})
+        if objective_options:
+            content.append(
+                action_row(
+                    string_select(
+                        custom_id=dashboard.central_custom_id("meta", "select_objective"),
+                        options=objective_options,
+                        placeholder=f"Editar ou remover objetivo · pagina {objective_page + 1}",
+                    )
+                )
+            )
+
+        add_buttons = []
+        if mode in {"items", "mixed"}:
+            add_buttons.append(
+                button(
+                    custom_id=dashboard.central_custom_id("meta", "add_item_objective"),
+                    label="Novo item",
+                    emoji="📦",
+                    style=1,
+                )
+            )
+        if mode in {"money", "mixed"}:
+            add_buttons.append(
+                button(
+                    custom_id=dashboard.central_custom_id("meta", "add_money_objective"),
+                    label="Dinheiro",
+                    emoji="💰",
+                    style=1,
+                )
+            )
+        content.append(action_row(*add_buttons))
+        content.append(
+            action_row(
+                button(
+                    custom_id=dashboard.central_custom_id("meta", "objectives_continue"),
+                    label="Continuar",
+                    emoji="✅",
+                    style=3,
+                    disabled=not _objectives_match_mode(data),
+                )
+            )
         )
     elif step == "notice":
         content.extend(
@@ -355,8 +559,46 @@ def _editor_payload(draft: dict[str, Any], *, banner: str = "") -> dict[str, Any
     return payload(container(*content, accent_color=COLOR))
 
 
-async def _show_editor(interaction: discord.Interaction, draft: dict[str, Any], *, banner: str = "") -> None:
-    await edit_interaction_message(interaction, _editor_payload(draft, banner=banner), ephemeral=True)
+async def _editor_products(
+    api: Any, interaction: discord.Interaction, draft: dict[str, Any]
+) -> dict[str, Any] | None:
+    if draft.get("step") != "objectives" or not hasattr(api, "meta_products"):
+        return None
+    key = (int(interaction.guild_id or 0), interaction.user.id)
+    page = max(0, _product_pages.get(key, 0))
+    try:
+        result = await api.meta_products(interaction.guild_id, page=page)
+        if page and not result.get("items"):
+            page = 0
+            _product_pages[key] = 0
+            result = await api.meta_products(interaction.guild_id, page=0)
+        return result
+    except Exception:
+        log.exception(
+            "Falha ao carregar catalogo da Meta guild=%s admin=%s",
+            interaction.guild_id,
+            interaction.user.id,
+        )
+        return None
+
+
+async def _show_editor(
+    interaction: discord.Interaction, draft: dict[str, Any], *, banner: str = ""
+) -> None:
+    key = (int(interaction.guild_id or 0), interaction.user.id)
+    products = await _editor_products(
+        getattr(interaction.client, "platform_api", None), interaction, draft
+    )
+    await edit_interaction_message(
+        interaction,
+        _editor_payload(
+            draft,
+            banner=banner,
+            products=products,
+            objective_page=max(0, _objective_pages.get(key, 0)),
+        ),
+        ephemeral=True,
+    )
 
 
 class EditorModal(discord.ui.Modal):
@@ -365,6 +607,47 @@ class EditorModal(discord.ui.Modal):
         self.api = api
         self.editor_application_id = int(editor_interaction.application_id)
         self.editor_token = editor_interaction.token
+
+    async def _refresh_after_submit(
+        self,
+        interaction: discord.Interaction,
+        saved: dict[str, Any],
+        *,
+        banner: str = "",
+    ) -> None:
+        key = (int(interaction.guild_id or 0), interaction.user.id)
+        products = await _editor_products(self.api, interaction, saved)
+        data = _editor_payload(
+            saved,
+            banner=banner,
+            products=products,
+            objective_page=max(0, _objective_pages.get(key, 0)),
+        )
+        try:
+            await edit_webhook_message(
+                interaction.client,
+                application_id=self.editor_application_id,
+                interaction_token=self.editor_token,
+                data=data,
+            )
+        except Exception:
+            log.warning(
+                "Editor efemero anterior expirou; rotacionando token guild=%s admin=%s",
+                interaction.guild_id,
+                interaction.user.id,
+                exc_info=True,
+            )
+            await edit_webhook_message(
+                interaction.client,
+                application_id=int(interaction.application_id),
+                interaction_token=interaction.token,
+                data=data,
+            )
+            return
+        try:
+            await interaction.delete_original_response()
+        except discord.HTTPException:
+            pass
 
     async def save_patch(
         self, interaction: discord.Interaction, *, patch: dict[str, Any], step: str
@@ -378,17 +661,75 @@ class EditorModal(discord.ui.Modal):
                 {"expected_revision": current["revision"], "step": step, "patch": patch},
                 actor=actor,
             )
-            await edit_webhook_message(
-                interaction.client,
-                application_id=self.editor_application_id,
-                interaction_token=self.editor_token,
-                data=_editor_payload(saved),
-            )
-            try:
-                await interaction.delete_original_response()
-            except discord.HTTPException:
-                pass
+            await self._refresh_after_submit(interaction, saved)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 409:
+                current = await self.api.meta_draft(
+                    interaction.guild_id, actor=actor_from(interaction)
+                )
+                await self._refresh_after_submit(
+                    interaction,
+                    current,
+                    banner="O rascunho mudou durante a edicao. A versao atual foi recarregada.",
+                )
+                return
+            await interaction.followup.send(_error_text(exc), ephemeral=True)
         except Exception as exc:
+            log.exception(
+                "Falha ao salvar rascunho da Meta guild=%s admin=%s interaction=%s",
+                interaction.guild_id,
+                interaction.user.id,
+                interaction.id,
+            )
+            await interaction.followup.send(_error_text(exc), ephemeral=True)
+
+    async def save_objective(
+        self,
+        interaction: discord.Interaction,
+        *,
+        objective: dict[str, Any],
+        index: int | None,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            actor = actor_from(interaction)
+            current = await self.api.meta_draft(interaction.guild_id, actor=actor)
+            objectives = list(current["data"].get("objectives") or [])
+            if index is None:
+                objectives.append(objective)
+            elif 0 <= index < len(objectives):
+                objectives[index] = objective
+            else:
+                raise ValueError("O objetivo selecionado nao existe mais.")
+            saved = await self.api.meta_patch_draft(
+                interaction.guild_id,
+                {
+                    "expected_revision": current["revision"],
+                    "step": "objectives",
+                    "patch": {"objectives": objectives},
+                },
+                actor=actor,
+            )
+            await self._refresh_after_submit(interaction, saved)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 409:
+                current = await self.api.meta_draft(
+                    interaction.guild_id, actor=actor_from(interaction)
+                )
+                await self._refresh_after_submit(
+                    interaction,
+                    current,
+                    banner="O rascunho mudou durante a edicao. Selecione o objetivo novamente.",
+                )
+                return
+            await interaction.followup.send(_error_text(exc), ephemeral=True)
+        except Exception as exc:
+            log.exception(
+                "Falha ao salvar objetivo da Meta guild=%s admin=%s interaction=%s",
+                interaction.guild_id,
+                interaction.user.id,
+                interaction.id,
+            )
             await interaction.followup.send(_error_text(exc), ephemeral=True)
 
 
@@ -475,70 +816,126 @@ class ScheduleModal(EditorModal):
         await self.save_patch(interaction, patch=patch, step="participants")
 
 
-class ObjectivesModal(EditorModal):
-    def __init__(self, api: Any, interaction: discord.Interaction, mode: str) -> None:
-        super().__init__("Objetivos da Meta", api, interaction)
-        self.mode = mode
-        placeholder = {
-            "items": "Arma | 10.500 | unidade\nMunicao | 100 | caixa",
-            "money": "Dinheiro | 1500.00",
-            "mixed": "item | Arma | 10.500 | unidade\nmoney | Dinheiro | 1500.00",
-        }.get(mode, "item | Produto | 10 | unidade")
-        self.objectives = discord.ui.TextInput(
-            label="Um objetivo por linha, separado por |",
-            placeholder=placeholder,
-            style=discord.TextStyle.paragraph,
+class ItemObjectiveModal(EditorModal):
+    def __init__(
+        self,
+        api: Any,
+        interaction: discord.Interaction,
+        *,
+        objective: dict[str, Any] | None = None,
+        index: int | None = None,
+    ) -> None:
+        super().__init__("Editar item" if objective else "Novo item", api, interaction)
+        self.index = index
+        current = objective or {}
+        self.name_input = discord.ui.TextInput(
+            label="Item",
+            placeholder="Ex.: Arma",
+            default=str(current.get("name") or "") or None,
             min_length=1,
-            max_length=2000,
+            max_length=100,
         )
-        self.add_item(self.objectives)
-
-    @staticmethod
-    def _decimal(value: str, places: int) -> str:
-        amount = Decimal(value.strip())
-        if not amount.is_finite() or amount <= 0 or amount.as_tuple().exponent < -places:
-            raise ValueError
-        return format(amount, "f")
-
-    def _parse(self) -> list[dict[str, Any]]:
-        result = []
-        for raw in str(self.objectives.value).splitlines():
-            parts = [part.strip() for part in raw.split("|")]
-            if self.mode == "items":
-                if len(parts) != 3:
-                    raise ValueError
-                result.append(
-                    {"kind": "item", "name": parts[0], "item_quantity": self._decimal(parts[1], 3), "unit": parts[2], "money_amount": None}
-                )
-            elif self.mode == "money":
-                if len(parts) != 2:
-                    raise ValueError
-                result.append(
-                    {"kind": "money", "name": parts[0], "money_amount": self._decimal(parts[1], 2), "unit": None, "item_quantity": None}
-                )
-            elif parts and parts[0].casefold() == "item" and len(parts) == 4:
-                result.append(
-                    {"kind": "item", "name": parts[1], "item_quantity": self._decimal(parts[2], 3), "unit": parts[3], "money_amount": None}
-                )
-            elif parts and parts[0].casefold() == "money" and len(parts) == 3:
-                result.append(
-                    {"kind": "money", "name": parts[1], "money_amount": self._decimal(parts[2], 2), "unit": None, "item_quantity": None}
-                )
-            else:
-                raise ValueError
-        if not result:
-            raise ValueError
-        return result
+        self.quantity_input = discord.ui.TextInput(
+            label="Quantidade",
+            placeholder="Ex.: 10.500 ou 10.500,250",
+            default=(
+                _decimal_input(current.get("item_quantity"), places=3)
+                if current.get("item_quantity") is not None
+                else None
+            ),
+            min_length=1,
+            max_length=30,
+        )
+        self.unit_input = discord.ui.TextInput(
+            label="Unidade",
+            placeholder="Ex.: unidade, caixa, pacote",
+            default=str(current.get("unit") or "") or None,
+            min_length=1,
+            max_length=30,
+        )
+        self.add_item(self.name_input)
+        self.add_item(self.quantity_input)
+        self.add_item(self.unit_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
-            parsed = self._parse()
-        except (ValueError, InvalidOperation):
+            quantity = _parse_decimal_br(
+                str(self.quantity_input.value), places=3
+            )
+        except (ValueError, InvalidOperation) as exc:
             await interaction.response.send_message(
-                "Objetivos invalidos. Use o formato mostrado no campo e valores positivos.", ephemeral=True
+                f"Quantidade invalida: {exc} Use virgula para decimais, por exemplo `10.500,250`.",
+                ephemeral=True,
             )
             return
-        await self.save_patch(interaction, patch={"objectives": parsed}, step="notice")
+        await self.save_objective(
+            interaction,
+            index=self.index,
+            objective={
+                "kind": "item",
+                "name": str(self.name_input.value).strip(),
+                "unit": str(self.unit_input.value).strip(),
+                "item_quantity": quantity,
+                "money_amount": None,
+            },
+        )
+
+
+class MoneyObjectiveModal(EditorModal):
+    def __init__(
+        self,
+        api: Any,
+        interaction: discord.Interaction,
+        *,
+        objective: dict[str, Any] | None = None,
+        index: int | None = None,
+    ) -> None:
+        super().__init__("Editar dinheiro" if objective else "Objetivo em dinheiro", api, interaction)
+        self.index = index
+        current = objective or {}
+        self.name_input = discord.ui.TextInput(
+            label="Descricao",
+            placeholder="Ex.: Dinheiro",
+            default=str(current.get("name") or "Dinheiro"),
+            min_length=1,
+            max_length=100,
+        )
+        self.amount_input = discord.ui.TextInput(
+            label="Valor",
+            placeholder="Ex.: R$ 1.500,00",
+            default=(
+                _decimal_input(current.get("money_amount"), places=2)
+                if current.get("money_amount") is not None
+                else None
+            ),
+            min_length=1,
+            max_length=30,
+        )
+        self.add_item(self.name_input)
+        self.add_item(self.amount_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            amount = _parse_decimal_br(
+                str(self.amount_input.value), places=2, allow_currency=True
+            )
+        except (ValueError, InvalidOperation) as exc:
+            await interaction.response.send_message(
+                f"Valor invalido: {exc} Exemplo aceito: `R$ 1.500,00`.",
+                ephemeral=True,
+            )
+            return
+        await self.save_objective(
+            interaction,
+            index=self.index,
+            objective={
+                "kind": "money",
+                "name": str(self.name_input.value).strip(),
+                "unit": None,
+                "item_quantity": None,
+                "money_amount": amount,
+            },
+        )
 
 
 class NoticeModal(EditorModal):
@@ -750,19 +1147,209 @@ async def set_type(interaction: discord.Interaction, api: Any) -> None:
         return
     actor = actor_from(interaction)
     current = await api.meta_draft(interaction.guild_id, actor=actor)
+    selected = str(values[0])
+    objectives = list(current["data"].get("objectives") or [])
+    if selected == "items":
+        compatible = [item for item in objectives if item.get("kind") == "item"]
+    elif selected == "money":
+        compatible = [item for item in objectives if item.get("kind") == "money"]
+    else:
+        compatible = objectives
     saved = await api.meta_patch_draft(
         interaction.guild_id,
-        {"expected_revision": current["revision"], "step": "objectives", "patch": {"objective_mode": values[0], "objectives": []}},
+        {
+            "expected_revision": current["revision"],
+            "step": "objectives",
+            "patch": {"objective_mode": selected, "objectives": compatible},
+        },
         actor=actor,
     )
-    await _show_editor(interaction, saved)
+    removed = len(objectives) - len(compatible)
+    await _show_editor(
+        interaction,
+        saved,
+        banner=(
+            f"{removed} objetivo(s) de outro tipo foram removidos desta configuracao."
+            if removed
+            else ""
+        ),
+    )
 
 
 async def edit_objectives(interaction: discord.Interaction, api: Any) -> None:
+    """Compatibilidade com mensagens efemeras abertas antes do editor guiado."""
+
     draft = await api.meta_draft(interaction.guild_id, actor=actor_from(interaction))
-    await interaction.response.send_modal(
-        ObjectivesModal(api, interaction, str(draft["data"].get("objective_mode") or "mixed"))
+    await _show_editor(interaction, draft)
+
+
+async def add_item_objective(interaction: discord.Interaction, api: Any) -> None:
+    await interaction.response.send_modal(ItemObjectiveModal(api, interaction))
+
+
+async def add_money_objective(interaction: discord.Interaction, api: Any) -> None:
+    await interaction.response.send_modal(MoneyObjectiveModal(api, interaction))
+
+
+async def select_product(interaction: discord.Interaction, api: Any) -> None:
+    values = list((interaction.data or {}).get("values") or [])
+    if not values:
+        return
+    key = (int(interaction.guild_id or 0), interaction.user.id)
+    selected = str(values[0])
+    if selected.startswith("page:"):
+        delta = -1 if selected == "page:prev" else 1
+        _product_pages[key] = max(0, _product_pages.get(key, 0) + delta)
+        draft = await api.meta_draft(interaction.guild_id, actor=actor_from(interaction))
+        await _show_editor(interaction, draft)
+        return
+    product_id = int(selected.split(":", 1)[1])
+    catalog = await api.meta_products(
+        interaction.guild_id, page=max(0, _product_pages.get(key, 0))
     )
+    product = next(
+        (item for item in catalog.get("items") or [] if int(item["id"]) == product_id),
+        None,
+    )
+    if product is None:
+        await _reply(interaction, "O item cadastrado nao esta mais disponivel. Atualize a lista.")
+        return
+    await interaction.response.send_modal(
+        ItemObjectiveModal(
+            api,
+            interaction,
+            objective={
+                "kind": "item",
+                "name": product["name"],
+                "unit": product["unit"],
+                "item_quantity": product.get("last_suggested_quantity"),
+                "money_amount": None,
+            },
+        )
+    )
+
+
+def _objective_action_payload(draft: dict[str, Any], index: int) -> dict[str, Any]:
+    objectives = list(draft["data"].get("objectives") or [])
+    if index < 0 or index >= len(objectives):
+        raise ValueError("O objetivo selecionado nao existe mais.")
+    item = objectives[index]
+    return payload(
+        container(
+            text_display(
+                f"# 🎯 Objetivo selecionado\n\n{_objective_line(item)}\n\n"
+                "Escolha o que deseja fazer."
+            ),
+            action_row(
+                button(
+                    custom_id=dashboard.central_custom_id("meta", "edit_selected_objective"),
+                    label="Editar",
+                    emoji="✏️",
+                    style=1,
+                ),
+                button(
+                    custom_id=dashboard.central_custom_id("meta", "remove_selected_objective"),
+                    label="Remover",
+                    emoji="🗑️",
+                    style=4,
+                ),
+                button(
+                    custom_id=dashboard.central_custom_id("meta", "back_to_objectives"),
+                    label="Voltar",
+                    style=2,
+                ),
+            ),
+            accent_color=COLOR,
+        )
+    )
+
+
+async def select_objective(interaction: discord.Interaction, api: Any) -> None:
+    values = list((interaction.data or {}).get("values") or [])
+    if not values:
+        return
+    key = (int(interaction.guild_id or 0), interaction.user.id)
+    selected = str(values[0])
+    if selected.startswith("page:"):
+        delta = -1 if selected == "page:prev" else 1
+        _objective_pages[key] = max(0, _objective_pages.get(key, 0) + delta)
+        draft = await api.meta_draft(interaction.guild_id, actor=actor_from(interaction))
+        await _show_editor(interaction, draft)
+        return
+    index = int(selected.split(":", 1)[1])
+    draft = await api.meta_draft(interaction.guild_id, actor=actor_from(interaction))
+    _selected_objectives[key] = index
+    try:
+        data = _objective_action_payload(draft, index)
+    except ValueError as exc:
+        await _reply(interaction, str(exc))
+        return
+    await edit_interaction_message(interaction, data, ephemeral=True)
+
+
+async def edit_selected_objective(interaction: discord.Interaction, api: Any) -> None:
+    key = (int(interaction.guild_id or 0), interaction.user.id)
+    index = _selected_objectives.get(key)
+    draft = await api.meta_draft(interaction.guild_id, actor=actor_from(interaction))
+    objectives = list(draft["data"].get("objectives") or [])
+    if index is None or index < 0 or index >= len(objectives):
+        await _show_editor(interaction, draft, banner="Selecione o objetivo novamente.")
+        return
+    item = objectives[index]
+    modal: EditorModal
+    if item.get("kind") == "money":
+        modal = MoneyObjectiveModal(api, interaction, objective=item, index=index)
+    else:
+        modal = ItemObjectiveModal(api, interaction, objective=item, index=index)
+    await interaction.response.send_modal(modal)
+
+
+async def remove_selected_objective(interaction: discord.Interaction, api: Any) -> None:
+    key = (int(interaction.guild_id or 0), interaction.user.id)
+    index = _selected_objectives.get(key)
+    actor = actor_from(interaction)
+    current = await api.meta_draft(interaction.guild_id, actor=actor)
+    objectives = list(current["data"].get("objectives") or [])
+    if index is None or index < 0 or index >= len(objectives):
+        await _show_editor(interaction, current, banner="Selecione o objetivo novamente.")
+        return
+    removed = objectives.pop(index)
+    saved = await api.meta_patch_draft(
+        interaction.guild_id,
+        {
+            "expected_revision": current["revision"],
+            "step": "objectives",
+            "patch": {"objectives": objectives},
+        },
+        actor=actor,
+    )
+    _selected_objectives.pop(key, None)
+    await _show_editor(
+        interaction, saved, banner=f"{removed.get('name') or 'Objetivo'} removido."
+    )
+
+
+async def back_to_objectives(interaction: discord.Interaction, api: Any) -> None:
+    draft = await api.meta_draft(interaction.guild_id, actor=actor_from(interaction))
+    await _show_editor(interaction, draft)
+
+
+async def objectives_continue(interaction: discord.Interaction, api: Any) -> None:
+    actor = actor_from(interaction)
+    current = await api.meta_draft(interaction.guild_id, actor=actor)
+    if not _objectives_match_mode(current["data"]):
+        await _show_editor(
+            interaction,
+            current,
+            banner="Adicione ao menos um objetivo compativel com o tipo da Meta.",
+        )
+        return
+    saved = await api.meta_patch_draft(
+        interaction.guild_id,
+        {"expected_revision": current["revision"], "step": "notice", "patch": {}},
+        actor=actor,
+    )
+    await _show_editor(interaction, saved)
 
 
 async def edit_notice(interaction: discord.Interaction, api: Any) -> None:
@@ -805,18 +1392,49 @@ def _member_snapshots(guild: discord.Guild) -> list[dict[str, Any]]:
     ]
 
 
+def _cycle_period(cycle: dict[str, Any]) -> str:
+    zone = ZoneInfo(str(cycle.get("timezone") or "UTC"))
+
+    def local(value: Any) -> datetime:
+        result = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if result.tzinfo is None:
+            result = result.replace(tzinfo=timezone.utc)
+        return result.astimezone(zone)
+
+    starts_at = local(cycle["starts_at"])
+    ends_at = local(cycle["ends_at"])
+    return (
+        f"{starts_at:%d/%m/%Y %H:%M} → {ends_at:%d/%m/%Y %H:%M}\n"
+        f"Encerra <t:{int(ends_at.timestamp())}:R>"
+    )
+
+
+def _notice_component_id(cycle: dict[str, Any]) -> int:
+    value = int(cycle["id"]) & 0xFFFFFFFF
+    return value or 1
+
+
+def _notice_nonce(cycle: dict[str, Any]) -> str:
+    digest = hashlib.blake2s(
+        str(cycle["notice_reference"]).encode("utf-8"), digest_size=8
+    ).hexdigest()
+    return f"meta-{digest}"
+
+
 def _notice_payload(goal: dict[str, Any], cycle: dict[str, Any], *, ended: bool) -> dict[str, Any]:
     objectives = _objective_lines({"objectives": cycle.get("objectives") or []})
-    heading = "Meta Encerrada" if ended else str(cycle.get("name") or goal["name"])
+    name = str(cycle.get("name") or goal["name"])
+    heading = f"🏁 Meta Encerrada — {name}" if ended else f"🎯 {name}"
     prefix = "" if ended else "@everyone\n\n"
     data = container(
-        text_display(
-            f"{prefix}# 🎯 {heading}\n\n{cycle.get('notice_text') or ''}\n\n"
-            f"### Objetivos\n{objectives}\n\n"
-            f"**Participantes:** {len(cycle.get('participants') or [])}\n"
-            f"_Referencia: {cycle['notice_reference']}_"
-        ),
+        text_display(f"{prefix}# {heading}"),
+        text_display(str(cycle.get("notice_text") or "")),
+        separator(),
+        text_display(f"### 📅 Período\n{_cycle_period(cycle)}"),
+        separator(),
+        text_display(f"### 📦 Objetivos\n{objectives}"),
         accent_color=COLOR,
+        component_id=_notice_component_id(cycle),
     )
     return payload(data) if ended else meta_notice_payload(data)
 
@@ -833,6 +1451,22 @@ async def _channel_for_launch(guild: discord.Guild, channel_id: int) -> discord.
     return channel
 
 
+def _component_contains_id(value: Any, expected: int) -> bool:
+    if isinstance(value, dict):
+        if value.get("id") == expected:
+            return True
+        return any(
+            _component_contains_id(child, expected)
+            for child in value.get("components") or []
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_component_contains_id(child, expected) for child in value)
+    if getattr(value, "id", None) == expected:
+        return True
+    children = getattr(value, "children", None) or getattr(value, "components", None) or []
+    return any(_component_contains_id(child, expected) for child in children)
+
+
 async def _find_notice(channel: discord.TextChannel, cycle: dict[str, Any]) -> discord.Message | None:
     message_id = cycle.get("notice_message_id")
     if message_id:
@@ -840,12 +1474,20 @@ async def _find_notice(channel: discord.TextChannel, cycle: dict[str, Any]) -> d
             return await channel.fetch_message(int(message_id))
         except discord.HTTPException:
             pass
-    reference = str(cycle["notice_reference"])
+    component_id = _notice_component_id(cycle)
+    nonce = _notice_nonce(cycle)
+    legacy_reference = str(cycle["notice_reference"])
     started_at = datetime.fromisoformat(str(cycle["starts_at"]).replace("Z", "+00:00"))
     try:
         async for message in channel.history(limit=None, after=started_at):
-            if message.author.id == channel.guild.me.id and (
-                reference in message.content or reference in str(message.components)
+            bot_member = channel.guild.me
+            if bot_member is None or message.author.id != bot_member.id:
+                continue
+            if str(getattr(message, "nonce", "")) == nonce or _component_contains_id(
+                message.components, component_id
+            ) or (
+                legacy_reference in message.content
+                or legacy_reference in str(message.components)
             ):
                 return message
     except discord.HTTPException:
@@ -918,7 +1560,12 @@ async def run_job(bot: discord.Client, api: Any, item: dict[str, Any]) -> dict[s
     goal = await api.meta_goal(guild_id, goal_id)
     notice = await _find_notice(channel, cycle)
     if notice is None:
-        message_id = await send_meta_notice(bot, channel.id, _notice_payload(goal, cycle, ended=False))
+        message_id = await send_meta_notice(
+            bot,
+            channel.id,
+            _notice_payload(goal, cycle, ended=False),
+            nonce=_notice_nonce(cycle),
+        )
         try:
             notice = await channel.fetch_message(message_id)
         except discord.HTTPException:

@@ -171,6 +171,46 @@ async def get_settings(session: AsyncSession, *, guild_id: str) -> dict[str, Any
     }
 
 
+async def list_products(
+    session: AsyncSession, *, guild_id: str, page: int = 0, page_size: int = 23
+) -> dict[str, Any]:
+    """Return the tenant-scoped Meta catalog used by the guided objective editor."""
+
+    active = (MetaProduct.guild_id == guild_id, MetaProduct.archived.is_(False))
+    total = int(
+        await session.scalar(select(func.count(MetaProduct.id)).where(*active)) or 0
+    )
+    items = list(
+        (
+            await session.execute(
+                select(MetaProduct)
+                .where(*active)
+                .order_by(MetaProduct.normalized_name, MetaProduct.id)
+                .offset(page * page_size)
+                .limit(page_size)
+            )
+        ).scalars()
+    )
+    return {
+        "items": [
+            {
+                "id": item.id,
+                "name": item.name,
+                "unit": item.unit,
+                "last_suggested_quantity": (
+                    format(item.last_suggested_quantity, "f")
+                    if item.last_suggested_quantity is not None
+                    else None
+                ),
+            }
+            for item in items
+        ],
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+    }
+
+
 async def save_settings(
     session: AsyncSession,
     *,
