@@ -8,7 +8,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 
@@ -20,7 +19,10 @@ from app.domain_modules.registration.domain import (  # noqa: E402
     RegistrationRequestStatus,
 )
 from app.domain_modules.registration.models import OrganizationMember  # noqa: E402
-from app.domain_modules.registration.schemas import RegistrationConfig, RegistrationSubmit  # noqa: E402
+from app.domain_modules.registration.schemas import (  # noqa: E402
+    RegistrationConfig,
+    RegistrationSubmit,
+)
 from app.platform.models import (  # noqa: E402
     AuditEntry,
     DeliveryOutbox,
@@ -177,6 +179,35 @@ def test_registration_service_approval_idempotency_outbox_and_reactivation() -> 
                     "registration.log_approved",
                     "registration.member_approved",
                 }
+                approved_log = next(
+                    item
+                    for item in deliveries
+                    if item.renderer_key == "registration.log_approved"
+                )
+                assert approved_log.payload == {
+                    "schema_version": 2,
+                    "request_id": request.id,
+                    "decision": "approved",
+                    "discord_user_id": "10",
+                    "submitted_name": "Ana Silva",
+                    "player_id": "001",
+                    "reviewed_by": "20",
+                    "decision_at": f"{approved.approved_at.isoformat()}Z",
+                    "reason": None,
+                    "previous_nickname": "Antes",
+                    "target_nickname": "Ana Silva | 001",
+                    "member_role_id": "1004",
+                    "role_was_present": False,
+                    "nickname_applied": True,
+                    "role_applied": True,
+                    "config_version": 1,
+                    "log_approved_title": "Registro aprovado",
+                    "log_rejected_title": "Registro rejeitado",
+                    "log_footer": "Yuno • Sistema de Registro",
+                    "show_member_avatar": True,
+                    "approved_dm_title": "Registro aprovado",
+                    "rejected_dm_title": "Registro não aprovado",
+                }
 
                 await services.deactivate_member(
                     session,
@@ -298,6 +329,22 @@ def test_registration_compensation_release_rejection_and_tenant_isolation() -> N
                 )
                 assert rejected.status == RegistrationRequestStatus.rejected
                 assert rejected.rejection_reason == "Dados divergentes"
+                rejected_log = await session.scalar(
+                    select(DeliveryOutbox).where(
+                        DeliveryOutbox.guild_id == "100",
+                        DeliveryOutbox.renderer_key == "registration.log_rejected",
+                    )
+                )
+                assert rejected_log is not None
+                assert rejected_log.payload["decision"] == "rejected"
+                assert rejected_log.payload["discord_user_id"] == "11"
+                assert rejected_log.payload["reviewed_by"] == "21"
+                assert rejected_log.payload["submitted_name"] == "Bia"
+                assert rejected_log.payload["player_id"] == "002"
+                assert rejected_log.payload["reason"] == "Dados divergentes"
+                assert rejected_log.payload["member_role_id"] == "1004"
+                assert rejected_log.payload["target_nickname"] is None
+                assert rejected_log.payload["decision_at"] == f"{rejected.rejected_at.isoformat()}Z"
                 with pytest.raises(HTTPException):
                     await services.reject_request(
                         session,

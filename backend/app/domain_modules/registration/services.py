@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import logging
 import secrets
 import unicodedata
-import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -20,8 +20,15 @@ from app.domain_modules.registration.domain import (
     normalize_name,
     validate_player_id,
 )
-from app.domain_modules.registration.models import OrganizationMember, RegistrationRequest
-from app.domain_modules.registration.schemas import RegistrationConfig, RegistrationSubmit
+from app.domain_modules.registration.models import (
+    OrganizationMember,
+    RegistrationRequest,
+)
+from app.domain_modules.registration.schemas import (
+    RegistrationConfig,
+    RegistrationDecisionDeliveryPayload,
+    RegistrationSubmit,
+)
 from app.platform.audit import write_audit
 from app.platform.models import (
     AutomationTask,
@@ -30,7 +37,6 @@ from app.platform.models import (
     ModuleInstance,
     ModuleLifecycle,
 )
-
 
 CLAIM_LEASE = timedelta(minutes=5)
 log = logging.getLogger("yuno.registration")
@@ -351,7 +357,11 @@ async def submit_request(
         destination_id=config.approval_channel_id,
         request_id=request.id,
         event="submitted",
-        payload={"request_id": request.id, "config_version_id": version.id},
+        payload={
+            "request_id": request.id,
+            "config_version_id": version.id,
+            "config_version": version.version,
+        },
         correlation_id=correlation_id,
         max_attempts=10,
     )
@@ -632,6 +642,7 @@ async def complete_approval(
         event="approved",
         correlation_id=correlation_id,
         dm_message=config.approved_message,
+        config_version=version.version,
     )
     try:
         async with session.begin_nested():
@@ -677,12 +688,34 @@ async def _decision_deliveries(
     event: str,
     correlation_id: str,
     dm_message: str,
+    config_version: int,
 ) -> None:
-    common = {
-        "request_id": request.id,
-        "decision": event,
-        "reason": request.rejection_reason,
-    }
+    decision_at = (
+        request.approved_at if event == "approved" else request.rejected_at
+    ) or request.reviewed_at or datetime.now(timezone.utc)
+    common = RegistrationDecisionDeliveryPayload(
+        request_id=request.id,
+        decision=event,
+        discord_user_id=request.discord_user_id,
+        submitted_name=request.submitted_name,
+        player_id=request.player_id_original,
+        reviewed_by=request.reviewed_by,
+        decision_at=decision_at,
+        reason=request.rejection_reason,
+        previous_nickname=request.previous_nickname,
+        target_nickname=request.target_nickname,
+        member_role_id=config.member_role_id,
+        role_was_present=request.role_was_present,
+        nickname_applied=request.nickname_applied,
+        role_applied=request.role_applied,
+        config_version=config_version,
+        log_approved_title=config.log_approved_title,
+        log_rejected_title=config.log_rejected_title,
+        log_footer=config.log_footer,
+        show_member_avatar=config.show_member_avatar,
+        approved_dm_title=config.approved_dm_title,
+        rejected_dm_title=config.rejected_dm_title,
+    ).model_dump(mode="json")
     await _queue(
         session,
         guild_id=request.guild_id,
@@ -857,7 +890,8 @@ async def reject_request(
         config=config,
         event="rejected",
         correlation_id=correlation_id,
-        dm_message=f"{config.rejected_message}\nMotivo: {clean_reason}",
+        dm_message=config.rejected_message,
+        config_version=version.version,
     )
     await _commit_refresh(session, request)
     _log_phase(

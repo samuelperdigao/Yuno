@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domain_modules.registration.domain import (
@@ -53,6 +56,22 @@ class RegistrationConfig(RegistrationSchema):
     rejected_message: str = Field(
         default="Seu registro foi rejeitado.", min_length=1, max_length=2000
     )
+    log_approved_title: str = Field(
+        default="Registro aprovado", min_length=1, max_length=256
+    )
+    log_rejected_title: str = Field(
+        default="Registro rejeitado", min_length=1, max_length=256
+    )
+    log_footer: str = Field(
+        default="Yuno • Sistema de Registro", min_length=1, max_length=2048
+    )
+    show_member_avatar: bool = True
+    approved_dm_title: str = Field(
+        default="Registro aprovado", min_length=1, max_length=256
+    )
+    rejected_dm_title: str = Field(
+        default="Registro não aprovado", min_length=1, max_length=256
+    )
     already_pending_message: str = Field(
         default="Voce ja possui um registro aguardando analise.", min_length=1, max_length=2000
     )
@@ -104,12 +123,37 @@ class RegistrationConfig(RegistrationSchema):
         return value
 
     @model_validator(mode="after")
-    def valid_ranges(self) -> "RegistrationConfig":
+    def valid_ranges(self) -> RegistrationConfig:
         if self.player_id_min_length > self.player_id_max_length:
             raise ValueError("Limite minimo do ID excede o maximo.")
         if self.name_min_length > self.name_max_length:
             raise ValueError("Limite minimo do nome excede o maximo.")
         return self
+
+
+class RegistrationDecisionDeliveryPayload(RegistrationSchema):
+    schema_version: Literal[2] = 2
+    request_id: str = Field(min_length=1, max_length=36)
+    decision: Literal["approved", "rejected"]
+    discord_user_id: str = Field(min_length=1, max_length=32)
+    submitted_name: str = Field(min_length=1, max_length=120)
+    player_id: str = Field(min_length=1, max_length=120)
+    reviewed_by: str | None = Field(default=None, max_length=32)
+    decision_at: datetime
+    reason: str | None = Field(default=None, max_length=1000)
+    previous_nickname: str | None = Field(default=None, max_length=32)
+    target_nickname: str | None = Field(default=None, max_length=32)
+    member_role_id: str = Field(min_length=1, max_length=32)
+    role_was_present: bool | None = None
+    nickname_applied: bool = False
+    role_applied: bool = False
+    config_version: int = Field(ge=1)
+    log_approved_title: str = Field(min_length=1, max_length=256)
+    log_rejected_title: str = Field(min_length=1, max_length=256)
+    log_footer: str = Field(min_length=1, max_length=2048)
+    show_member_avatar: bool = True
+    approved_dm_title: str = Field(min_length=1, max_length=256)
+    rejected_dm_title: str = Field(min_length=1, max_length=256)
 
 
 class RegistrationSubmit(RegistrationSchema):

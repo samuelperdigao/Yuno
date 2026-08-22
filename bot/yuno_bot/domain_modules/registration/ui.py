@@ -7,6 +7,13 @@ import discord
 import httpx
 
 from yuno_bot import dashboard
+from yuno_bot.domain_modules.registration.renderers import (
+    APPROVED_COLOR,
+    PENDING_COLOR,
+    REJECTED_COLOR,
+    RegistrationLogData,
+    RegistrationLogRenderer,
+)
 from yuno_bot.platform.components_v2 import (
     action_row,
     button,
@@ -19,6 +26,10 @@ from yuno_bot.platform.components_v2 import (
     separator,
     string_select,
     text_display,
+    thumbnail,
+)
+from yuno_bot.platform.components_v2 import (
+    section as component_section,
 )
 from yuno_bot.platform.contracts import (
     ActorContext,
@@ -28,7 +39,6 @@ from yuno_bot.platform.contracts import (
 )
 from yuno_bot.platform.panels import PanelPublisher
 from yuno_bot.platform.router import RoutedModal, custom_id
-
 
 COLOR = 0xFFC72C
 PANEL_COLOR_CHOICES = (
@@ -52,6 +62,14 @@ PROTECTED_ROLE_PERMISSIONS = (
     "moderate_members",
     "manage_webhooks",
 )
+REGISTRATION_VISUAL_DEFAULTS = {
+    "log_approved_title": "Registro aprovado",
+    "log_rejected_title": "Registro rejeitado",
+    "log_footer": "Yuno • Sistema de Registro",
+    "show_member_avatar": True,
+    "approved_dm_title": "Registro aprovado",
+    "rejected_dm_title": "Registro não aprovado",
+}
 
 
 def actor_from(interaction: discord.Interaction) -> ActorContext:
@@ -116,6 +134,37 @@ def _modal_values(interaction: discord.Interaction) -> dict[str, str]:
 
 def _selected_ids(interaction: discord.Interaction) -> list[str]:
     return [str(value) for value in ((interaction.data or {}).get("values") or [])]
+
+
+def _safe_display_text(value: Any, *, fallback: str = "Não informado") -> str:
+    text = str(value or "").strip()
+    if not text:
+        return fallback
+    return discord.utils.escape_markdown(discord.utils.escape_mentions(text))
+
+
+def _as_utc_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        result = value
+    elif isinstance(value, str) and value.strip():
+        try:
+            result = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if result.tzinfo is None:
+        result = result.replace(tzinfo=timezone.utc)
+    return result.astimezone(timezone.utc)
+
+
+def _discord_time(value: Any) -> str:
+    moment = _as_utc_datetime(value)
+    return f"<t:{int(moment.timestamp())}:F>" if moment else "Horário indisponível"
+
+
+def _nickname_preview(template: str, *, name: str, player_id: str) -> str:
+    return template.replace("{name}", name).replace("{id}", player_id)
 
 
 def _hex_color(value: str | None) -> int:
@@ -265,23 +314,62 @@ async def render_review(context: dict) -> ComponentsV2Payload:
         request = await context["api"].registration_request(
             context["guild"].id, str(context["resource_id"])
         )
-    status = str(request["status"])
-    lines = [
-        "# Analise de registro",
-        f"Membro: <@{request['discord_user_id']}>",
-        f"Nome: **{request['submitted_name']}**",
-        f"ID: `{request['player_id_original']}`",
-        f"Estado: **{status.upper()}**",
-    ]
-    if request.get("reviewed_by"):
-        lines.append(f"Decidido por: <@{request['reviewed_by']}>")
-    if request.get("rejection_reason"):
-        lines.append(f"Motivo: {request['rejection_reason']}")
-    components = [text_display("\n".join(lines))]
+    status = str(request["status"]).lower()
+    status_labels = {
+        "pending": "Aguardando análise",
+        "processing": "Em processamento",
+        "approved": "Aprovado",
+        "rejected": "Rejeitado",
+    }
+    titles = {
+        "pending": "Nova solicitação de registro",
+        "processing": "Registro em processamento",
+        "approved": "Registro aprovado",
+        "rejected": "Registro rejeitado",
+    }
+    colors = {
+        "pending": PENDING_COLOR,
+        "processing": PENDING_COLOR,
+        "approved": APPROVED_COLOR,
+        "rejected": REJECTED_COLOR,
+    }
+    member_id = str(request.get("discord_user_id") or "")
+    member = f"<@{member_id}>" if member_id.isascii() and member_id.isdigit() else "Membro indisponível"
+    submitted_name = _safe_display_text(request.get("submitted_name"))
+    player_id = _safe_display_text(request.get("player_id_original"))
+    target_nickname = _safe_display_text(
+        context.get("target_nickname") or request.get("target_nickname"),
+        fallback="Será definido na aprovação",
+    )
+    identity = text_display(
+        f"# {titles.get(status, 'Solicitação de registro')}\n"
+        f"**{status_labels.get(status, 'Estado indisponível')}**\n\n"
+        f"### Dados enviados\n"
+        f"**Membro**\n{member}\n\n"
+        f"**Nome**\n{submitted_name}\n\n"
+        f"**ID**\n`{player_id}`\n\n"
+        f"**Enviado em**\n{_discord_time(request.get('created_at'))}"
+    )
+    avatar_url = str(context.get("avatar_url") or "")
+    if avatar_url.startswith(("https://", "http://")):
+        components = [
+            component_section(
+                identity,
+                accessory=thumbnail(avatar_url, description="Foto do membro"),
+            )
+        ]
+    else:
+        components = [identity]
+
     if status == "pending":
         components.extend(
             [
                 separator(),
+                text_display(
+                    "### Resultado esperado\n"
+                    f"**Apelido após aprovação**\n{target_nickname}\n\n"
+                    "Confira os dados e escolha uma única decisão."
+                ),
                 action_row(
                     button(
                         custom_id=custom_id("registration", "review", "approve"),
@@ -298,7 +386,59 @@ async def render_review(context: dict) -> ComponentsV2Payload:
                 ),
             ]
         )
-    return ComponentsV2Payload(payload(container(*components, accent_color=COLOR)))
+    elif status == "processing":
+        components.extend(
+            [
+                separator(),
+                text_display(
+                    "### Aprovação em andamento\n"
+                    "O Yuno está aplicando o apelido e o cargo. As ações ficam bloqueadas até a conclusão."
+                ),
+            ]
+        )
+    elif status == "approved":
+        reviewer_id = str(request.get("reviewed_by") or "")
+        reviewer = (
+            f"<@{reviewer_id}>"
+            if reviewer_id.isascii() and reviewer_id.isdigit()
+            else "Responsável indisponível"
+        )
+        role_id = str(context.get("member_role_id") or "")
+        role = f"<@&{role_id}>" if role_id.isascii() and role_id.isdigit() else "Cargo indisponível"
+        components.extend(
+            [
+                separator(),
+                text_display(
+                    "### Resultado\n"
+                    f"**Aprovado por**\n{reviewer}\n\n"
+                    f"**Cargo aplicado**\n{role}\n\n"
+                    f"**Apelido aplicado**\n{target_nickname}\n\n"
+                    f"**Concluído em**\n{_discord_time(context.get('decision_at') or request.get('approved_at'))}"
+                ),
+            ]
+        )
+    elif status == "rejected":
+        reviewer_id = str(request.get("reviewed_by") or "")
+        reviewer = (
+            f"<@{reviewer_id}>"
+            if reviewer_id.isascii() and reviewer_id.isdigit()
+            else "Responsável indisponível"
+        )
+        reason = _safe_display_text(request.get("rejection_reason"))
+        components.extend(
+            [
+                separator(),
+                text_display(
+                    "### Resultado\n"
+                    f"**Rejeitado por**\n{reviewer}\n\n"
+                    f"**Motivo**\n{reason}\n\n"
+                    f"**Concluído em**\n{_discord_time(context.get('decision_at') or request.get('rejected_at'))}"
+                ),
+            ]
+        )
+    return ComponentsV2Payload(
+        payload(container(*components, accent_color=colors.get(status, PENDING_COLOR)))
+    )
 
 
 class RegistrationModal(RoutedModal):
@@ -355,7 +495,7 @@ async def open_form(context: RoutedContext) -> InteractionResult:
 async def submit(context: RoutedContext) -> InteractionResult:
     values = _modal_values(context.interaction)
     try:
-        result = await context.api.registration_submit(
+        await context.api.registration_submit(
             context.actor.guild_id,
             {
                 "name": values.get("registration_name", ""),
@@ -365,9 +505,7 @@ async def submit(context: RoutedContext) -> InteractionResult:
             panel_config_version=context.panel.get("config_version"),
         )
         config = (await context.api.registration_config(context.actor.guild_id))["data"]
-        return InteractionResult(
-            content=f"{config['submitted_message']} Protocolo `{result['id']}`."
-        )
+        return InteractionResult(content=config["submitted_message"])
     except Exception as exc:
         return InteractionResult(content=error_text(exc))
 
@@ -437,7 +575,7 @@ async def approve(context: RoutedContext) -> InteractionResult:
             role_added = True
         await context.api.registration_step(guild.id, claim["id"], token, "role", actor=context.actor)
         await context.api.registration_complete(guild.id, claim["id"], token, actor=context.actor)
-        return InteractionResult(content="Registro aprovado com nickname e cargo aplicados.")
+        return InteractionResult(content="Registro aprovado com apelido e cargo aplicados.")
     except Exception as exc:
         if token and claim and member is not None:
             compensated = True
@@ -495,6 +633,7 @@ def _section_select() -> dict[str, Any]:
             {"label": "3 · Regras do formulário", "value": "rules", "emoji": {"name": "⚙️"}},
             {"label": "4 · Aparência do painel", "value": "panel", "emoji": {"name": "🎨"}},
             {"label": "5 · Mensagens", "value": "messages", "emoji": {"name": "💬"}},
+            {"label": "6 · Logs e avisos", "value": "notifications", "emoji": {"name": "📣"}},
         ],
         placeholder="Selecione uma etapa do Registro",
     )
@@ -537,7 +676,7 @@ async def _admin_state(api: Any, guild_id: int) -> tuple[dict, dict]:
 
 def build_admin_payload(instance: dict, draft: dict) -> dict[str, Any]:
     published = int(draft["base_published_version"] or 0)
-    config = draft["data"]
+    config = {**REGISTRATION_VISUAL_DEFAULTS, **draft["data"]}
     is_active = published > 0 and instance["lifecycle"] == "active"
     action_label = "Configurar Registro"
     if is_active:
@@ -605,7 +744,7 @@ async def _render_section(
     if section == "system":
         section = "channels"
     _, draft = await _admin_state(api, interaction.guild_id)
-    config = draft["data"]
+    config = {**REGISTRATION_VISUAL_DEFAULTS, **draft["data"]}
     components: list[dict[str, Any]] = [
         dashboard.module_navigation("registration"),
         separator(spacing=1),
@@ -675,7 +814,7 @@ async def _render_section(
                 ),
             ]
         )
-    else:
+    elif section == "messages":
         components.extend(
             [
                 text_display(
@@ -691,6 +830,56 @@ async def _render_section(
                 action_row(button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="Revisar e publicar", emoji="👁️", style=1)),
             ]
         )
+    elif section == "notifications":
+        avatar_status = "ativada" if config.get("show_member_avatar", True) else "desativada"
+        components.extend(
+            [
+                text_display(
+                    "## 📣 6 · Logs e avisos\n\n"
+                    "Personalize a apresentação sem esconder os dados obrigatórios da decisão.\n\n"
+                    f"**Log de aprovação**\n{config['log_approved_title']}\n\n"
+                    f"**Log de rejeição**\n{config['log_rejected_title']}\n\n"
+                    f"**Rodapé**\n{config['log_footer']}\n\n"
+                    f"Foto do membro: **{avatar_status}**"
+                ),
+                action_row(
+                    string_select(
+                        custom_id=dashboard.central_custom_id("registration", "set_log_avatar"),
+                        options=[
+                            {
+                                "label": "Mostrar foto do membro",
+                                "value": "show",
+                                "description": "Usa o avatar atual quando ele estiver disponível.",
+                                "default": bool(config.get("show_member_avatar", True)),
+                            },
+                            {
+                                "label": "Ocultar foto do membro",
+                                "value": "hide",
+                                "description": "Mantém os mesmos dados, sem a miniatura.",
+                                "default": not bool(config.get("show_member_avatar", True)),
+                            },
+                        ],
+                        placeholder="Escolha o uso da foto do membro",
+                    )
+                ),
+                action_row(
+                    button(
+                        custom_id=dashboard.central_custom_id("registration", "edit_notifications"),
+                        label="Editar títulos e rodapé",
+                        emoji="✏️",
+                        style=2,
+                    ),
+                    button(
+                        custom_id=dashboard.central_custom_id("registration", "review_publish"),
+                        label="Revisar e publicar",
+                        emoji="👁️",
+                        style=1,
+                    ),
+                ),
+            ]
+        )
+    else:
+        raise RuntimeError("Seção de configuração do Registro inválida.")
     await _replace_central(
         interaction,
         payload(container(*components, accent_color=COLOR)),
@@ -836,9 +1025,23 @@ async def set_panel_color(interaction: discord.Interaction, api: Any) -> None:
     await _render_section(interaction, api, "panel")
 
 
+async def set_log_avatar(interaction: discord.Interaction, api: Any) -> None:
+    values = _selected_ids(interaction)
+    if len(values) != 1 or values[0] not in {"show", "hide"}:
+        await _send_interaction_error(interaction, "Escolha uma opção de foto válida.")
+        return
+    await _defer_if_needed(interaction)
+    await _save_patch(
+        interaction,
+        api,
+        {"show_member_avatar": values[0] == "show"},
+    )
+    await _render_section(interaction, api, "notifications")
+
+
 CONFIG_MODAL_FIELDS: dict[str, tuple[tuple[str, str, str], ...]] = {
     "team": (
-        ("nickname_template", "Template de nickname", "{name} | {id}"),
+        ("nickname_template", "Formato do apelido", "{name} | {id}"),
     ),
     "rules": (
         ("player_id_min_length", "Minimo do ID", "1"),
@@ -865,12 +1068,27 @@ CONFIG_MODAL_FIELDS: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("duplicate_id_message", "ID duplicado", ""),
         ("resubmit_not_allowed_message", "Reenvio bloqueado", ""),
     ),
+    "notifications": (
+        ("log_approved_title", "Título do log aprovado", "Registro aprovado"),
+        ("log_rejected_title", "Título do log rejeitado", "Registro rejeitado"),
+        ("log_footer", "Rodapé dos avisos", "Yuno • Sistema de Registro"),
+        ("approved_dm_title", "Título da DM aprovada", "Registro aprovado"),
+        ("rejected_dm_title", "Título da DM rejeitada", "Registro não aprovado"),
+    ),
 }
 
 
 class AdminConfigModal(discord.ui.Modal):
     def __init__(self, api: Any, group: str, config: dict, channel_id: int, message_id: int) -> None:
-        super().__init__(title=f"Registro · {group.title()}")
+        group_title = {
+            "team": "Equipe e cargo",
+            "rules": "Regras do formulário",
+            "panel": "Painel público",
+            "messages": "Mensagens",
+            "errors": "Avisos",
+            "notifications": "Logs e avisos",
+        }.get(group, "Configuração")
+        super().__init__(title=f"Registro · {group_title}")
         self.api = api
         self.group = group
         self.central_channel_id = channel_id
@@ -918,11 +1136,12 @@ class AdminConfigModal(discord.ui.Modal):
 
 async def _open_config_modal(interaction: discord.Interaction, api: Any, group: str) -> None:
     draft = await api.configuration_draft(interaction.guild_id, "registration")
+    config = {**REGISTRATION_VISUAL_DEFAULTS, **draft["data"]}
     await interaction.response.send_modal(
         AdminConfigModal(
             api,
             group,
-            draft["data"],
+            config,
             interaction.channel_id,
             interaction.message.id,
         )
@@ -951,6 +1170,10 @@ async def edit_messages(interaction, api):
 
 async def edit_errors(interaction, api):
     await _open_config_modal(interaction, api, "errors")
+
+
+async def edit_notifications(interaction, api):
+    await _open_config_modal(interaction, api, "notifications")
 
 
 async def _preflight(guild: discord.Guild, config: dict) -> list[str]:
@@ -1005,7 +1228,7 @@ async def review_publish(interaction: discord.Interaction, api: Any) -> None:
                 f"Analise: <#{config['approval_channel_id']}>\n"
                 f"Cargo: <@&{config['member_role_id']}>\n"
                 f"Aprovadores: **{len(config['approver_role_ids'])}**\n"
-                f"Template: `{config['nickname_template']}`\n\n"
+                f"Formato do apelido: `{config['nickname_template']}`\n\n"
                 "A confirmacao cria uma versao imutavel e reconcilia o painel publico."
             ),
             action_row(
@@ -1110,6 +1333,28 @@ async def confirm_publish(interaction: discord.Interaction, api: Any) -> None:
         await _send_interaction_error(interaction, error_text(exc))
 
 
+async def _resolve_avatar_url(
+    bot: discord.Client, *, guild_id: int, user_id: str | None
+) -> str | None:
+    value = str(user_id or "").strip()
+    if not (value.isascii() and value.isdigit()):
+        return None
+    user: Any = None
+    guild = bot.get_guild(guild_id)
+    if guild is not None:
+        user = guild.get_member(int(value))
+    if user is None:
+        user = bot.get_user(int(value))
+    if user is None:
+        try:
+            user = await bot.fetch_user(int(value))
+        except (discord.HTTPException, RuntimeError, TypeError, ValueError):
+            return None
+    avatar = getattr(user, "display_avatar", None)
+    url = str(getattr(avatar, "url", "") or "")
+    return url if url.startswith(("https://", "http://")) else None
+
+
 async def deliver_review(bot: discord.Client, item: dict) -> str | None:
     guild = bot.get_guild(int(item["guild_id"]))
     if guild is None:
@@ -1118,6 +1363,20 @@ async def deliver_review(bot: discord.Client, item: dict) -> str | None:
     request_id = str(item["resource_id"])
     request = await api.registration_request(guild.id, request_id)
     config_ref = await api.registration_config(guild.id)
+    config = config_ref["data"]
+    delivery_data = item.get("payload") or {}
+    avatar_url = None
+    if delivery_data.get("show_member_avatar", config.get("show_member_avatar", True)):
+        avatar_url = await _resolve_avatar_url(
+            bot,
+            guild_id=guild.id,
+            user_id=request.get("discord_user_id"),
+        )
+    target_nickname = request.get("target_nickname") or _nickname_preview(
+        str(config["nickname_template"]),
+        name=str(request["submitted_name"]),
+        player_id=str(request["player_id_original"]),
+    )
     actor = system_actor(bot, guild.id, item["correlation_id"])
     panel = await PanelPublisher(bot, api).reconcile(
         guild=guild,
@@ -1129,7 +1388,13 @@ async def deliver_review(bot: discord.Client, item: dict) -> str | None:
         resource_id=request_id,
         render_context={
             "request": request,
-            "config_version": config_ref["version"],
+            "config_version": delivery_data.get("config_version")
+            or config_ref["version"],
+            "avatar_url": avatar_url,
+            "target_nickname": target_nickname,
+            "member_role_id": delivery_data.get("member_role_id")
+            or config.get("member_role_id"),
+            "decision_at": delivery_data.get("decision_at"),
         },
     )
     await api.registration_attach_review_message(
@@ -1147,14 +1412,21 @@ async def deliver_log(bot: discord.Client, item: dict) -> str | None:
     if channel is None:
         channel = await bot.fetch_channel(int(item["destination_id"]))
     data = item.get("payload") or {}
-    decision = data.get("decision", "registro")
-    embed = discord.Embed(
-        title=f"Registro {decision}",
-        description=f"Solicitacao `{data.get('request_id')}`",
-        color=COLOR if decision == "approved" else 0xED4245,
-    )
-    if data.get("reason"):
-        embed.add_field(name="Motivo", value=str(data["reason"])[:1024], inline=False)
+    avatar_url = None
+    if data.get("show_member_avatar", True):
+        avatar_url = await _resolve_avatar_url(
+            bot,
+            guild_id=int(item["guild_id"]),
+            user_id=data.get("discord_user_id"),
+        )
+    resolved = RegistrationLogData.from_payload(data, avatar_url=avatar_url)
+    renderer = RegistrationLogRenderer()
+    if resolved.decision == "approved":
+        embed = renderer.render_approved(resolved)
+    elif resolved.decision == "rejected":
+        embed = renderer.render_rejected(resolved)
+    else:
+        embed = renderer.render_submitted(resolved)
     message = await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
     return str(message.id)
 
@@ -1164,12 +1436,18 @@ async def deliver_dm(bot: discord.Client, item: dict) -> str | None:
         int(item["destination_id"])
     )
     data = item.get("payload") or {}
-    embed = discord.Embed(
-        title="Atualizacao do seu registro",
-        description=str(data.get("message") or "Seu registro foi atualizado."),
-        color=COLOR,
+    avatar = getattr(user, "display_avatar", None)
+    avatar_url = str(getattr(avatar, "url", "") or "")
+    if not data.get("show_member_avatar", True):
+        avatar_url = ""
+    resolved = RegistrationLogData.from_payload(data, avatar_url=avatar_url)
+    renderer = RegistrationLogRenderer()
+    embed = (
+        renderer.render_member_rejected(resolved)
+        if resolved.decision == "rejected"
+        else renderer.render_member_approved(resolved)
     )
-    message = await user.send(embed=embed)
+    message = await user.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
     return str(message.id)
 
 
