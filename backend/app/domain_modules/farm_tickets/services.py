@@ -534,6 +534,40 @@ async def _assert_cycle_open(
         raise FarmTicketConflict("O membro nao participa mais deste ciclo.")
 
 
+async def _resolve_concurrent_open(
+    session: AsyncSession,
+    *,
+    guild_id: str,
+    member_id: str,
+    meta_cycle_id: int,
+) -> dict[str, Any]:
+    winner = (
+        await session.execute(
+            select(FarmTicket).where(
+                FarmTicket.guild_id == guild_id,
+                FarmTicket.member_id == member_id,
+                FarmTicket.binding_released_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if winner is not None:
+        return await ticket_dict(session, winner)
+    historical = (
+        await session.execute(
+            select(FarmTicket).where(
+                FarmTicket.guild_id == guild_id,
+                FarmTicket.meta_cycle_id == meta_cycle_id,
+                FarmTicket.member_id == member_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if historical is not None:
+        raise FarmTicketConflict(
+            "A participacao neste ciclo ja possui ticket encerrado e nao sera reativada."
+        )
+    raise FarmTicketConflict("A abertura concorrente do ticket nao pôde ser consolidada.")
+
+
 async def open_ticket(
     session: AsyncSession,
     *,
@@ -595,7 +629,16 @@ async def open_ticket(
         created_by=_actor_id(actor),
     )
     session.add(ticket)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        return await _resolve_concurrent_open(
+            session,
+            guild_id=guild_id,
+            member_id=member_id,
+            meta_cycle_id=active_goal.cycle.cycle_id,
+        )
     session.add(
         FarmTicketCycle(
             ticket_id=ticket.id,
@@ -657,18 +700,12 @@ async def open_ticket(
         await session.commit()
     except IntegrityError:
         await session.rollback()
-        winner = (
-            await session.execute(
-                select(FarmTicket).where(
-                    FarmTicket.guild_id == guild_id,
-                    FarmTicket.member_id == member_id,
-                    FarmTicket.binding_released_at.is_(None),
-                )
-            )
-        ).scalar_one_or_none()
-        if winner is None:
-            raise
-        return await ticket_dict(session, winner)
+        return await _resolve_concurrent_open(
+            session,
+            guild_id=guild_id,
+            member_id=member_id,
+            meta_cycle_id=active_goal.cycle.cycle_id,
+        )
     await session.refresh(ticket)
     return await ticket_dict(session, ticket)
 

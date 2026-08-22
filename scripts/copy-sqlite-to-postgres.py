@@ -68,7 +68,7 @@ async def _rows(connection: AsyncConnection, table) -> list[dict[str, Any]]:
 
 
 async def _reset_sequences(connection: AsyncConnection, metadata: MetaData) -> None:
-    for table in metadata.sorted_tables:
+    for table in sorted(metadata.tables.values(), key=lambda item: item.name):
         for column in table.primary_key.columns:
             try:
                 python_type = column.type.python_type
@@ -156,7 +156,9 @@ async def copy_database(source_url: str, target_url: str) -> dict[str, dict[str,
             source_metadata = await _metadata(source)
             target_metadata = await _metadata(target)
             constraints = await _defer_foreign_keys(target)
-            for source_table in source_metadata.sorted_tables:
+            for source_table in sorted(
+                source_metadata.tables.values(), key=lambda item: item.name
+            ):
                 if source_table.name in SKIPPED_TABLES:
                     continue
                 target_table = target_metadata.tables.get(source_table.name)
