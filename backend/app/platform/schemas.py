@@ -5,7 +5,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.platform.models import MigrationState, ModuleLifecycle, PanelState, RuntimeMode, WorkState
+from app.platform.models import (
+    MigrationState,
+    ModuleLifecycle,
+    PanelState,
+    RuntimeMode,
+    WorkState,
+)
 
 
 class ModuleManifestOut(BaseModel):
@@ -240,13 +246,13 @@ class WorkItemOut(BaseModel):
 
 
 class DeliveryWorkItemOut(WorkItemOut):
-    destination_type: Literal["channel", "user", "panel"]
+    destination_type: Literal["channel", "user", "panel", "thread"]
     destination_id: str
 
 
 class DeliveryCreateIn(BaseModel):
     renderer_key: str = Field(min_length=1, max_length=100)
-    destination_type: Literal["channel", "user", "panel"]
+    destination_type: Literal["channel", "user", "panel", "thread"]
     destination_id: str = Field(min_length=1, max_length=80)
     resource_type: str = Field(default="", max_length=80)
     resource_id: str = Field(default="", max_length=80)
