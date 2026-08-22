@@ -145,6 +145,11 @@ def count(connection, table):
     ).fetchone()
     return connection.execute(f'SELECT count(*) FROM "{table}"').fetchone()[0] if exists else 0
 
+def exists(connection, table):
+    return connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    ).fetchone() is not None
+
 with sqlite3.connect(sys.argv[1]) as backup, sqlite3.connect(sys.argv[2]) as migrated:
     if backup.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
         raise SystemExit("Restauracao ensaiada falhou no integrity_check")
@@ -152,6 +157,8 @@ with sqlite3.connect(sys.argv[1]) as backup, sqlite3.connect(sys.argv[2]) as mig
         raise SystemExit("Copia migrada falhou no integrity_check")
     before = {table: count(backup, table) for table in protected}
     after = {table: count(migrated, table) for table in protected}
+    legacy_present_before = exists(backup, "farm_tickets")
+    configs_present_before = exists(backup, "farm_ticket_configs")
     legacy_before = count(backup, "farm_tickets")
     configs_before = count(backup, "farm_ticket_configs")
     if before != after:
@@ -184,7 +191,10 @@ with sqlite3.connect(sys.argv[1]) as backup, sqlite3.connect(sys.argv[2]) as mig
         "SELECT count(*) FROM farm_ticket_v2_legacy_archive "
         "WHERE source_namespace='yuno.legacy.farm_ticket_configs'"
     ).fetchone()[0]
-    if archive_count != legacy_before or config_archive_count != configs_before:
+    if (
+        (legacy_present_before and archive_count != legacy_before)
+        or (configs_present_before and config_archive_count != configs_before)
+    ):
         raise SystemExit(
             "Arquivo legado divergente: "
             f"tickets={legacy_before}/{archive_count}, "
@@ -222,8 +232,16 @@ value = urlsplit(sys.argv[1])
 print(urlunsplit((value.scheme, value.netloc, "/" + sys.argv[2], value.query, value.fragment)))
 PY
   )
-  legacy_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_tickets")
-  config_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_configs")
+  legacy_present=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select to_regclass('public.farm_tickets') is not null")
+  config_present=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select to_regclass('public.farm_ticket_configs') is not null")
+  legacy_count=0
+  config_count=0
+  if test "`$legacy_present" = "t"; then
+    legacy_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_tickets")
+  fi
+  if test "`$config_present" = "t"; then
+    config_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_configs")
+  fi
   v2_ticket_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_tickets")
   v2_event_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_events")
   DATABASE_URL="`$rehearsal_url" .venv/bin/python -m alembic -c backend/alembic.ini upgrade head
@@ -233,8 +251,8 @@ PY
   test "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select to_regclass('public.farm_cycles') is null")" = "t"
   archive_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_legacy_archive where source_namespace='yuno.legacy.farm_tickets.cutover'")
   config_archive_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_legacy_archive where source_namespace='yuno.legacy.farm_ticket_configs'")
-  test "`$legacy_count" = "`$archive_count"
-  test "`$config_count" = "`$config_archive_count"
+  if test "`$legacy_present" = "t"; then test "`$legacy_count" = "`$archive_count"; fi
+  if test "`$config_present" = "t"; then test "`$config_count" = "`$config_archive_count"; fi
   test "`$v2_ticket_count" = "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_tickets")"
   test "`$v2_event_count" = "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_events")"
   test "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_legacy_archive where length(checksum_sha256) <> 64")" = "0"
