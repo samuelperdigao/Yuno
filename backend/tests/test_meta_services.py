@@ -487,6 +487,10 @@ def test_prepare_launch_is_idempotent_and_multi_guild_isolated() -> None:
                     causation_id="retry",
                 )
                 assert one["cycle"]["id"] == retry["cycle"]["id"]
+                untouched = await services.reconcile(
+                    session, guild_id="200", causation_id="recover:existing"
+                )
+                assert untouched["launch_tasks"] == 0
                 await session.execute(
                     delete(AutomationTask).where(
                         AutomationTask.guild_id == "100",
@@ -499,6 +503,27 @@ def test_prepare_launch_is_idempotent_and_multi_guild_isolated() -> None:
                 )
                 assert recovered["launch_pending"] == 1
                 assert recovered["launch_tasks"] == 1
+                active = await services.activate_cycle(
+                    session,
+                    guild_id="100",
+                    cycle_id=one["cycle"]["id"],
+                    members=_members("1"),
+                    notice_channel_id="500",
+                    notice_message_id="601",
+                    causation_id="activate:pending",
+                )
+                repeated_after_activation = await services.prepare_launch(
+                    session,
+                    guild_id="100",
+                    goal_id=first["id"],
+                    members=[],
+                    notice_channel_id="500",
+                    causation_id="late:recovery",
+                )
+                assert repeated_after_activation["status"] == "active"
+                assert repeated_after_activation["cycle"]["id"] == active["cycle"]["id"]
+                stored = await session.get(MetaGoal, first["id"])
+                assert stored.state == GoalState.active
                 assert await contracts.get_cycle(
                     session, guild_id="200", cycle_id=one["cycle"]["id"]
                 ) is None

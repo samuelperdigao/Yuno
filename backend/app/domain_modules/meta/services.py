@@ -831,14 +831,15 @@ async def prepare_launch(
             .where(
                 MetaCycle.guild_id == guild_id,
                 MetaCycle.goal_id == goal.id,
-                MetaCycle.state == CycleState.launch_pending,
+                MetaCycle.state.in_((CycleState.launch_pending, CycleState.active)),
             )
             .options(selectinload(MetaCycle.objectives), selectinload(MetaCycle.participants))
             .order_by(MetaCycle.id.desc())
         )
     ).scalars().first()
     if existing is not None:
-        return {"status": "prepared", "goal": goal_dict(goal), "cycle": cycle_dict(existing)}
+        status = "active" if existing.state == CycleState.active else "prepared"
+        return {"status": status, "goal": goal_dict(goal), "cycle": cycle_dict(existing)}
     if goal.current_config_version_id is None:
         raise _http(409, "Meta sem configuracao vigente.")
     config = await _config(session, goal.current_config_version_id)
@@ -1351,6 +1352,23 @@ async def remove_member(
     return {"removed": True, "goal_id": goal.id, "cycle_id": cycle.id}
 
 
+async def _has_open_launch_task(
+    session: AsyncSession, *, guild_id: str, goal_id: int
+) -> bool:
+    task_id = await session.scalar(
+        select(AutomationTask.id)
+        .where(
+            AutomationTask.guild_id == guild_id,
+            AutomationTask.module_key == "meta",
+            AutomationTask.job_key == "meta.goal.launch",
+            AutomationTask.resource_id == str(goal_id),
+            AutomationTask.state.in_((WorkState.pending, WorkState.claimed, WorkState.retry)),
+        )
+        .limit(1)
+    )
+    return task_id is not None
+
+
 async def reconcile(session: AsyncSession, *, guild_id: str, causation_id: str) -> dict[str, Any]:
     await _lock_guild(session, guild_id)
     now = datetime.now(timezone.utc)
@@ -1367,6 +1385,8 @@ async def reconcile(session: AsyncSession, *, guild_id: str, causation_id: str) 
     )
     launch_tasks = 0
     for goal in scheduled:
+        if await _has_open_launch_task(session, guild_id=guild_id, goal_id=goal.id):
+            continue
         due_at = _utc(goal.next_transition_at or now)
         await _schedule_launch(
             session,
@@ -1415,6 +1435,8 @@ async def reconcile(session: AsyncSession, *, guild_id: str, causation_id: str) 
         ).scalars()
     )
     for cycle in pending_cycles:
+        if await _has_open_launch_task(session, guild_id=guild_id, goal_id=cycle.goal_id):
+            continue
         await schedule_task(
             session,
             guild_id=guild_id,
