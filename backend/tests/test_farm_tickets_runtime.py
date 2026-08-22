@@ -32,7 +32,7 @@ class FakeThread:
         self.sent.append(kwargs)
         return SimpleNamespace(id=9000 + len(self.sent))
 
-    async def delete(self, **kwargs) -> None:
+    async def delete(self) -> None:
         self.deleted = True
 
 
@@ -367,5 +367,51 @@ def test_runtime_creates_numbered_category_only_after_real_fifty_channel_limit(
         assert selected.name == "TICKETS DE FARM 2"
         assert len(primary.channels) == 50
         assert selected.channels == []
+
+    asyncio.run(scenario())
+
+
+def test_terminal_cleanup_deletes_panel_message_before_ticket_channel(
+    monkeypatch,
+) -> None:
+    async def scenario() -> None:
+        ticket = {**_ticket(), "binding_released": True}
+        guild = FakeGuild()
+        channel = await guild.create_text_channel("ticket-10-ana")
+        message = await channel.send(content="painel")
+        api = FakeTicketsAPI(ticket)
+        api.rows = [
+            {
+                "id": "binding-panel",
+                "ticket_id": ticket["id"],
+                "kind": "TICKET_PANEL_MESSAGE",
+                "resource_id": str(message.id),
+                "parent_resource_id": str(channel.id),
+                "ownership": "MANAGED",
+                "state": "DELETE_PENDING",
+            },
+            {
+                "id": "binding-channel",
+                "ticket_id": ticket["id"],
+                "kind": "TICKET_CHANNEL",
+                "resource_id": str(channel.id),
+                "parent_resource_id": None,
+                "ownership": "MANAGED",
+                "state": "DELETE_PENDING",
+            },
+        ]
+        bot = SimpleNamespace(user=SimpleNamespace(id=999))
+        monkeypatch.setattr(runtime.discord, "TextChannel", FakeTextChannel)
+        monkeypatch.setattr(runtime.discord, "Thread", FakeThread)
+        monkeypatch.setattr(runtime, "FarmTicketsAPI", lambda platform_api: api)
+
+        result = await runtime._cleanup_ticket_resources(
+            bot, FakePlatformAPI(), guild, ticket["id"], _actor()
+        )
+
+        assert result["deleted_bindings"] == 2
+        assert message.deleted
+        assert channel.deleted
+        assert all(item["state"] == "DELETED" for item in api.rows)
 
     asyncio.run(scenario())

@@ -607,7 +607,7 @@ async def _delete_binding_resource(
         if isinstance(channel, discord.TextChannel):
             try:
                 message = await channel.fetch_message(resource_id)
-                await message.delete(reason="Yuno Tickets V2: cleanup terminal")
+                await message.delete()
             except discord.NotFound:
                 pass
         return
@@ -696,7 +696,8 @@ async def run_job(bot: discord.Client, platform_api: Any, item: dict[str, Any]) 
             last = await api.consume_meta(guild.id, actor=actor.as_payload(), limit=100)
             if last.get("blocked"):
                 raise RetryableJobError(
-                    "Evento Meta aguarda processamento de comprovante recebido no prazo.",
+                    "Evento Meta aguarda processamento de comprovante "
+                    "recebido no prazo.",
                     retry_at=datetime.now(timezone.utc) + timedelta(seconds=15),
                 )
             if not last.get("has_more"):

@@ -641,6 +641,66 @@ def test_deeply_invalid_image_releases_claim_without_resetting_deadline(
     asyncio.run(run())
 
 
+def test_stale_proof_job_is_idempotent_after_candidate_rejection(monkeypatch) -> None:
+    class Storage:
+        async def put_file(self, **kwargs) -> None:
+            raise AssertionError("Job obsoleto nao pode acessar o storage.")
+
+    async def run() -> None:
+        engine, sessions = await _database()
+        try:
+            async with sessions() as session:
+                ticket = await _ticket(session)
+                started = await _begin(session, ticket, monkeypatch)
+                operation = await session.get(FarmTicketPendingOperation, started["id"])
+                await session.refresh(ticket)
+                claimed = await services.claim_proof(
+                    session,
+                    guild_id=ticket.guild_id,
+                    ticket_id=ticket.id,
+                    operation_id=operation.id,
+                    actor=_actor(),
+                    expected_version=ticket.revision,
+                    message_id="stale-message",
+                    attachment_id="stale-attachment",
+                    author_id="100",
+                    channel_id="600",
+                    received_at=operation.proof_deadline - timedelta(seconds=1),
+                    filename="proof.png",
+                    content_type="image/png",
+                    size_bytes=10,
+                    source_url="https://cdn.discord.test/stale",
+                )
+                await services.reject_invalid_proof(
+                    session,
+                    guild_id=ticket.guild_id,
+                    ticket_id=ticket.id,
+                    operation_id=operation.id,
+                    claim_token=claimed["claim_token"],
+                    reason="imagem invalida",
+                    now=operation.proof_deadline - timedelta(microseconds=1),
+                )
+
+                result = await proof_processing.process_claimed_proof(
+                    session,
+                    storage=Storage(),
+                    guild_id=ticket.guild_id,
+                    ticket_id=ticket.id,
+                    operation_id=operation.id,
+                    claim_token=claimed["claim_token"],
+                )
+
+                assert result == {
+                    "id": operation.id,
+                    "status": OperationStatus.AWAITING_PROOF.value,
+                    "stale_claim": True,
+                }
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
 def test_open_ticket_uses_public_contract_snapshots_and_is_idempotent(
     monkeypatch,
 ) -> None:

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain_modules.farm_tickets import services
 from app.domain_modules.farm_tickets.domain import (
+    OperationStatus,
     ProofNoLongerEligible,
     ProofStorageState,
 )
@@ -103,11 +104,25 @@ async def process_claimed_proof(
                 FarmTicketPendingOperation.guild_id == guild_id,
                 FarmTicketPendingOperation.ticket_id == ticket_id,
                 FarmTicketPendingOperation.id == operation_id,
-                FarmTicketPendingOperation.claim_token == claim_token,
             )
         )
     ).scalar_one_or_none()
-    if operation is None or not operation.attachment_url:
+    if operation is None:
+        raise services.FarmTicketConflict("Claim de comprovante nao encontrado.")
+    if operation.status in {
+        OperationStatus.CONFIRMED,
+        OperationStatus.EXPIRED,
+        OperationStatus.FAILED,
+    } or (
+        operation.status == OperationStatus.AWAITING_PROOF
+        and operation.claim_token is None
+    ):
+        return {
+            "id": operation.id,
+            "status": operation.status.value,
+            "stale_claim": True,
+        }
+    if operation.claim_token != claim_token or not operation.attachment_url:
         raise services.FarmTicketConflict("Claim de comprovante nao encontrado.")
     await services.mark_proof_processing(
         session,
