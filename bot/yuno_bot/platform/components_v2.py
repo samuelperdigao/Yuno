@@ -4,14 +4,15 @@ from typing import Any
 
 import discord
 
-
 ACTION_ROW = 1
 BUTTON = 2
 STRING_SELECT = 3
 ROLE_SELECT = 6
 USER_SELECT = 5
 CHANNEL_SELECT = 8
+SECTION = 9
 TEXT_DISPLAY = 10
+THUMBNAIL = 11
 MEDIA_GALLERY = 12
 SEPARATOR = 14
 CONTAINER = 17
@@ -20,6 +21,23 @@ FLAG_COMPONENTS_V2 = 1 << 15
 
 def text_display(content: str) -> dict[str, Any]:
     return {"type": TEXT_DISPLAY, "content": content}
+
+
+def thumbnail(url: str, *, description: str | None = None) -> dict[str, Any]:
+    value: dict[str, Any] = {"type": THUMBNAIL, "media": {"url": url}}
+    if description:
+        value["description"] = description
+    return value
+
+
+def section(
+    *components: dict[str, Any], accessory: dict[str, Any]
+) -> dict[str, Any]:
+    return {
+        "type": SECTION,
+        "components": list(components),
+        "accessory": accessory,
+    }
 
 
 def separator(*, spacing: int = 1, divider: bool = True) -> dict[str, Any]:

@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(ROOT / "bot"))
@@ -18,7 +17,10 @@ from app.domain_modules.registration.domain import (  # noqa: E402
     validate_player_id,
 )
 from app.domain_modules.registration.schemas import RegistrationConfig  # noqa: E402
-from yuno_bot.domain_modules.registration.ui import render_public, render_review  # noqa: E402
+from yuno_bot.domain_modules.registration.ui import (  # noqa: E402
+    render_public,
+    render_review,
+)
 
 
 def test_registration_normalization_preserves_leading_zeroes_and_name_case() -> None:
@@ -65,6 +67,12 @@ def test_registration_config_is_flat_strict_and_unbounded_by_role_select_batch()
     assert config.player_id_numeric_only is True
     assert config.allow_resubmit_after_rejection is True
     assert config.approver_role_ids == roles
+    assert config.log_approved_title == "Registro aprovado"
+    assert config.log_rejected_title == "Registro rejeitado"
+    assert config.log_footer == "Yuno • Sistema de Registro"
+    assert config.show_member_avatar is True
+    assert config.approved_dm_title == "Registro aprovado"
+    assert config.rejected_dm_title == "Registro não aprovado"
     with pytest.raises(Exception):
         RegistrationConfig.model_validate({"unknown": True})
 
@@ -88,7 +96,10 @@ def test_registration_components_v2_public_and_decided_review_are_stable() -> No
                     "status": "pending",
                     "reviewed_by": None,
                     "rejection_reason": None,
-                }
+                    "created_at": "2026-08-22T12:00:00+00:00",
+                },
+                "avatar_url": "https://cdn.discordapp.com/avatar.png",
+                "target_nickname": "Ana | 001",
             }
         )
     ).data
@@ -102,6 +113,26 @@ def test_registration_components_v2_public_and_decided_review_are_stable() -> No
                     "status": "approved",
                     "reviewed_by": "20",
                     "rejection_reason": None,
+                    "created_at": "2026-08-22T12:00:00+00:00",
+                    "approved_at": "2026-08-22T12:05:00+00:00",
+                    "target_nickname": "Ana | 001",
+                },
+                "member_role_id": "30",
+            }
+        )
+    ).data
+    rejected = asyncio.run(
+        render_review(
+            {
+                "request": {
+                    "discord_user_id": "10",
+                    "submitted_name": "Ana",
+                    "player_id_original": "001",
+                    "status": "rejected",
+                    "reviewed_by": "20",
+                    "rejection_reason": "Dados divergentes",
+                    "created_at": "2026-08-22T12:00:00+00:00",
+                    "rejected_at": "2026-08-22T12:06:00+00:00",
                 }
             }
         )
@@ -110,3 +141,13 @@ def test_registration_components_v2_public_and_decided_review_are_stable() -> No
     assert "registration:review:reject" in str(pending)
     assert "registration:review:approve" not in str(decided)
     assert "registration:review:reject" not in str(decided)
+    assert pending["components"][0]["accent_color"] == 0xFFC72C
+    assert decided["components"][0]["accent_color"] == 0x57F287
+    assert pending["components"][0]["components"][0]["type"] == 9
+    assert "Aguardando análise" in str(pending)
+    assert "Apelido após aprovação" in str(pending)
+    assert "approved" not in str(decided)
+    assert rejected["components"][0]["accent_color"] == 0xED4245
+    assert "registration:review:approve" not in str(rejected)
+    assert "Dados divergentes" in str(rejected)
+    assert "rejected" not in str(rejected)

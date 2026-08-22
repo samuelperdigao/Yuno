@@ -71,6 +71,7 @@ def _fields() -> tuple[ConfigurationField, ...]:
         "name_min_length": ConfigurationFieldType.number,
         "name_max_length": ConfigurationFieldType.number,
         "allow_resubmit_after_rejection": ConfigurationFieldType.boolean,
+        "show_member_avatar": ConfigurationFieldType.boolean,
         "panel_color": ConfigurationFieldType.color,
         "panel_banner_url": ConfigurationFieldType.text,
         "panel_thumbnail_url": ConfigurationFieldType.text,

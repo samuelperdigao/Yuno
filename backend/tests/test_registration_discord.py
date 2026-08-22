@@ -1,13 +1,21 @@
 import asyncio
-from types import SimpleNamespace
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "bot"))
 
 from yuno_bot.domain_modules.registration import ui as registration_ui  # noqa: E402
+from yuno_bot.domain_modules.registration.renderers import (  # noqa: E402
+    APPROVED_COLOR,
+    REJECTED_COLOR,
+    RegistrationLogData,
+    RegistrationLogRenderer,
+)
 from yuno_bot.domain_modules.registration.ui import approve  # noqa: E402
 from yuno_bot.platform.contracts import ActorContext, RoutedContext  # noqa: E402
 
@@ -153,7 +161,7 @@ def test_discord_approval_applies_nickname_before_role_and_finalizes_last() -> N
     context, events, member, api = _context()
     result = asyncio.run(approve(context))
 
-    assert result.content == "Registro aprovado com nickname e cargo aplicados."
+    assert result.content == "Registro aprovado com apelido e cargo aplicados."
     assert events == [
         "api.claim",
         "api.preflight",
@@ -186,6 +194,319 @@ def test_discord_approval_compensates_only_role_added_and_restores_nickname() ->
     assert member.nick == "Antes"
     assert member.roles == []
     assert api.release_payload == {"compensated": True, "error_code": "RuntimeError"}
+
+
+def test_registration_log_renderer_builds_commercial_approved_and_rejected_embeds() -> None:
+    renderer = RegistrationLogRenderer()
+    approved_data = RegistrationLogData.from_payload(
+        {
+            "decision": "approved",
+            "discord_user_id": "10",
+            "submitted_name": "Ana Silva",
+            "player_id": "001",
+            "reviewed_by": "20",
+            "target_nickname": "Ana Silva | 001",
+            "member_role_id": "30",
+            "decision_at": "2026-08-22T12:05:00+00:00",
+            "log_approved_title": "Acesso liberado",
+            "log_footer": "Yuno • Organização",
+        },
+        avatar_url="https://cdn.discordapp.com/avatar.png",
+    )
+    approved = renderer.render_approved(approved_data).to_dict()
+    approved_fields = {item["name"]: item["value"] for item in approved["fields"]}
+
+    assert approved["title"] == "Acesso liberado"
+    assert approved["color"] == APPROVED_COLOR
+    assert approved["thumbnail"]["url"] == "https://cdn.discordapp.com/avatar.png"
+    assert approved["timestamp"].startswith("2026-08-22T12:05:00")
+    assert approved["footer"]["text"] == "Yuno • Organização"
+    assert approved_fields == {
+        "Membro": "<@10>",
+        "Nome informado": "Ana Silva",
+        "ID informado": "`001`",
+        "Aprovado por": "<@20>",
+        "Cargo aplicado": "<@&30>",
+        "Apelido aplicado": "Ana Silva \\| 001",
+    }
+
+    rejected_data = RegistrationLogData.from_payload(
+        {
+            "decision": "rejected",
+            "discord_user_id": "11",
+            "submitted_name": "**Bia**",
+            "player_id": "002",
+            "reviewed_by": "21",
+            "reason": "**Dados divergentes** @everyone",
+            "decision_at": datetime(2026, 8, 22, 12, 10),
+        }
+    )
+    rejected = renderer.render_rejected(rejected_data).to_dict()
+    rejected_fields = {item["name"]: item["value"] for item in rejected["fields"]}
+
+    assert rejected["title"] == "Registro rejeitado"
+    assert rejected["color"] == REJECTED_COLOR
+    assert rejected["timestamp"].endswith("+00:00")
+    assert "thumbnail" not in rejected
+    assert rejected_fields["Rejeitado por"] == "<@21>"
+    assert rejected_fields["Nome informado"] != "**Bia**"
+    assert rejected_fields["Motivo"] != "**Dados divergentes** @everyone"
+
+
+def test_registration_log_renderer_accepts_legacy_payload_without_exposing_uuid() -> None:
+    legacy_id = "123e4567-e89b-12d3-a456-426614174000"
+    data = RegistrationLogData.from_payload(
+        {"request_id": legacy_id, "decision": "approved"}
+    )
+    rendered = str(RegistrationLogRenderer().render_approved(data).to_dict())
+
+    assert legacy_id not in rendered
+    assert "approved" not in rendered
+    assert "Registro aprovado" in rendered
+
+
+def test_registration_submit_receipt_uses_configured_text_without_uuid() -> None:
+    request_id = "123e4567-e89b-12d3-a456-426614174000"
+
+    class SubmitAPI:
+        async def registration_submit(
+            self, guild_id, registration, *, actor, panel_config_version
+        ):
+            assert guild_id == 100
+            assert registration == {"name": "Ana", "player_id": "001"}
+            assert actor.user_id == 10
+            assert panel_config_version == 2
+            return {"id": request_id}
+
+        async def registration_config(self, guild_id):
+            assert guild_id == 100
+            return {"data": {"submitted_message": "Recebemos seu registro para análise."}}
+
+    actor = ActorContext(
+        guild_id=100,
+        user_id=10,
+        role_ids=(),
+        discord_permissions=(),
+        channel_id=1001,
+        category_id=None,
+        actor_type="user",
+        is_guild_owner=False,
+        correlation_id="submit-visual",
+    )
+    interaction = SimpleNamespace(
+        data={
+            "components": [
+                {
+                    "components": [
+                        {"custom_id": "registration_name", "value": "Ana"},
+                        {"custom_id": "registration_player_id", "value": "001"},
+                    ]
+                }
+            ]
+        }
+    )
+    result = asyncio.run(
+        registration_ui.submit(
+            RoutedContext(
+                interaction=interaction,
+                actor=actor,
+                panel={"config_version": 2},
+                api=SubmitAPI(),
+                receipt_id="receipt-1",
+            )
+        )
+    )
+
+    assert result.content == "Recebemos seu registro para análise."
+    assert request_id not in result.content
+
+
+def test_registration_delivery_resolves_avatar_and_propagates_optional_destination_failures() -> None:
+    class FakeChannel:
+        id = 1003
+
+        def __init__(self) -> None:
+            self.embed = None
+
+        async def send(self, *, embed, allowed_mentions):
+            assert allowed_mentions is not None
+            self.embed = embed
+            return SimpleNamespace(id=555)
+
+    member = SimpleNamespace(
+        display_avatar=SimpleNamespace(url="https://cdn.discordapp.com/member.png")
+    )
+    guild = SimpleNamespace(get_member=lambda user_id: member if user_id == 10 else None)
+    channel = FakeChannel()
+    bot = SimpleNamespace(
+        get_channel=lambda channel_id: channel if channel_id == 1003 else None,
+        fetch_channel=None,
+        get_guild=lambda guild_id: guild if guild_id == 100 else None,
+        get_user=lambda _user_id: None,
+        fetch_user=None,
+    )
+    item = {
+        "guild_id": "100",
+        "destination_id": "1003",
+        "payload": {
+            "decision": "approved",
+            "discord_user_id": "10",
+            "submitted_name": "Ana",
+            "player_id": "001",
+            "reviewed_by": "20",
+            "member_role_id": "30",
+            "target_nickname": "Ana | 001",
+            "decision_at": "2026-08-22T12:05:00+00:00",
+            "show_member_avatar": True,
+        },
+    }
+
+    result = asyncio.run(registration_ui.deliver_log(bot, item))
+    assert result == "555"
+    assert channel.embed.to_dict()["thumbnail"]["url"].endswith("member.png")
+
+    async def missing_channel(_channel_id):
+        raise RuntimeError("canal removido")
+
+    missing_bot = SimpleNamespace(
+        get_channel=lambda _channel_id: None,
+        fetch_channel=missing_channel,
+    )
+    with pytest.raises(RuntimeError, match="canal removido"):
+        asyncio.run(registration_ui.deliver_log(missing_bot, item))
+
+
+def test_registration_avatar_absence_does_not_fail_and_closed_dm_is_retriable() -> None:
+    async def missing_user(_user_id):
+        raise RuntimeError("membro indisponível")
+
+    avatar_bot = SimpleNamespace(
+        get_guild=lambda _guild_id: None,
+        get_user=lambda _user_id: None,
+        fetch_user=missing_user,
+    )
+    assert (
+        asyncio.run(
+            registration_ui._resolve_avatar_url(
+                avatar_bot, guild_id=100, user_id="10"
+            )
+        )
+        is None
+    )
+
+    class ClosedDMUser:
+        display_avatar = SimpleNamespace(url="https://cdn.discordapp.com/member.png")
+
+        async def send(self, **_kwargs):
+            raise RuntimeError("DM fechada")
+
+    dm_bot = SimpleNamespace(
+        get_user=lambda user_id: ClosedDMUser() if user_id == 10 else None,
+        fetch_user=missing_user,
+    )
+    with pytest.raises(RuntimeError, match="DM fechada"):
+        asyncio.run(
+            registration_ui.deliver_dm(
+                dm_bot,
+                {
+                    "destination_id": "10",
+                    "payload": {
+                        "decision": "rejected",
+                        "message": "Seu registro não foi aprovado.",
+                        "reason": "Dados divergentes",
+                    },
+                },
+            )
+        )
+
+
+def test_registration_review_delivery_reuses_resource_panel_with_decision_snapshot(
+    monkeypatch,
+) -> None:
+    reconciliations: list[dict] = []
+    attachments: list[tuple[int, str, int, int]] = []
+
+    async def reconcile(_self, **kwargs):
+        reconciliations.append(kwargs)
+        return {"channel_id": "1002", "message_id": "555"}
+
+    class FakeAPI:
+        async def registration_request(self, guild_id, request_id):
+            assert (guild_id, request_id) == (100, "request-1")
+            return {
+                "id": request_id,
+                "discord_user_id": "10",
+                "submitted_name": "Ana",
+                "player_id_original": "001",
+                "status": "approved",
+                "reviewed_by": "20",
+                "rejection_reason": None,
+                "target_nickname": "Ana | 001",
+                "created_at": "2026-08-22T12:00:00+00:00",
+                "approved_at": "2026-08-22T12:05:00+00:00",
+            }
+
+        async def registration_config(self, guild_id):
+            assert guild_id == 100
+            return {
+                "version": 9,
+                "data": {
+                    "nickname_template": "{name} | {id}",
+                    "member_role_id": "999",
+                    "show_member_avatar": True,
+                },
+            }
+
+        async def registration_attach_review_message(
+            self, guild_id, request_id, channel_id, message_id, *, actor
+        ):
+            assert actor.actor_type == "system"
+            attachments.append((guild_id, request_id, channel_id, message_id))
+
+    monkeypatch.setattr(registration_ui.PanelPublisher, "reconcile", reconcile)
+    member = SimpleNamespace(
+        display_avatar=SimpleNamespace(url="https://cdn.discordapp.com/member.png")
+    )
+    guild = SimpleNamespace(
+        id=100,
+        get_member=lambda user_id: member if user_id == 10 else None,
+    )
+    api = FakeAPI()
+    bot = SimpleNamespace(
+        user=SimpleNamespace(id=900),
+        platform_api=api,
+        get_guild=lambda guild_id: guild if guild_id == 100 else None,
+        get_user=lambda _user_id: None,
+        fetch_user=None,
+    )
+    item = {
+        "guild_id": "100",
+        "resource_id": "request-1",
+        "destination_id": "1002",
+        "correlation_id": "decision-1",
+        "payload": {
+            "decision": "approved",
+            "config_version": 3,
+            "member_role_id": "30",
+            "decision_at": "2026-08-22T12:05:00+00:00",
+            "show_member_avatar": True,
+        },
+    }
+
+    assert asyncio.run(registration_ui.deliver_review(bot, item)) == "555"
+    assert asyncio.run(registration_ui.deliver_review(bot, item)) == "555"
+    assert len(reconciliations) == 2
+    assert all(call["resource_id"] == "request-1" for call in reconciliations)
+    assert all(call["panel_key"] == "review" for call in reconciliations)
+    context = reconciliations[0]["render_context"]
+    assert context["config_version"] == 3
+    assert context["member_role_id"] == "30"
+    assert context["target_nickname"] == "Ana | 001"
+    assert context["avatar_url"].endswith("member.png")
+    assert attachments == [
+        (100, "request-1", 1002, 555),
+        (100, "request-1", 1002, 555),
+    ]
 
 
 def test_panel_recovery_activates_registration_after_visual_reconciliation(monkeypatch) -> None:
@@ -240,7 +561,7 @@ def test_panel_recovery_activates_registration_after_visual_reconciliation(monke
     assert result == {"changed": True, "panel_key": "public", "activated": True}
 
 
-def test_registration_admin_uses_five_clear_configuration_steps() -> None:
+def test_registration_admin_uses_six_clear_configuration_steps() -> None:
     selector = registration_ui._section_select()
     options = selector["options"]
 
@@ -250,6 +571,7 @@ def test_registration_admin_uses_five_clear_configuration_steps() -> None:
         "rules",
         "panel",
         "messages",
+        "notifications",
     ]
     assert [item["label"] for item in options] == [
         "1 · Canais",
@@ -257,6 +579,7 @@ def test_registration_admin_uses_five_clear_configuration_steps() -> None:
         "3 · Regras do formulário",
         "4 · Aparência do painel",
         "5 · Mensagens",
+        "6 · Logs e avisos",
     ]
 
 
@@ -339,12 +662,64 @@ def test_registration_rule_handlers_change_only_the_selected_rule(monkeypatch) -
             SimpleNamespace(data={"values": ["block"]}), object()
         )
     )
+    asyncio.run(
+        registration_ui.set_log_avatar(
+            SimpleNamespace(data={"values": ["hide"]}), object()
+        )
+    )
 
     assert saved == [
         {"player_id_numeric_only": False},
         {"allow_resubmit_after_rejection": False},
+        {"show_member_avatar": False},
     ]
-    assert rendered == ["rules", "rules"]
+    assert rendered == ["rules", "rules", "notifications"]
+
+
+def test_registration_notification_settings_are_explicit_and_keep_semantic_colors() -> None:
+    fields = registration_ui.CONFIG_MODAL_FIELDS["notifications"]
+    assert [item[0] for item in fields] == [
+        "log_approved_title",
+        "log_rejected_title",
+        "log_footer",
+        "approved_dm_title",
+        "rejected_dm_title",
+    ]
+    assert APPROVED_COLOR == 0x57F287
+    assert REJECTED_COLOR == 0xED4245
+
+
+def test_registration_notification_section_supports_drafts_from_previous_version(
+    monkeypatch,
+) -> None:
+    captured: dict = {}
+
+    async def admin_state(_api, _guild_id):
+        return (
+            {"lifecycle": "active"},
+            {
+                "base_published_version": 2,
+                "data": {},
+            },
+        )
+
+    async def replace(_interaction, data, **_kwargs):
+        captured.update(data)
+
+    monkeypatch.setattr(registration_ui, "_admin_state", admin_state)
+    monkeypatch.setattr(registration_ui, "_replace_central", replace)
+
+    asyncio.run(
+        registration_ui._render_section(
+            SimpleNamespace(guild_id=100), object(), "notifications"
+        )
+    )
+
+    rendered = str(captured)
+    assert "Registro aprovado" in rendered
+    assert "Registro rejeitado" in rendered
+    assert "Yuno • Sistema de Registro" in rendered
+    assert "Mostrar foto do membro" in rendered
 
 
 def test_central_replacement_acknowledges_silently_without_receipt(monkeypatch) -> None:
