@@ -1,13 +1,24 @@
 import asyncio
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+os.environ.setdefault("DISCORD_BOT_TOKEN", "test-token")
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(ROOT / "bot"))
 
-from yuno_bot.domain_modules.farm_tickets import MODULE_UI, ui  # noqa: E402
+from app.domain_modules.farm_tickets import (
+    definition as backend_definition,  # noqa: E402
+)
+from yuno_bot.domain_modules.farm_tickets import (  # noqa: E402
+    MODULE_UI,
+    admin,
+    runtime,
+    ui,
+)
 from yuno_bot.platform.components_v2 import (  # noqa: E402
     FLAG_COMPONENTS_V2,
     media_gallery,
@@ -272,3 +283,283 @@ def test_adapter_is_discoverable_without_touching_the_generic_ticket_module() ->
         "approve",
         "finalize",
     }
+
+
+def _admin_interaction(*, values: list[str] | None = None) -> SimpleNamespace:
+    class Response:
+        done = False
+
+        def is_done(self) -> bool:
+            return self.done
+
+        async def defer(self, **_kwargs) -> None:
+            self.done = True
+
+    return SimpleNamespace(
+        guild_id=100,
+        guild=SimpleNamespace(owner_id=1, me=None),
+        user=SimpleNamespace(id=7),
+        channel_id=10,
+        channel=SimpleNamespace(category_id=None),
+        message=SimpleNamespace(id=20),
+        client="bot",
+        id=555,
+        response=Response(),
+        data={"values": list(values or [])},
+    )
+
+
+class _AdminAPI:
+    def __init__(self, data: dict | None = None, *, published: str | None = None) -> None:
+        self.data = dict(data or {})
+        self.published = published
+        self.saved: list[dict] = []
+        self.publishes: list[dict] = []
+        self.lifecycles: list[dict] = []
+
+    async def module_instance(self, guild_id, module_key):
+        del guild_id, module_key
+        return {
+            "lifecycle": "active" if self.published else "inactive",
+            "published_config_version_id": self.published,
+        }
+
+    async def configuration_draft(self, guild_id, module_key):
+        del guild_id, module_key
+        return {
+            "revision": 3,
+            "base_published_version": 0,
+            "schema_version": 2,
+            "data": dict(self.data),
+        }
+
+    async def save_configuration_draft(self, guild_id, module_key, payload, *, actor):
+        del guild_id, module_key, actor
+        self.saved.append(payload)
+        self.data = dict(payload["data"])
+        return {**payload, "revision": 4}
+
+    async def publish_configuration(self, guild_id, module_key, payload, *, actor):
+        del guild_id, module_key, actor
+        self.publishes.append(payload)
+        return {"version": 1}
+
+    async def update_lifecycle(self, guild_id, module_key, **kwargs):
+        del guild_id, module_key
+        self.lifecycles.append(kwargs)
+        return {"lifecycle": kwargs["lifecycle"]}
+
+
+def _complete_config() -> dict:
+    return {
+        "category_id": "900",
+        "panel_channel_id": "901",
+        "log_channel_id": "902",
+        "administrator_role_ids": ["800", "801"],
+    }
+
+
+def test_central_exposes_the_only_path_that_publishes_the_tickets_configuration() -> None:
+    assert {item.key for item in MODULE_UI.admin_pages} == {"overview"}
+    assert {item.key for item in MODULE_UI.admin_actions} == {
+        "overview",
+        "open_system",
+        "set_category",
+        "set_panel_channel",
+        "set_log_channel",
+        "set_admin_roles",
+        "review_publish",
+        "confirm_publish",
+    }
+    for item in MODULE_UI.admin_actions:
+        assert len(f"yuno:central:v1:farm_tickets:{item.key}") <= 100
+
+
+def test_unpublished_overview_offers_configuration_without_leaking_internal_state(
+    monkeypatch,
+) -> None:
+    captured: dict = {}
+
+    async def replace(_interaction, data, **_kwargs):
+        captured.update(data)
+
+    monkeypatch.setattr(admin, "_replace_central", replace)
+    api = _AdminAPI()
+
+    asyncio.run(admin.render_admin(_admin_interaction(), api))
+
+    children = captured["components"][0]["components"]
+    content = "\n".join(item["content"] for item in children if item["type"] == 10)
+    action = next(
+        item
+        for item in children
+        if item["type"] == 1 and item["components"][0]["type"] == 2
+    )
+    assert "Ainda nao publicado" in content
+    assert "Ainda nao definido" in content
+    assert "lifecycle" not in content.lower()
+    assert "rascunho" not in content.lower()
+    assert action["components"][0]["custom_id"] == "yuno:central:v1:farm_tickets:open_system"
+
+
+def test_configuration_page_selects_cover_the_four_contract_fields(monkeypatch) -> None:
+    captured: dict = {}
+
+    async def replace(_interaction, data, **_kwargs):
+        captured.update(data)
+
+    monkeypatch.setattr(admin, "_replace_central", replace)
+
+    asyncio.run(admin.open_system(_admin_interaction(), _AdminAPI(_complete_config())))
+
+    selects = [
+        row["components"][0]
+        for row in captured["components"][0]["components"]
+        if row["type"] == 1 and row["components"][0]["type"] in {6, 8}
+    ]
+    assert [item["custom_id"].rsplit(":", 1)[-1] for item in selects] == [
+        "set_category",
+        "set_panel_channel",
+        "set_log_channel",
+        "set_admin_roles",
+    ]
+    assert selects[0]["channel_types"] == [4]
+    assert selects[1]["channel_types"] == [0]
+    assert selects[2]["channel_types"] == [0]
+    assert selects[3]["max_values"] == 25
+
+
+def test_partial_selection_only_reaches_the_backend_once_a_role_exists(
+    monkeypatch,
+) -> None:
+    # administrator_role_ids tem min_length 1 no contrato: um rascunho sem cargo
+    # seria recusado com 422, entao a selecao parcial fica em memoria de sessao.
+    captured: dict = {}
+
+    async def replace(_interaction, data, **_kwargs):
+        captured.clear()
+        captured.update(data)
+
+    monkeypatch.setattr(admin, "_replace_central", replace)
+    admin._pending.clear()
+    api = _AdminAPI()
+
+    asyncio.run(admin.set_category(_admin_interaction(values=["900"]), api))
+    asyncio.run(admin.set_panel_channel(_admin_interaction(values=["901"]), api))
+    assert api.saved == []
+    assert admin._pending[(100, 7)]["category_id"] == "900"
+    content = "\n".join(
+        item["content"]
+        for item in captured["components"][0]["components"]
+        if item["type"] == 10
+    )
+    assert "so viram rascunho gravado" in content
+
+    asyncio.run(admin.set_admin_roles(_admin_interaction(values=["800", "800"]), api))
+
+    assert len(api.saved) == 1
+    assert api.saved[0]["data"] == {
+        "category_id": "900",
+        "panel_channel_id": "901",
+        "log_channel_id": "",
+        "administrator_role_ids": ["800"],
+    }
+    assert api.saved[0]["expected_revision"] == 3
+    assert api.saved[0]["schema_version"] == 2
+    assert (100, 7) not in admin._pending
+    admin._pending.clear()
+
+
+def test_published_grants_satisfy_the_backend_permission_validator() -> None:
+    assert admin.ADMIN_CAPABILITIES == backend_definition.ADMIN_CAPABILITIES
+
+    config = _complete_config()
+    grants = [SimpleNamespace(**item) for item in admin.build_grants(config)]
+
+    assert backend_definition._validate_permission_grants(config, grants) == []
+    assert len(grants) == 1 + len(backend_definition.ADMIN_CAPABILITIES) * 2
+
+    stale = backend_definition._validate_permission_grants(
+        {**config, "administrator_role_ids": ["800", "801", "802"]}, grants
+    )
+    assert stale and all("cargos administradores" in item for item in stale)
+
+
+def test_preflight_blocks_publication_on_missing_fields_and_dead_resources() -> None:
+    guild = SimpleNamespace(
+        me=None,
+        get_channel=lambda _id: None,
+        get_role=lambda _id: None,
+    )
+
+    errors = admin.preflight(guild, dict(admin.EMPTY_CONFIG))
+
+    assert [item for item in errors if "Categoria principal" in item]
+    assert [item for item in errors if "Canal do painel" in item]
+    assert [item for item in errors if "Canal de logs" in item]
+    assert [item for item in errors if "Cargos administradores" in item]
+
+    dead = admin.preflight(guild, _complete_config())
+    assert "A categoria principal nao existe mais neste servidor." in dead
+    assert [item for item in dead if "Cargo administrador inexistente" in item]
+
+    same_channel = admin.preflight(
+        guild, {**_complete_config(), "log_channel_id": "901"}
+    )
+    assert "O painel e os logs precisam de canais diferentes." in same_channel
+
+
+def test_confirm_publish_is_refused_before_the_resources_exist(monkeypatch) -> None:
+    sent: list[str] = []
+
+    async def send_error(_interaction, message):
+        sent.append(message)
+
+    monkeypatch.setattr(admin, "_send_interaction_error", send_error)
+    admin._pending.clear()
+    api = _AdminAPI(_complete_config())
+    interaction = _admin_interaction()
+    interaction.guild = SimpleNamespace(
+        owner_id=1, me=None, get_channel=lambda _id: None, get_role=lambda _id: None
+    )
+
+    asyncio.run(admin.confirm_publish(interaction, api))
+
+    assert api.publishes == []
+    assert api.lifecycles == []
+    assert sent and sent[0].startswith("Publicacao bloqueada:")
+
+
+def test_reconcile_skips_provisioning_while_configuration_is_unpublished() -> None:
+    calls: list[str] = []
+
+    class PlatformAPI:
+        async def module_instance(self, guild_id, module_key):
+            calls.append(f"instance:{guild_id}:{module_key}")
+            return {"lifecycle": "inactive", "published_config_version_id": None}
+
+        async def effective_configuration(self, guild_id, module_key):
+            raise AssertionError("nao pode buscar configuracao publicada inexistente")
+
+    bot = SimpleNamespace(
+        get_guild=lambda _id: SimpleNamespace(id=100),
+        user=SimpleNamespace(id=42),
+    )
+
+    result = asyncio.run(
+        runtime.run_job(
+            bot,
+            PlatformAPI(),
+            {
+                "id": "startup:100",
+                "guild_id": "100",
+                "key": "farm_tickets.reconcile",
+                "resource_id": "100",
+                "correlation_id": "startup:farm-tickets:100",
+                "payload": {"reason": "startup"},
+            },
+        )
+    )
+
+    assert result == {"skipped": "unpublished_configuration"}
+    assert calls == ["instance:100:farm_tickets"]

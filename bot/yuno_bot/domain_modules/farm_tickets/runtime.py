@@ -753,6 +753,11 @@ async def run_job(bot: discord.Client, platform_api: Any, item: dict[str, Any]) 
                 pass
             raise
     if key == "farm_tickets.reconcile":
+        instance = await platform_api.module_instance(guild.id, "farm_tickets")
+        if instance.get("published_config_version_id") is None:
+            # Modulo ligado e ainda nao configurado e um estado valido: nada e
+            # provisionado ate a Central publicar categoria, canais e cargos.
+            return {"skipped": "unpublished_configuration"}
         for _ in range(20):
             result = await api.consume_meta(
                 guild.id, actor=actor.as_payload(), limit=100

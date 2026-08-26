@@ -1,3 +1,14 @@
+from yuno_bot.domain_modules.farm_tickets.admin import (
+    confirm_publish,
+    open_system,
+    overview,
+    render_admin,
+    review_publish,
+    set_admin_roles,
+    set_category,
+    set_log_channel,
+    set_panel_channel,
+)
 from yuno_bot.domain_modules.farm_tickets.runtime import (
     deliver_event,
     deliver_log,
@@ -27,6 +38,8 @@ from yuno_bot.domain_modules.farm_tickets.ui import (
 )
 from yuno_bot.platform.contracts import (
     ActionDefinition,
+    AdminActionDefinition,
+    AdminPageDefinition,
     DeliveryRendererDefinition,
     JobHandlerDefinition,
     ModuleUIAdapter,
@@ -41,6 +54,17 @@ MODULE_UI = ModuleUIAdapter(
     icon="🎫",
     order=25,
     minimum_plan="pro",
+    admin_pages=(AdminPageDefinition("overview", render_admin),),
+    admin_actions=(
+        AdminActionDefinition("overview", overview),
+        AdminActionDefinition("open_system", open_system),
+        AdminActionDefinition("set_category", set_category),
+        AdminActionDefinition("set_panel_channel", set_panel_channel),
+        AdminActionDefinition("set_log_channel", set_log_channel),
+        AdminActionDefinition("set_admin_roles", set_admin_roles),
+        AdminActionDefinition("review_publish", review_publish),
+        AdminActionDefinition("confirm_publish", confirm_publish),
+    ),
     panels=(
         PanelDefinition(
             "global", render_global, version=2, recovery_policy="automatic"
