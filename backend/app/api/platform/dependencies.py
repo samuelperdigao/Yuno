@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.platform.correlation import CORRELATION_ID_MAX_LENGTH
 from app.platform.models import GuildAdminRole
 from app.platform.schemas import ActorContextIn
 from app.services import active_license_for_guild
@@ -11,7 +12,9 @@ from sqlalchemy import select
 
 
 ActorHeader = Annotated[str, Header(alias="x-yuno-actor-id", min_length=1, max_length=32, pattern=r"^\d+$")]
-CorrelationHeader = Annotated[str | None, Header(alias="x-yuno-correlation-id", max_length=80)]
+CorrelationHeader = Annotated[
+    str | None, Header(alias="x-yuno-correlation-id", max_length=CORRELATION_ID_MAX_LENGTH)
+]
 
 
 async def require_active_license(session: AsyncSession, guild_id: str) -> None:

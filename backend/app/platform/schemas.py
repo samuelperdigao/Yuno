@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.platform.correlation import CORRELATION_ID_MAX_LENGTH
 from app.platform.models import (
     MigrationState,
     ModuleLifecycle,
@@ -52,7 +53,7 @@ class ActorContextIn(BaseModel):
     actor_type: Literal["user", "system"] = "user"
     is_guild_owner: bool = False
     resource_owner_id: str | None = Field(default=None, max_length=32)
-    correlation_id: str = Field(min_length=1, max_length=80)
+    correlation_id: str = Field(min_length=1, max_length=CORRELATION_ID_MAX_LENGTH)
 
 
 class GuildProfileIn(BaseModel):
@@ -209,7 +210,7 @@ class TaskScheduleIn(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     due_at: datetime
     idempotency_key: str = Field(min_length=1, max_length=160)
-    correlation_id: str = Field(min_length=1, max_length=80)
+    correlation_id: str = Field(min_length=1, max_length=CORRELATION_ID_MAX_LENGTH)
     max_attempts: int | None = Field(default=None, ge=1, le=50)
 
 
@@ -260,7 +261,7 @@ class DeliveryCreateIn(BaseModel):
     priority: int = Field(default=100, ge=0, le=1000)
     available_at: datetime
     idempotency_key: str = Field(min_length=1, max_length=160)
-    correlation_id: str = Field(min_length=1, max_length=80)
+    correlation_id: str = Field(min_length=1, max_length=CORRELATION_ID_MAX_LENGTH)
     max_attempts: int = Field(default=5, ge=1, le=50)
 
 
@@ -270,7 +271,7 @@ class InteractionBeginIn(BaseModel):
     action_key: str = Field(min_length=1, max_length=100)
     resource_type: str = Field(default="", max_length=80)
     resource_id: str = Field(default="", max_length=80)
-    correlation_id: str = Field(min_length=1, max_length=80)
+    correlation_id: str = Field(min_length=1, max_length=CORRELATION_ID_MAX_LENGTH)
 
 
 class InteractionCompleteIn(BaseModel):
