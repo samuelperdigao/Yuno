@@ -6,6 +6,27 @@ import socket
 from yuno_bot.platform.contracts import RetryableJobError
 from yuno_bot.platform.registry import UIRegistry, ui_registry
 
+# `error` de fail_task/fail_delivery aceita 2000 caracteres no backend.
+ERROR_MAX_LENGTH = 2000
+
+
+def describe_error(exc: BaseException) -> str:
+    """Descreve `exc` para gravar em `last_error`.
+
+    Gravar um texto generico apagava a unica pista que sobrava: o traceback vai
+    para o journal do bot, mas quem olha a fila ve so a linha do banco. Foi
+    assim que cinco jobs ficaram com "Falha no handler do job." e exigiram
+    reproduzir tudo a mao para descobrir que o backend respondia 422.
+
+    Para erro HTTP o corpo da resposta vai junto -- e nele que o FastAPI diz
+    qual campo recusou.
+    """
+    detalhe = f"{type(exc).__name__}: {exc}"
+    corpo = getattr(getattr(exc, "response", None), "text", None)
+    if corpo:
+        detalhe = f"{detalhe} | corpo: {corpo}"
+    return detalhe[:ERROR_MAX_LENGTH]
+
 
 class PlatformCoordinator:
     """Executa jobs e entregas duraveis declarados por modulos domain-first."""
@@ -78,9 +99,9 @@ class PlatformCoordinator:
                 await self.api.fail_task(
                     item, self.worker_id, str(exc), retry_at=exc.retry_at
                 )
-            except Exception:
+            except Exception as exc:
                 self.bot.log.exception("Falha no job %s:%s", item["module_key"], item["key"])
-                await self.api.fail_task(item, self.worker_id, "Falha no handler do job.")
+                await self.api.fail_task(item, self.worker_id, describe_error(exc))
         for item in deliveries:
             renderer = self.registry.delivery(item["module_key"], item["key"])
             if renderer is None:
@@ -89,6 +110,6 @@ class PlatformCoordinator:
             try:
                 external_id = await renderer.handler(self.bot, item)
                 await self.api.complete_delivery(item, self.worker_id, external_id)
-            except Exception:
+            except Exception as exc:
                 self.bot.log.exception("Falha na entrega %s:%s", item["module_key"], item["key"])
-                await self.api.fail_delivery(item, self.worker_id, "Falha no renderer da entrega.")
+                await self.api.fail_delivery(item, self.worker_id, describe_error(exc))
