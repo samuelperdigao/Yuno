@@ -246,3 +246,60 @@ def test_panel_does_not_choose_the_transport_and_never_mentions_anyone() -> None
     rendered = uk.panel(header="# Aviso")
     assert "flags" not in rendered
     assert "allowed_mentions" not in rendered
+
+
+def test_state_behaves_like_a_string_on_python_310() -> None:
+    """O contrato de `State` não pode depender de `enum.StrEnum`.
+
+    O bot roda em Python 3.10 no servidor e a CI valida em 3.10; `StrEnum` só
+    existe a partir do 3.11. Isto já derrubou o bot em produção uma vez — o
+    venv local é 3.12 e escondeu o `ImportError` até o deploy. O teste fixa o
+    comportamento observável (comparação, `str()`, f-string, chave de dict) em
+    vez da implementação, então serve tanto para `str, Enum` quanto para
+    `StrEnum` no dia em que o servidor subir de versão.
+    """
+
+    state = uk.State.RUNNING
+    assert state == "running"
+    assert str(state) == "running"
+    assert f"{state}" == "running"
+    assert uk.State("running") is state
+    assert {uk.State.APPROVED: 1}[uk.State("approved")] == 1
+    assert uk.accent_for(state) == uk.accent_for("running")
+
+
+def test_no_module_imports_a_python_311_only_name() -> None:
+    """Varre o bot atrás de nomes que só existem acima do 3.10.
+
+    `compileall` não pega isto: a sintaxe é válida, o import é que falha em
+    tempo de execução — e falha no boot, derrubando o bot inteiro.
+    """
+
+    import ast
+
+    forbidden = {
+        "StrEnum": "enum.StrEnum é 3.11+",
+        "ReprEnum": "enum.ReprEnum é 3.11+",
+        "TaskGroup": "asyncio.TaskGroup é 3.11+",
+        "tomllib": "tomllib é 3.11+",
+        "batched": "itertools.batched é 3.12+",
+        "override": "typing.override é 3.12+",
+        "Self": "typing.Self é 3.11+",
+        "LiteralString": "typing.LiteralString é 3.11+",
+    }
+    offenders: list[str] = []
+    for path in sorted((ROOT / "bot" / "yuno_bot").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.Import):
+                names = [alias.name.split(".")[0] for alias in node.names]
+            else:
+                continue
+            for name in names:
+                if name in forbidden:
+                    offenders.append(
+                        f"{path.relative_to(ROOT)}:{node.lineno}: {forbidden[name]}"
+                    )
+    assert not offenders, "imports acima do Python 3.10:\n" + "\n".join(offenders)

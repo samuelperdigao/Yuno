@@ -24,7 +24,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from enum import StrEnum
+from enum import Enum
 from typing import Any
 
 from yuno_bot.platform.components_v2 import container as _container
@@ -57,12 +57,17 @@ NOT_INFORMED = "Não informado"
 DASH = "—"
 
 
-class State(StrEnum):
+class State(str, Enum):
     """Estados semânticos comuns aos módulos, independentes de domínio.
 
     Cada módulo traduz o próprio vocabulário para um destes valores e o kit
     resolve emoji e cor. É o que faz um ticket aprovado e um registro aprovado
     parecerem do mesmo produto.
+
+    `str, Enum` em vez de `enum.StrEnum` porque o bot roda em Python 3.10 no
+    servidor (e a CI valida em 3.10); `StrEnum` só existe a partir do 3.11. O
+    `__str__` abaixo replica o comportamento de `StrEnum`, para que interpolar
+    um estado numa string devolva o valor e não `State.RUNNING`.
     """
 
     PENDING = "pending"
@@ -73,6 +78,9 @@ class State(StrEnum):
     FAILED = "failed"
     CLOSED = "closed"
     DISABLED = "disabled"
+
+    def __str__(self) -> str:
+        return self.value
 
 
 STATE_ACCENTS: dict[State, int] = {
