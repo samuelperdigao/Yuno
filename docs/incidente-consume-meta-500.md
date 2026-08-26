@@ -1,7 +1,7 @@
 # Incidente — `meta-events/consume` devolvendo 500 a cada boot (resolvido)
 
-> Diagnosticado e corrigido em 2026-08-26. Correção ainda **não implantada** no
-> servidor de teste no momento em que este documento foi escrito.
+> Diagnosticado, corrigido e **implantado** no servidor de teste em 2026-08-26
+> (`0ad8c00`, `2f55b0f`, `12c8985`). Cursor destravado e verificado em produção.
 
 ## Sintoma
 
@@ -89,16 +89,64 @@ incidente.
 
 Suíte após a correção: **249 passed, 6 skipped**.
 
+## Segunda metade: a coluna não bastava (`2f55b0f`)
+
+Alargar só a coluna deixou o bug vivo em outro ponto. Depois do primeiro deploy
+o fim de ciclo finalmente **foi agendado** — e aí todo job de limpeza terminal
+passou a levar **422 no `POST .../farm_tickets/bindings`**, porque o contrato de
+transporte continuava estreito:
+
+```python
+ActorContextIn.correlation_id: str = Field(min_length=1, max_length=80)
+```
+
+A correlação de 85 caracteres passou a ser aceita pelo banco e seguiu recusada
+pelo Pydantic, antes de chegar ao domínio. Confirmado separando as camadas
+contra o banco de produção, em transação com rollback: `upsert_discord_binding`
+aceita o payload; quem recusa é o schema.
+
+Corrigido em `ActorContextIn`, `WorkItemScheduleIn`, `DeliveryScheduleIn`,
+`InteractionBeginIn` e no `CorrelationHeader`, todos passando a usar
+`CORRELATION_ID_MAX_LENGTH`. `test_schema_de_transporte_acompanha_a_coluna`
+varre os schemas de entrada e o header e falha se algum capar abaixo da coluna.
+
+**Lição:** um limite de tamanho vive em duas camadas. Mudar uma sem a outra
+troca um erro por outro.
+
+## Terceira correção: `last_error` inútil (`12c8985`)
+
+Os cinco jobs falhos gravavam `"Falha no handler do job."` — o coordinator
+descartava a exceção. O traceback ia para o journal do bot, mas quem consulta
+`automation_tasks`, que é por onde se descobre que a fila travou, via só a frase
+genérica. `describe_error()` agora grava tipo, mensagem e, em erro HTTP, o corpo
+da resposta — é nele que o FastAPI diz qual campo recusou.
+
+## Verificação em produção
+
+- `meta-events/consume` → **200 OK** (era 500).
+- Cursor: `last_sequence = 11`, `bootstrap_complete = true`. As 11 sequências
+  represadas processaram de uma vez, com 11 receipts gravados.
+- Ticket do ciclo 1 fechou como `FINALIZED_INCOMPLETE` / `CYCLE_ENDED`, binding
+  liberado. Ticket do ciclo 4 segue `APPROVED` e ativo.
+- `farm_tickets.provision` e `farm_tickets.storage.cleanup`, que estavam em
+  retry com 422, concluíram.
+- Fila: 76 `succeeded`, 3 `failed`, 1 `pending`, 1 `cancelled`. As 3 falhas são
+  anteriores às correções e estão exauridas; as duas provas do banco estão
+  íntegras (`STORED` e `DELETED`, ambas com entrega na thread confirmada), então
+  não houve dano funcional.
+- Journal do `yuno-api`: **zero** `500 Internal` ou `Exception in ASGI`, e o
+  access log voltou a aparecer.
+
 ## Pendente
 
-1. **Deploy da correção** — inclui `alembic upgrade head` (a migração
-   `a9b0c1d2e3f4` é necessária; sem ela o 500 continua).
-2. **Destravar o cursor**: depois do deploy, o próximo boot do bot processa as
-   sequências 2 a 11 de uma vez. Conferir que `last_sequence` chega a 11 e que
-   os tickets dos ciclos 1–3 fecham como esperado.
-3. **Suítes reais** (`test_platform_postgres.py`, `test_farm_tickets_minio.py`)
-   continuam sem execução — são elas que pegariam esta classe de bug antes do
-   deploy, e são o único lugar onde `VARCHAR` é cobrado de verdade.
+1. **Suítes reais** (`test_platform_postgres.py`, `test_farm_tickets_minio.py`)
+   continuam sem execução — são o único lugar onde `VARCHAR` é cobrado de
+   verdade antes do deploy.
+2. **T-01 a T-07** de `docs/tickets-v2-acceptance.md` continuam pendentes:
+   exigem interação real no Discord.
+3. Três tarefas em `failed` de 22 e 26/08 seguem na fila como resíduo. Uma delas
+   (`farm_tickets.proof.process`) está com `attempts = 15` contra
+   `max_attempts = 10` — vale entender como um job ultrapassou o próprio limite.
 4. `docs/deployment.md` descreve uma stack Docker Compose, mas o servidor de
    teste roda `systemd` + venv (`yuno-api.service`, `yuno-bot.service`). O
    documento está desatualizado em relação à máquina real.
