@@ -16,10 +16,13 @@ from dataclasses import dataclass
 import discord
 
 from yuno_bot import modules, server_setup
+from yuno_bot.platform import ui_kit as uk
 
-YUNO_GREEN = 0x2ECC71
-YUNO_ORANGE = 0xF39C12
-YUNO_RED = 0xE74C3C
+# Os tokens vivem em `platform/ui_kit.py`; aqui ficam só os apelidos que o
+# diagnostico usa, para o verde do Yuno ser o mesmo verde em todo o produto.
+YUNO_GREEN = uk.SUCCESS
+YUNO_ORANGE = uk.WARNING
+YUNO_RED = uk.DANGER
 
 LIMITE_CAMPO = 1000  # embed field aceita 1024; a folga cobre o sufixo de corte
 
@@ -52,11 +55,11 @@ class Diagnostico:
 def _permissoes(guild: discord.Guild) -> tuple[Item, ...]:
     membro = guild.me
     if membro is None:
-        return (Item("Permissoes do bot", False, "nao consegui ler minhas proprias permissoes"),)
+        return (Item("Permissões do bot", False, "não consegui ler minhas próprias permissões"),)
 
     perms = membro.guild_permissions
     if perms.administrator:
-        return (Item("Permissoes do bot", True, "administrador"),)
+        return (Item("Permissões do bot", True, "administrador"),)
 
     return tuple(
         Item(nome, getattr(perms, nome, False), motivo)
@@ -75,7 +78,7 @@ def _estrutura(guild: discord.Guild, config: dict) -> tuple[Item, ...]:
                 Item(
                     f"#{spec.name}",
                     False,
-                    "nao configurado" if not canal_id else "o canal salvo foi apagado",
+                    "não configurado" if not canal_id else "o canal salvo foi apagado",
                 )
             )
         else:
@@ -89,7 +92,7 @@ def _estrutura(guild: discord.Guild, config: dict) -> tuple[Item, ...]:
                 Item(
                     f"#{nome}",
                     False,
-                    "log nao configurado" if not canal_id else "o canal de log salvo foi apagado",
+                    "log não configurado" if not canal_id else "o canal de log salvo foi apagado",
                 )
             )
         else:
@@ -129,28 +132,28 @@ def _truncar(linhas: list[str], *, vazio: str) -> str:
 
 def diagnostic_embed(diagnostico: Diagnostico, guild_name: str) -> discord.Embed:
     if not diagnostico.licenca_ativa:
-        cor, titulo = YUNO_RED, "Yuno sem licenca ativa"
+        cor, titulo = YUNO_RED, "Yuno sem licença ativa"
     elif diagnostico.pronto:
         cor, titulo = YUNO_GREEN, "Yuno configurado e pronto"
     else:
-        cor, titulo = YUNO_ORANGE, "Yuno com pendencias de configuracao"
+        cor, titulo = YUNO_ORANGE, "Yuno com pendências de configuração"
 
     embed = discord.Embed(title=titulo, color=cor, timestamp=discord.utils.utcnow())
     embed.set_footer(text=f"Diagnostico do Yuno em {guild_name}")
 
     embed.add_field(
-        name="Licenca",
+        name="Licença",
         value=(
             "Ativa neste servidor."
             if diagnostico.licenca_ativa
-            else "Sem licenca ativa. Ative pelo painel do Yuno para liberar os comandos."
+            else "Sem licença ativa. Ative pelo painel do Yuno para liberar os comandos."
         ),
         inline=False,
     )
 
     faltando_perm = [item for item in diagnostico.permissoes if not item.ok]
     embed.add_field(
-        name="Permissoes",
+        name="Permissões",
         value=_truncar(
             [f"Preciso de **{item.nome}** para {item.detalhe}." for item in faltando_perm],
             vazio="Tenho tudo que preciso.",
@@ -171,10 +174,10 @@ def diagnostic_embed(diagnostico: Diagnostico, guild_name: str) -> discord.Embed
 
     desligados = [item.nome for item in diagnostico.modulos if not item.ok]
     embed.add_field(
-        name="Modulos",
+        name="Módulos",
         value=_truncar(
             [f"Desligado: {nome}" for nome in desligados],
-            vazio="Todos os modulos estao ligados.",
+            vazio="Todos os módulos estão ligados.",
         ),
         inline=False,
     )
@@ -182,7 +185,7 @@ def diagnostic_embed(diagnostico: Diagnostico, guild_name: str) -> discord.Embed
     if faltando_estrutura and diagnostico.licenca_ativa:
         embed.add_field(
             name="O que fazer agora",
-            value="Rode `/yuno configurar` — ele cria o que falta e nao mexe no que ja esta certo.",
+            value="Rode `/yuno configurar` — ele cria o que falta e não mexe no que ja esta certo.",
             inline=False,
         )
 

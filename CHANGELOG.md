@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-08-26
+
+### Adicionado
+
+- Kit de design compartilhado (`platform/ui_kit.py`): tokens de cor, estados semânticos com emoji e cor, barra de progresso, linha de objetivo, tipografia com rótulo e emoji, onboarding numerado, rodapé `-#` e formatação pt-BR de número, dinheiro, quantidade e data. Guia de estilo em `docs/ui-kit.md`.
+- Central de Gestão em lista vertical: um módulo por linha, com selo de estado, explicação e o próximo passo como botão, além do placar de quantos módulos estão no ar e quantos aguardam o administrador.
+- Painel do ticket com barra de progresso, avatar do membro, campos rotulados, saúde por objetivo e cor do container acompanhando o estado do ticket.
+- Editor de Metas com indicador de progresso dos sete passos e seções numeradas no mesmo padrão do Registro.
+
+### Corrigido
+
+- Português sem acento em toda a superfície visível do bot (Central, Registro, Metas, Tags, Tickets de Farm, diagnóstico, mensagens de erro do roteador e textos padrão do Registro).
+- O aviso de ciclo da Meta passa a mudar de cor ao encerrar, em vez de permanecer amarelo.
+- Status de sincronização das Tags deixa de exibir o valor cru em inglês vindo da API.
+- O verde, o laranja e o vermelho do diagnóstico passam a ser os mesmos do restante do produto.
+
+### Nota de atualização
+
+A Central publicada é reescrita com o layout novo no primeiro boot, pela reconciliação de startup. Onde a mensagem da Central foi apagada ou substituída por outro autor, é preciso rodar `/yuno configurar` novamente.
+
 ## 2026-08-20
 
 ### Adicionado

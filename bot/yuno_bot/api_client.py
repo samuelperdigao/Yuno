@@ -163,7 +163,7 @@ class YunoAPI:
         payload = response.json().get("detail") or {}
         current_revision = int(payload.get("current_revision", 0))
         raise ControlPlaneConflict(
-            "Conflito de revisao do Control Plane.",
+            "Conflito de revisão do Control Plane.",
             request=response.request,
             response=response,
             current_revision=current_revision,

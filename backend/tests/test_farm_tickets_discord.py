@@ -395,8 +395,8 @@ def test_unpublished_overview_offers_configuration_without_leaking_internal_stat
         for item in children
         if item["type"] == 1 and item["components"][0]["type"] == 2
     )
-    assert "Ainda nao publicado" in content
-    assert "Ainda nao definido" in content
+    assert "Ainda não publicado" in content
+    assert "Ainda não definido" in content
     assert "lifecycle" not in content.lower()
     assert "rascunho" not in content.lower()
     assert action["components"][0]["custom_id"] == "yuno:central:v1:farm_tickets:open_system"
@@ -453,7 +453,7 @@ def test_partial_selection_only_reaches_the_backend_once_a_role_exists(
         for item in captured["components"][0]["components"]
         if item["type"] == 10
     )
-    assert "so viram rascunho gravado" in content
+    assert "só viram rascunho" in content
 
     asyncio.run(admin.set_admin_roles(_admin_interaction(values=["800", "800"]), api))
 
@@ -500,7 +500,7 @@ def test_preflight_blocks_publication_on_missing_fields_and_dead_resources() -> 
     assert [item for item in errors if "Cargos administradores" in item]
 
     dead = admin.preflight(guild, _complete_config())
-    assert "A categoria principal nao existe mais neste servidor." in dead
+    assert "A categoria principal não existe mais neste servidor." in dead
     assert [item for item in dead if "Cargo administrador inexistente" in item]
 
     same_channel = admin.preflight(
@@ -527,7 +527,7 @@ def test_confirm_publish_is_refused_before_the_resources_exist(monkeypatch) -> N
 
     assert api.publishes == []
     assert api.lifecycles == []
-    assert sent and sent[0].startswith("Publicacao bloqueada:")
+    assert sent and sent[0].startswith("Publicação bloqueada:")
 
 
 def test_reconcile_skips_provisioning_while_configuration_is_unpublished() -> None:

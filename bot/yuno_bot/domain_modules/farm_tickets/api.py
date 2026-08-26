@@ -268,13 +268,13 @@ class FarmTicketsAPI:
             )
             return {
                 "ticket": result,
-                "message": "Ticket reservado. O canal privado esta sendo preparado.",
+                "message": "Ticket reservado. O canal privado está sendo preparado.",
             }
         if action_key == "delete_ticket_global":
             member_id = str(payload.get("member_id") or "")
             ticket = await self.active_ticket(guild_id, member_id)
             if ticket is None:
-                return {"message": "Esse membro nao possui ticket ativo."}
+                return {"message": "Esse membro não possui ticket ativo."}
             result = await self._mutation(
                 "POST",
                 f"/guilds/{guild_id}/modules/farm_tickets/tickets/{ticket['id']}/delete",
@@ -284,7 +284,7 @@ class FarmTicketsAPI:
                     "idempotency_key": idempotency,
                 },
             )
-            return {"ticket": result, "message": "Exclusao do ticket registrada."}
+            return {"ticket": result, "message": "Exclusão do ticket registrada."}
 
         ticket = await self.ticket(guild_id, resource_id)
         if action_key in {"create_entry", "edit_entry", "withdraw"}:
@@ -307,7 +307,7 @@ class FarmTicketsAPI:
                     message = (
                         "Recolhimento confirmado."
                         if action_key == "withdraw"
-                        else "Valores salvos. Envie uma imagem valida neste canal em ate 5 minutos."
+                        else "Valores salvos. Envie uma imagem válida neste canal em até 5 minutos."
                     )
                     return {**result, "message": message}
                 return {**result, "form": result["draft"]}
@@ -359,7 +359,7 @@ class FarmTicketsAPI:
                 },
             )
             return {"ticket": result, "message": "Ticket atualizado."}
-        raise ValueError(f"Acao de Tickets desconhecida: {action_key}")
+        raise ValueError(f"Ação de Tickets desconhecida: {action_key}")
 
     farm_tickets_action = action
     farm_tickets_entries = entries

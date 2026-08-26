@@ -27,10 +27,11 @@ from yuno_bot.platform.components_v2 import (
     string_select,
     text_display,
 )
+from yuno_bot.platform import ui_kit as uk
 from yuno_bot.platform.contracts import ActorContext, RetryableJobError
 
 
-COLOR = 0xFFC72C
+COLOR = uk.BRAND
 log = logging.getLogger("yuno.meta")
 _goal_pages: dict[tuple[int, int], int] = {}
 _selected_goals: dict[tuple[int, int], int] = {}
@@ -67,7 +68,7 @@ def _error_text(exc: Exception) -> str:
                 return str(detail)
         except Exception:
             pass
-    return "Nao foi possivel concluir a acao de Metas. Tente novamente."
+    return "Não foi possível concluir a ação de Metas. Tente novamente."
 
 
 async def _reply(interaction: discord.Interaction, message: str) -> None:
@@ -81,7 +82,7 @@ async def _replace_public(interaction: discord.Interaction, data: dict[str, Any]
     if not interaction.response.is_done():
         await interaction.response.defer()
     if interaction.channel_id is None or interaction.message is None:
-        raise RuntimeError("Referencia da Central indisponivel.")
+        raise RuntimeError("Referência da Central indisponível.")
     await edit_message(interaction.client, interaction.channel_id, interaction.message.id, data)
 
 
@@ -89,6 +90,50 @@ def _public_status(goal: dict[str, Any]) -> str:
     if goal["state"] == "active":
         return "Ativa"
     return "Agendada"
+
+
+def _public_state(goal: dict[str, Any]) -> uk.State:
+    return uk.State.RUNNING if goal.get("state") == "active" else uk.State.PENDING
+
+
+#: Passo do editor -> número da seção. `schedule` e `participant_roles` são
+#: continuações de 2 e 3, então compartilham o número em vez de inventar um.
+EDITOR_STEPS: dict[str, int] = {
+    "name": 1,
+    "periodicity": 2,
+    "schedule": 2,
+    "participants": 3,
+    "participant_roles": 3,
+    "type": 4,
+    "objectives": 5,
+    "notice": 6,
+    "review": 7,
+}
+EDITOR_TOTAL_STEPS = 7
+
+
+def _editor_progress(step: str) -> str:
+    """Onde o administrador está no fluxo de sete passos.
+
+    Sem isso, as sete telas do editor são visualmente idênticas e não dá para
+    saber quanto falta — o que faz o fluxo parecer maior do que é.
+    """
+
+    number = EDITOR_STEPS.get(step)
+    if number is None:
+        return ""
+    bar = uk.progress_bar(
+        number * 100 / EDITOR_TOTAL_STEPS, length=EDITOR_TOTAL_STEPS
+    )
+    return f"{bar} Passo {number} de {EDITOR_TOTAL_STEPS}"
+
+
+def _page_previous() -> dict[str, Any]:
+    return {"label": "Página anterior", "value": "page:prev", "emoji": {"name": "⬅️"}}
+
+
+def _page_next() -> dict[str, Any]:
+    return {"label": "Próxima página", "value": "page:next", "emoji": {"name": "➡️"}}
 
 
 def _main_payload(goals: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
@@ -105,36 +150,51 @@ def _main_payload(goals: dict[str, Any], settings: dict[str, Any]) -> dict[str, 
         for item in goals["items"]
     ]
     if page > 0:
-        options.insert(0, {"label": "Pagina anterior", "value": "page:prev", "emoji": {"name": "⬅️"}})
+        options.insert(0, _page_previous())
     if (page + 1) * page_size < total:
-        options.append({"label": "Proxima pagina", "value": "page:next", "emoji": {"name": "➡️"}})
+        options.append(_page_next())
     if not options:
         options.append({"label": "Nenhuma Meta ativa ou agendada", "value": "none"})
+    notice_channel = settings.get("notice_channel_id")
+    destination = (
+        f"<#{notice_channel}>"
+        if notice_channel
+        else "⚪ Nenhum canal de avisos definido"
+    )
     return payload(
-        container(
-            dashboard.module_navigation("meta"),
-            separator(),
-            text_display("# 🎯 Sistema de Metas"),
-            action_row(
-                button(
-                    custom_id=dashboard.central_custom_id("meta", "create_goal"),
-                    label="Criar Meta",
-                    emoji="➕",
-                    style=1,
+        uk.panel(
+            header=[
+                dashboard.module_navigation("meta"),
+                uk.space(),
+                uk.heading("Sistema de Metas", emoji="🎯"),
+            ],
+            blocks=[uk.field("Canal dos avisos", destination, emoji="📣")],
+            actions=[
+                action_row(
+                    button(
+                        custom_id=dashboard.central_custom_id("meta", "create_goal"),
+                        label="Criar Meta",
+                        emoji="➕",
+                        style=1,
+                    ),
+                    button(
+                        custom_id=dashboard.central_custom_id("meta", "settings"),
+                        label="Configurações",
+                        emoji="⚙️",
+                        style=2,
+                    ),
                 ),
-                button(
-                    custom_id=dashboard.central_custom_id("meta", "settings"),
-                    label="Configuracoes",
-                    emoji="⚙️",
-                    style=2,
+                action_row(
+                    string_select(
+                        custom_id=dashboard.central_custom_id("meta", "select_goal"),
+                        options=options,
+                        placeholder=f"Metas ativas e agendadas · página {page + 1}",
+                    )
                 ),
-            ),
-            action_row(
-                string_select(
-                    custom_id=dashboard.central_custom_id("meta", "select_goal"),
-                    options=options,
-                    placeholder=f"Metas ativas e agendadas · pagina {page + 1}",
-                )
+            ],
+            footer=(
+                "Uma Meta agendada só entra no ar depois que o aviso público é "
+                "publicado no canal escolhido."
             ),
             accent_color=COLOR,
         )
@@ -159,24 +219,18 @@ async def render_admin(interaction: discord.Interaction, api: Any) -> None:
 def _schedule_summary(data: dict[str, Any]) -> str:
     recurrence = data.get("recurrence")
     if recurrence == "daily":
-        return f"Diaria as {data.get('daily_time') or '—'}"
+        return f"Diária às {data.get('daily_time') or '—'}"
     if recurrence == "weekly":
-        return f"Semanal no dia {data.get('weekday', '—')} as 00:00"
+        return f"Semanal no dia {data.get('weekday', '—')} às 00:00"
     if recurrence == "monthly":
-        return f"Mensal no dia {data.get('month_day', '—')} as 00:00"
+        return f"Mensal no dia {data.get('month_day', '—')} às 00:00"
     if recurrence == "custom":
-        return f"Personalizada: {data.get('scheduled_start_at', '—')} ate {data.get('scheduled_end_at', '—')}"
-    return "Nao definida"
+        return f"Personalizada: {data.get('scheduled_start_at', '—')} até {data.get('scheduled_end_at', '—')}"
+    return "Não definida"
 
 
 def _format_decimal_br(value: Any, *, places: int, fixed: bool = False) -> str:
-    amount = Decimal(str(value))
-    rendered = f"{amount:.{places}f}"
-    integer, _, fraction = rendered.partition(".")
-    grouped = f"{int(integer):,}".replace(",", ".")
-    if not fixed:
-        fraction = fraction.rstrip("0")
-    return f"{grouped},{fraction}" if fraction else grouped
+    return uk.number_br(value, places=places, fixed=fixed)
 
 
 def _decimal_input(value: Any, *, places: int) -> str:
@@ -206,9 +260,9 @@ def _parse_decimal_br(value: str, *, places: int, allow_currency: bool = False) 
             1 <= len(groups[0]) <= 3
             and all(len(group) == 3 and group.isdigit() for group in groups[1:])
         ):
-            raise ValueError("Separadores de milhar invalidos.")
+            raise ValueError("Separadores de milhar inválidos.")
         if not groups[0].isdigit() or not fraction.isdigit() or len(fraction) > places:
-            raise ValueError(f"Use no maximo {places} casas decimais.")
+            raise ValueError(f"Use no máximo {places} casas decimais.")
         normalized = "".join(groups) + "." + fraction
     elif "." in raw:
         groups = raw.split(".")
@@ -228,11 +282,11 @@ def _parse_decimal_br(value: str, *, places: int, allow_currency: bool = False) 
         ):
             normalized = raw
         else:
-            raise ValueError("Valor numerico invalido.")
+            raise ValueError("Valor numérico inválido.")
     elif raw.isdigit():
         normalized = raw
     else:
-        raise ValueError("Valor numerico invalido.")
+        raise ValueError("Valor numérico inválido.")
 
     amount = Decimal(normalized)
     if (
@@ -246,35 +300,28 @@ def _parse_decimal_br(value: str, *, places: int, allow_currency: bool = False) 
 
 
 def _display_unit(unit: Any, quantity: Any) -> str:
-    value = str(unit or "unidade").strip()
-    if Decimal(str(quantity)) == 1 or value.casefold().endswith("s"):
-        return value
-    plurals = {
-        "unidade": "unidades",
-        "caixa": "caixas",
-        "pacote": "pacotes",
-        "kit": "kits",
-        "item": "itens",
-    }
-    return plurals.get(value.casefold(), value)
+    return uk.plural_unit(unit, quantity)
 
 
 def _objective_line(item: dict[str, Any]) -> str:
+    """Uma meta ainda sem lançamento: só alvo, sem barra.
+
+    `ui_kit.objective_row` precisa do par atual/alvo; o aviso de ciclo e o
+    editor mostram o objetivo antes de existir qualquer lançamento, então uma
+    barra aqui exibiria um `0%` que não significa nada.
+    """
+
     if item.get("kind") == "money":
-        return (
-            f"💰 {item.get('name') or 'Dinheiro'} — "
-            f"R$ {_format_decimal_br(item.get('money_amount'), places=2, fixed=True)}"
-        )
-    quantity = item.get("item_quantity")
+        return f"💰 {item.get('name') or 'Dinheiro'} — {uk.money_br(item.get('money_amount'))}"
     return (
-        f"📦 {item.get('name')} — {_format_decimal_br(quantity, places=3)} "
-        f"{_display_unit(item.get('unit'), quantity)}"
+        f"📦 {item.get('name')} — "
+        f"{uk.quantity(item.get('item_quantity'), item.get('unit') or 'unidade')}"
     )
 
 
 def _objective_lines(data: dict[str, Any]) -> str:
-    lines = [f"• {_objective_line(item)}" for item in data.get("objectives") or []]
-    return "\n".join(lines) or "_Nenhum objetivo definido._"
+    lines = uk.bullet(_objective_line(item) for item in data.get("objectives") or [])
+    return lines or "_Nenhum objetivo definido._"
 
 
 def _objectives_match_mode(data: dict[str, Any]) -> bool:
@@ -300,22 +347,27 @@ def _editor_payload(
     step = draft["step"]
     data = draft["data"]
     title = "Editar Meta" if draft.get("goal_id") else "Criar Meta"
+    progress = _editor_progress(step)
     content = [
         text_display(
-            f"# 🎯 {title}\n\nUma unica mensagem acompanha todo o fluxo. "
-            f"Rascunho salvo · revisao **{draft['revision']}**."
-            + (f"\n\n⚠️ {banner}" if banner else "")
+            uk.heading(title, emoji="🎯")
+            + (f"\n{progress}" if progress else "")
+            + (f"\n\n{uk.empty_state('Atenção', banner)}" if banner else "")
         ),
         separator(),
     ]
     if step == "name":
         content.extend(
             [
-                text_display(f"### 1. Nome\n**{data.get('name') or 'Ainda nao informado'}**"),
+                text_display(
+                    f"{uk.section_number(1, 'Nome', emoji='🏷️')}\n\n"
+                    f"**{data.get('name') or 'Ainda não informado'}**"
+                ),
                 action_row(
                     button(
                         custom_id=dashboard.central_custom_id("meta", "edit_name"),
                         label="Informar nome",
+                        emoji="✏️",
                         style=1,
                     )
                 ),
@@ -324,13 +376,16 @@ def _editor_payload(
     elif step == "periodicity":
         content.extend(
             [
-                text_display("### 2. Periodicidade\nEscolha como os ciclos serao renovados."),
+                text_display(
+                    f"{uk.section_number(2, 'Periodicidade', emoji='🔁')}\n\n"
+                    "Escolha como os ciclos serão renovados."
+                ),
                 action_row(
                     string_select(
                         custom_id=dashboard.central_custom_id("meta", "set_recurrence"),
                         placeholder="Escolha a periodicidade",
                         options=[
-                            {"label": "Diaria", "value": "daily", "emoji": {"name": "☀️"}},
+                            {"label": "Diária", "value": "daily", "emoji": {"name": "☀️"}},
                             {"label": "Semanal", "value": "weekly", "emoji": {"name": "📅"}},
                             {"label": "Mensal", "value": "monthly", "emoji": {"name": "🗓️"}},
                             {"label": "Personalizada", "value": "custom", "emoji": {"name": "⏱️"}},
@@ -342,11 +397,15 @@ def _editor_payload(
     elif step == "schedule":
         content.extend(
             [
-                text_display(f"### 2. Periodicidade\n**{_schedule_summary(data)}**"),
+                text_display(
+                    f"{uk.section_number(2, 'Periodicidade', emoji='🔁')}\n\n"
+                    f"**{_schedule_summary(data)}**"
+                ),
                 action_row(
                     button(
                         custom_id=dashboard.central_custom_id("meta", "edit_schedule"),
                         label="Definir agenda",
+                        emoji="📅",
                         style=1,
                     )
                 ),
@@ -355,7 +414,10 @@ def _editor_payload(
     elif step == "participants":
         content.extend(
             [
-                text_display("### 3. Participantes\nO snapshot sera congelado quando o ciclo iniciar."),
+                text_display(
+                    f"{uk.section_number(3, 'Participantes', emoji='👥')}\n\n"
+                    "O snapshot será congelado quando o ciclo iniciar."
+                ),
                 action_row(
                     string_select(
                         custom_id=dashboard.central_custom_id("meta", "set_participation"),
@@ -373,7 +435,8 @@ def _editor_payload(
         content.extend(
             [
                 text_display(
-                    f"### 3. Participantes por cargo\n**{len(roles)} cargo(s)** selecionado(s). "
+                    f"{uk.section_number(3, 'Participantes por cargo', emoji='🎭')}\n\n"
+                    f"**{len(roles)} cargo(s)** selecionado(s). "
                     "Adicione em lotes se precisar de mais de 25."
                 ),
                 action_row(
@@ -397,7 +460,10 @@ def _editor_payload(
     elif step == "type":
         content.extend(
             [
-                text_display("### 4. Tipo\nEscolha itens, dinheiro ou uma Meta mista."),
+                text_display(
+                    f"{uk.section_number(4, 'Tipo', emoji='🧭')}\n\n"
+                    "Escolha itens, dinheiro ou uma Meta mista."
+                ),
                 action_row(
                     string_select(
                         custom_id=dashboard.central_custom_id("meta", "set_type"),
@@ -416,8 +482,9 @@ def _editor_payload(
         objectives = list(data.get("objectives") or [])
         content.append(
             text_display(
-                "### 5. Objetivos\nAdicione cada objetivo em campos separados. "
-                "Os valores abaixo ja estao no formato que sera publicado.\n\n"
+                f"{uk.section_number(5, 'Objetivos', emoji='📦')}\n\n"
+                "Adicione cada objetivo em campos separados. "
+                "Os valores abaixo já estão no formato que será publicado.\n\n"
                 + _objective_lines(data)
             )
         )
@@ -427,7 +494,7 @@ def _editor_payload(
                 "label": str(item["name"])[:100],
                 "value": f"product:{item['id']}",
                 "description": (
-                    f"Sugestao: {_format_decimal_br(item['last_suggested_quantity'], places=3)} "
+                    f"Sugestão: {_format_decimal_br(item['last_suggested_quantity'], places=3)} "
                     f"{item['unit']}"
                     if item.get("last_suggested_quantity")
                     else f"Unidade: {item['unit']}"
@@ -438,16 +505,16 @@ def _editor_payload(
         ]
         product_page = int(catalog.get("page") or 0)
         if product_page > 0:
-            catalog_options.insert(0, {"label": "Pagina anterior", "value": "page:prev", "emoji": {"name": "⬅️"}})
+            catalog_options.insert(0, _page_previous())
         if (product_page + 1) * int(catalog.get("page_size") or 23) < int(catalog.get("total") or 0):
-            catalog_options.append({"label": "Proxima pagina", "value": "page:next", "emoji": {"name": "➡️"}})
+            catalog_options.append(_page_next())
         if mode in {"items", "mixed"} and catalog_options:
             content.append(
                 action_row(
                     string_select(
                         custom_id=dashboard.central_custom_id("meta", "select_product"),
                         options=catalog_options,
-                        placeholder=f"Usar item cadastrado · pagina {product_page + 1}",
+                        placeholder=f"Usar item cadastrado · página {product_page + 1}",
                     )
                 )
             )
@@ -464,16 +531,16 @@ def _editor_payload(
             for index, item in enumerate(visible)
         ]
         if objective_page > 0:
-            objective_options.insert(0, {"label": "Pagina anterior", "value": "page:prev", "emoji": {"name": "⬅️"}})
+            objective_options.insert(0, _page_previous())
         if start + 23 < len(objectives):
-            objective_options.append({"label": "Proxima pagina", "value": "page:next", "emoji": {"name": "➡️"}})
+            objective_options.append(_page_next())
         if objective_options:
             content.append(
                 action_row(
                     string_select(
                         custom_id=dashboard.central_custom_id("meta", "select_objective"),
                         options=objective_options,
-                        placeholder=f"Editar ou remover objetivo · pagina {objective_page + 1}",
+                        placeholder=f"Editar ou remover objetivo · página {objective_page + 1}",
                     )
                 )
             )
@@ -513,12 +580,14 @@ def _editor_payload(
         content.extend(
             [
                 text_display(
-                    f"### 6. Texto do aviso\n{data.get('notice_text') or '_Ainda nao informado._'}"
+                    f"{uk.section_number(6, 'Texto do aviso', emoji='📣')}\n\n"
+                    f"{data.get('notice_text') or '_Ainda não informado._'}"
                 ),
                 action_row(
                     button(
                         custom_id=dashboard.central_custom_id("meta", "edit_notice"),
                         label="Informar aviso",
+                        emoji="✏️",
                         style=1,
                     )
                 ),
@@ -533,17 +602,21 @@ def _editor_payload(
         content.extend(
             [
                 text_display(
-                    "### 7. Revisao\n"
-                    f"**Nome:** {data.get('name')}\n"
-                    f"**Periodicidade:** {_schedule_summary(data)}\n"
-                    f"**Participantes:** {participant_text}\n"
-                    f"**Objetivos:**\n{_objective_lines(data)}\n"
-                    f"**Aviso:** {data.get('notice_text')}"
+                    f"{uk.section_number(7, 'Revisão', emoji='👁️')}\n\n"
+                    + uk.inline_fields(
+                        ("Nome", data.get("name")),
+                        ("Periodicidade", _schedule_summary(data)),
+                        ("Participantes", participant_text),
+                    )
+                    + "\n\n"
+                    + uk.field("Objetivos", _objective_lines(data), emoji="📦")
+                    + "\n\n"
+                    + uk.field("Aviso", data.get("notice_text"), emoji="📣")
                 ),
                 action_row(
                     button(
                         custom_id=dashboard.central_custom_id("meta", "submit_goal"),
-                        label="Criar Meta" if not draft.get("goal_id") else "Salvar proxima Meta",
+                        label="Criar Meta" if not draft.get("goal_id") else "Salvar próxima Meta",
                         emoji="✅",
                         style=3,
                     )
@@ -553,9 +626,22 @@ def _editor_payload(
     else:
         content.append(
             text_display(
-                "### Meta salva\nO lancamento foi agendado. O ciclo so ficara ativo depois que o aviso publico for confirmado."
+                f"{uk.heading('Meta salva', emoji='✅', level=3)}\n\n"
+                "O lançamento foi agendado. O ciclo só fica ativo depois que o "
+                "aviso público for confirmado."
             )
         )
+    content.extend(
+        (
+            separator(spacing=1, divider=False),
+            text_display(
+                uk.subtext(
+                    "Uma única mensagem acompanha todo o fluxo · rascunho salvo na "
+                    f"revisão {draft['revision']}."
+                )
+            ),
+        )
+    )
     return payload(container(*content, accent_color=COLOR))
 
 
@@ -575,7 +661,7 @@ async def _editor_products(
         return result
     except Exception:
         log.exception(
-            "Falha ao carregar catalogo da Meta guild=%s admin=%s",
+            "Falha ao carregar catálogo da Meta guild=%s admin=%s",
             interaction.guild_id,
             interaction.user.id,
         )
@@ -670,7 +756,7 @@ class EditorModal(discord.ui.Modal):
                 await self._refresh_after_submit(
                     interaction,
                     current,
-                    banner="O rascunho mudou durante a edicao. A versao atual foi recarregada.",
+                    banner="O rascunho mudou durante a edição. A versão atual foi recarregada.",
                 )
                 return
             await interaction.followup.send(_error_text(exc), ephemeral=True)
@@ -700,7 +786,7 @@ class EditorModal(discord.ui.Modal):
             elif 0 <= index < len(objectives):
                 objectives[index] = objective
             else:
-                raise ValueError("O objetivo selecionado nao existe mais.")
+                raise ValueError("O objetivo selecionado não existe mais.")
             saved = await self.api.meta_patch_draft(
                 interaction.guild_id,
                 {
@@ -719,7 +805,7 @@ class EditorModal(discord.ui.Modal):
                 await self._refresh_after_submit(
                     interaction,
                     current,
-                    banner="O rascunho mudou durante a edicao. Selecione o objetivo novamente.",
+                    banner="O rascunho mudou durante a edição. Selecione o objetivo novamente.",
                 )
                 return
             await interaction.followup.send(_error_text(exc), ephemeral=True)
@@ -811,7 +897,7 @@ class ScheduleModal(EditorModal):
                     "month_day": None,
                 }
         except (ValueError, TypeError):
-            await interaction.response.send_message("Agenda invalida. Revise o formato e o intervalo.", ephemeral=True)
+            await interaction.response.send_message("Agenda inválida. Revise o formato e o intervalo.", ephemeral=True)
             return
         await self.save_patch(interaction, patch=patch, step="participants")
 
@@ -864,7 +950,7 @@ class ItemObjectiveModal(EditorModal):
             )
         except (ValueError, InvalidOperation) as exc:
             await interaction.response.send_message(
-                f"Quantidade invalida: {exc} Use virgula para decimais, por exemplo `10.500,250`.",
+                f"Quantidade inválida: {exc} Use vírgula para decimais, por exemplo `10.500,250`.",
                 ephemeral=True,
             )
             return
@@ -894,7 +980,7 @@ class MoneyObjectiveModal(EditorModal):
         self.index = index
         current = objective or {}
         self.name_input = discord.ui.TextInput(
-            label="Descricao",
+            label="Descrição",
             placeholder="Ex.: Dinheiro",
             default=str(current.get("name") or "Dinheiro"),
             min_length=1,
@@ -921,7 +1007,7 @@ class MoneyObjectiveModal(EditorModal):
             )
         except (ValueError, InvalidOperation) as exc:
             await interaction.response.send_message(
-                f"Valor invalido: {exc} Exemplo aceito: `R$ 1.500,00`.",
+                f"Valor inválido: {exc} Exemplo aceito: `R$ 1.500,00`.",
                 ephemeral=True,
             )
             return
@@ -972,9 +1058,18 @@ async def settings(interaction: discord.Interaction, api: Any) -> None:
             payload(
                 container(
                     text_display(
-                        "# ⚙️ Configuracoes de Metas\n\nSelecione o canal usado para o aviso de cada novo ciclo."
-                        f"\nCanal atual: <#{current['notice_channel_id']}>" if current.get("notice_channel_id") else
-                        "# ⚙️ Configuracoes de Metas\n\nSelecione o canal usado para o aviso de cada novo ciclo."
+                        uk.heading("Configurações de Metas", emoji="⚙️")
+                        + "\n\nSelecione o canal usado para o aviso de cada novo ciclo."
+                        + (
+                            "\n\n"
+                            + uk.field(
+                                "Canal atual",
+                                f"<#{current['notice_channel_id']}>",
+                                emoji="📣",
+                            )
+                            if current.get("notice_channel_id")
+                            else ""
+                        )
                     ),
                     action_row(
                         channel_select(
@@ -996,14 +1091,14 @@ async def save_settings(interaction: discord.Interaction, api: Any) -> None:
     values = list((interaction.data or {}).get("values") or [])
     channel = interaction.guild.get_channel(int(values[0])) if values and interaction.guild else None
     if not isinstance(channel, discord.TextChannel):
-        await _reply(interaction, "Selecione um canal de texto valido.")
+        await _reply(interaction, "Selecione um canal de texto válido.")
         return
     bot_member = interaction.guild.me
     permissions = channel.permissions_for(bot_member) if bot_member else None
     required = ("view_channel", "send_messages", "read_message_history", "mention_everyone")
     missing = [name for name in required if not permissions or not getattr(permissions, name, False)]
     if missing:
-        await _reply(interaction, "Permissoes ausentes no canal: " + ", ".join(missing))
+        await _reply(interaction, "Permissões ausentes no canal: " + ", ".join(missing))
         return
     try:
         current = await api.meta_settings(interaction.guild_id)
@@ -1014,7 +1109,13 @@ async def save_settings(interaction: discord.Interaction, api: Any) -> None:
         )
         await edit_interaction_message(
             interaction,
-            payload(container(text_display(f"# ✅ Configuracoes salvas\n\nAvisos serao publicados em {channel.mention}."), accent_color=COLOR)),
+            payload(
+                uk.panel(
+                    header=uk.heading("Configurações salvas", emoji="✅")
+                    + f"\n\nOs avisos serão publicados em {channel.mention}.",
+                    state=uk.State.APPROVED,
+                )
+            ),
         )
     except Exception as exc:
         await _reply(interaction, _error_text(exc))
@@ -1036,23 +1137,30 @@ async def select_goal(interaction: discord.Interaction, api: Any) -> None:
     try:
         goal = await api.meta_goal(interaction.guild_id, goal_id)
         config = goal.get("future_configuration") or goal.get("current_configuration") or {}
+        state = _public_state(goal)
         components = [
             text_display(
-                f"# 🎯 {goal['name']}\n\n**Status:** {_public_status(goal)}\n"
-                f"**Periodicidade:** {_schedule_summary(config)}\n"
-                f"**Objetivos:**\n{_objective_lines(config)}"
+                uk.heading(goal["name"], emoji="🎯")
+                + "\n\n"
+                + uk.field("Status", uk.badge(state, _public_status(goal)), emoji="📌")
+                + "\n\n"
+                + uk.field("Periodicidade", _schedule_summary(config), emoji="🔁")
+                + "\n\n"
+                + uk.field("Objetivos", _objective_lines(config), emoji="📦")
             )
         ]
         if goal["state"] == "active" and goal["recurrence"] != "custom":
             components.append(
-                action_row(button(custom_id=dashboard.central_custom_id("meta", "edit_goal"), label="Editar proxima Meta", style=2))
+                action_row(button(custom_id=dashboard.central_custom_id("meta", "edit_goal"), label="Editar próxima Meta", style=2))
             )
         elif goal["state"] == "scheduled" and goal["recurrence"] == "custom":
             components.append(
                 action_row(button(custom_id=dashboard.central_custom_id("meta", "edit_goal"), label="Editar Meta agendada", style=2))
             )
         await edit_interaction_message(
-            interaction, payload(container(*components, accent_color=COLOR)), ephemeral=True
+            interaction,
+            payload(container(*components, accent_color=uk.accent_for(state))),
+            ephemeral=True,
         )
     except Exception as exc:
         await _reply(interaction, _error_text(exc))
@@ -1169,7 +1277,7 @@ async def set_type(interaction: discord.Interaction, api: Any) -> None:
         interaction,
         saved,
         banner=(
-            f"{removed} objetivo(s) de outro tipo foram removidos desta configuracao."
+            f"{removed} objetivo(s) de outro tipo foram removidos desta configuração."
             if removed
             else ""
         ),
@@ -1212,7 +1320,7 @@ async def select_product(interaction: discord.Interaction, api: Any) -> None:
         None,
     )
     if product is None:
-        await _reply(interaction, "O item cadastrado nao esta mais disponivel. Atualize a lista.")
+        await _reply(interaction, "O item cadastrado não está mais disponível. Atualize a lista.")
         return
     await interaction.response.send_modal(
         ItemObjectiveModal(
@@ -1232,12 +1340,12 @@ async def select_product(interaction: discord.Interaction, api: Any) -> None:
 def _objective_action_payload(draft: dict[str, Any], index: int) -> dict[str, Any]:
     objectives = list(draft["data"].get("objectives") or [])
     if index < 0 or index >= len(objectives):
-        raise ValueError("O objetivo selecionado nao existe mais.")
+        raise ValueError("O objetivo selecionado não existe mais.")
     item = objectives[index]
     return payload(
         container(
             text_display(
-                f"# 🎯 Objetivo selecionado\n\n{_objective_line(item)}\n\n"
+                uk.heading("Objetivo selecionado", emoji="🎯") + f"\n\n{_objective_line(item)}\n\n"
                 "Escolha o que deseja fazer."
             ),
             action_row(
@@ -1372,7 +1480,7 @@ async def submit_goal(interaction: discord.Interaction, api: Any) -> None:
             await _show_editor(
                 interaction,
                 current,
-                banner="Outro administrador alterou esta Meta. A versao atual foi recarregada; revise novamente.",
+                banner="Outro administrador alterou esta Meta. A versão atual foi recarregada; revise novamente.",
             )
             return
         await _reply(interaction, _error_text(exc))
@@ -1405,7 +1513,7 @@ def _cycle_period(cycle: dict[str, Any]) -> str:
     ends_at = local(cycle["ends_at"])
     return (
         f"{starts_at:%d/%m/%Y %H:%M} → {ends_at:%d/%m/%Y %H:%M}\n"
-        f"Encerra <t:{int(ends_at.timestamp())}:R>"
+        f"Encerra {uk.timestamp(ends_at, 'R')}"
     )
 
 
@@ -1422,18 +1530,38 @@ def _notice_nonce(cycle: dict[str, Any]) -> str:
 
 
 def _notice_payload(goal: dict[str, Any], cycle: dict[str, Any], *, ended: bool) -> dict[str, Any]:
+    """Aviso público do ciclo.
+
+    O `component_id` é o marcador que reencontra a mensagem depois de um
+    restart e o `@everyone` só existe aqui, via `meta_notice_payload`. O
+    redesenho mexe em conteúdo e cor; nenhum dos dois muda.
+    """
+
     objectives = _objective_lines({"objectives": cycle.get("objectives") or []})
     name = str(cycle.get("name") or goal["name"])
-    heading = f"🏁 Meta Encerrada — {name}" if ended else f"🎯 {name}"
+    title = (
+        uk.heading(f"Meta Encerrada — {name}", emoji="🏁")
+        if ended
+        else uk.heading(name, emoji="🎯")
+    )
     prefix = "" if ended else "@everyone\n\n"
-    data = container(
-        text_display(f"{prefix}# {heading}"),
-        text_display(str(cycle.get("notice_text") or "")),
-        separator(),
-        text_display(f"### 📅 Período\n{_cycle_period(cycle)}"),
-        separator(),
-        text_display(f"### 📦 Objetivos\n{objectives}"),
-        accent_color=COLOR,
+    footer = (
+        "Ciclo encerrado. O próximo aviso chega quando a Meta reiniciar."
+        if ended
+        else "O Yuno atualiza este aviso automaticamente quando o ciclo encerrar."
+    )
+    data = uk.panel(
+        header=f"{prefix}{title}",
+        blocks=[
+            str(cycle.get("notice_text") or ""),
+            uk.rule(),
+            uk.field("Período", _cycle_period(cycle), emoji="📅"),
+            uk.rule(),
+            uk.field("Objetivos", objectives, emoji="📦"),
+        ],
+        footer=footer,
+        state=uk.State.DONE if ended else None,
+        accent_color=None if ended else COLOR,
         component_id=_notice_component_id(cycle),
     )
     return payload(data) if ended else meta_notice_payload(data)
@@ -1442,12 +1570,12 @@ def _notice_payload(goal: dict[str, Any], cycle: dict[str, Any], *, ended: bool)
 async def _channel_for_launch(guild: discord.Guild, channel_id: int) -> discord.TextChannel:
     channel = guild.get_channel(channel_id)
     if not isinstance(channel, discord.TextChannel):
-        raise RetryableJobError("Canal de avisos de Meta nao encontrado.")
+        raise RetryableJobError("Canal de avisos de Meta não encontrado.")
     member = guild.me
     permissions = channel.permissions_for(member) if member else None
     required = ("view_channel", "send_messages", "read_message_history", "mention_everyone")
     if not permissions or any(not getattr(permissions, value, False) for value in required):
-        raise RetryableJobError("Permissoes insuficientes no canal de avisos de Meta.")
+        raise RetryableJobError("Permissões insuficientes no canal de avisos de Meta.")
     return channel
 
 
@@ -1507,7 +1635,7 @@ async def run_job(bot: discord.Client, api: Any, item: dict[str, Any]) -> dict[s
     guild_id = int(item["guild_id"])
     guild = bot.get_guild(guild_id)
     if guild is None:
-        raise RetryableJobError("Guild da Meta nao esta disponivel no bot.")
+        raise RetryableJobError("Guild da Meta não está disponível no bot.")
     causation_id = str(item.get("correlation_id") or item["id"])
     if item["key"] == "meta.recovery":
         return await api.meta_recovery(guild_id, causation_id)
@@ -1516,7 +1644,7 @@ async def run_job(bot: discord.Client, api: Any, item: dict[str, Any]) -> dict[s
         goal = await api.meta_goal(guild_id, int(payload_data["goal_id"]))
         cycle = goal.get("latest_cycle")
         if cycle is None or int(cycle["id"]) != int(payload_data["cycle_id"]):
-            raise RetryableJobError("Ciclo do aviso encerrado nao foi encontrado.")
+            raise RetryableJobError("Ciclo do aviso encerrado não foi encontrado.")
         await edit_message(
             bot,
             int(payload_data["channel_id"]),
@@ -1540,7 +1668,7 @@ async def run_job(bot: discord.Client, api: Any, item: dict[str, Any]) -> dict[s
     goal_id = int(payload_data["goal_id"])
     settings_data = await api.meta_settings(guild_id)
     if not settings_data.get("notice_channel_id"):
-        raise RetryableJobError("Canal de avisos de Meta ainda nao foi configurado.")
+        raise RetryableJobError("Canal de avisos de Meta ainda não foi configurado.")
     channel = await _channel_for_launch(guild, int(settings_data["notice_channel_id"]))
     if not guild.chunked:
         await guild.chunk(cache=True)

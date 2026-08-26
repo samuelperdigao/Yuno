@@ -22,7 +22,7 @@ def _system_actor(
     bot: discord.Client, guild_id: int, correlation_id: str
 ) -> ActorContext:
     if bot.user is None:
-        raise RuntimeError("Bot ainda nao possui identidade Discord.")
+        raise RuntimeError("Bot ainda não possui identidade Discord.")
     return ActorContext(
         guild_id=guild_id,
         user_id=bot.user.id,
@@ -245,7 +245,7 @@ async def _ensure_global_resources(
             read_message_history=True,
             manage_threads=True,
             attach_files=True,
-            reason="Yuno Tickets V2: permissoes do bot",
+            reason="Yuno Tickets V2: permissões do bot",
         )
     for role_id in config.get("administrator_role_ids") or []:
         role = guild.get_role(int(role_id))
@@ -568,7 +568,7 @@ async def _provision_ticket(
             )
     await channel.edit(
         overwrites=overwrites,
-        reason="Yuno Tickets V2: reconciliacao de permissoes publicadas",
+        reason="Yuno Tickets V2: reconciliação de permissões publicadas",
     )
     await _record_binding(
         api,
@@ -680,7 +680,7 @@ async def _cleanup_ticket_resources(
 async def run_job(bot: discord.Client, platform_api: Any, item: dict[str, Any]) -> dict:
     guild = bot.get_guild(int(item["guild_id"]))
     if guild is None:
-        raise RuntimeError("Guild indisponivel para Tickets de Farm.")
+        raise RuntimeError("Guild indisponível para Tickets de Farm.")
     api = FarmTicketsAPI(platform_api)
     actor = _system_actor(bot, guild.id, str(item["correlation_id"]))
     payload = item.get("payload") or {}
@@ -717,7 +717,7 @@ async def run_job(bot: discord.Client, platform_api: Any, item: dict[str, Any]) 
                 )
             if not last.get("has_more"):
                 return last
-        raise RetryableJobError("Journal Meta possui mais paginas.")
+        raise RetryableJobError("Journal Meta possui mais páginas.")
     if key == "farm_tickets.storage.cleanup":
         result = await api.cleanup_storage(
             guild.id,
@@ -801,12 +801,12 @@ async def deliver_proof_copy(bot: discord.Client, item: dict[str, Any]) -> str |
         None,
     )
     if proof is None or not proof.get("url"):
-        raise RuntimeError("Comprovante ou URL pre-assinada indisponivel.")
+        raise RuntimeError("Comprovante ou URL pre-assinada indisponível.")
     destination = bot.get_channel(int(item["destination_id"]))
     if destination is None:
         destination = await bot.fetch_channel(int(item["destination_id"]))
     if not isinstance(destination, discord.Thread):
-        raise RuntimeError("Destino da copia nao e uma thread.")
+        raise RuntimeError("Destino da copia não e uma thread.")
     temp_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -848,13 +848,13 @@ async def deliver_log(bot: discord.Client, item: dict[str, Any]) -> str | None:
     guild_id = int(item["guild_id"])
     guild = bot.get_guild(guild_id)
     if guild is None:
-        raise RuntimeError("Guild indisponivel para log de Tickets.")
+        raise RuntimeError("Guild indisponível para log de Tickets.")
     ticket = await api.ticket(guild_id, str(item["payload"]["ticket_id"]))
     channel = bot.get_channel(int(item["destination_id"]))
     if channel is None:
         channel = await bot.fetch_channel(int(item["destination_id"]))
     if not isinstance(channel, discord.TextChannel):
-        raise RuntimeError("Canal de log de Tickets indisponivel.")
+        raise RuntimeError("Canal de log de Tickets indisponível.")
     actor = _system_actor(bot, guild_id, str(item["correlation_id"]))
     message, _ = await _sync_ticket_log(api, guild, channel, ticket, actor)
     return str(message.id)
@@ -865,7 +865,7 @@ async def deliver_event(bot: discord.Client, item: dict[str, Any]) -> str | None
     if destination is None:
         destination = await bot.fetch_channel(int(item["destination_id"]))
     if not isinstance(destination, discord.Thread):
-        raise RuntimeError("Destino de evento nao e uma thread de log.")
+        raise RuntimeError("Destino de evento não e uma thread de log.")
     payload = item.get("payload") or {}
     detail = json.dumps(
         payload.get("event_payload") or {}, ensure_ascii=False, sort_keys=True
@@ -886,7 +886,7 @@ async def deliver_event(bot: discord.Client, item: dict[str, Any]) -> str | None
 async def deliver_panel(bot: discord.Client, item: dict[str, Any]) -> str | None:
     guild = bot.get_guild(int(item["guild_id"]))
     if guild is None:
-        raise RuntimeError("Guild indisponivel para painel de Tickets.")
+        raise RuntimeError("Guild indisponível para painel de Tickets.")
     actor = _system_actor(bot, guild.id, str(item["correlation_id"]))
     if item["resource_type"] == "farm_ticket":
         result = await _provision_ticket(

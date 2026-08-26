@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT / "bot"))
 
 from yuno_bot.domain_modules.meta import MODULE_UI
 from yuno_bot.domain_modules.meta import ui
+from yuno_bot.platform import ui_kit as uk
 from yuno_bot.platform.components_v2 import (
     meta_notice_payload,
     payload,
@@ -58,7 +59,7 @@ def test_persistent_meta_page_has_create_settings_and_paginated_select() -> None
         for option in component.get("options", [])
         if component.get("custom_id") == "yuno:central:v1:meta:select_goal"
     ]
-    assert labels == ["Criar Meta", "Configuracoes"]
+    assert labels == ["Criar Meta", "Configurações"]
     assert {item["value"] for item in options} == {"goal:1", "page:next"}
     assert len(options) <= 25
 
@@ -160,7 +161,9 @@ def test_closed_notice_preserves_visual_content_and_hides_internal_reference() -
     }
     active = ui._notice_payload(goal, cycle, ended=False)
     ended = ui._notice_payload(goal, cycle, ended=True)
-    assert active["components"][0]["accent_color"] == ended["components"][0]["accent_color"]
+    # A cor acompanha o estado: amarelo enquanto o ciclo corre, azul quando encerra.
+    assert active["components"][0]["accent_color"] == uk.BRAND
+    assert ended["components"][0]["accent_color"] == uk.accent_for(uk.State.DONE)
     assert active["components"][0]["id"] == ended["components"][0]["id"] == 17
     assert "meta:1:1" not in str(active)
     assert "meta:1:1" not in str(ended)

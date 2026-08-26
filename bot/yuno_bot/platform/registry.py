@@ -71,7 +71,7 @@ class UIRegistry:
             if not isinstance(adapter, ModuleUIAdapter):
                 raise TypeError(f"{imported.__name__}.MODULE_UI deve ser ModuleUIAdapter.")
             if adapter.module_key != info.name:
-                raise ValueError("A pasta do adapter UI deve ter a mesma chave do modulo.")
+                raise ValueError("A pasta do adapter UI deve ter a mesma chave do módulo.")
             if not adapter.released:
                 continue
             if self.get(adapter.module_key) is adapter:

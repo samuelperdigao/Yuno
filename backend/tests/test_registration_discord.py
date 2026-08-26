@@ -222,12 +222,12 @@ def test_registration_log_renderer_builds_commercial_approved_and_rejected_embed
     assert approved["timestamp"].startswith("2026-08-22T12:05:00")
     assert approved["footer"]["text"] == "Yuno • Organização"
     assert approved_fields == {
-        "Membro": "<@10>",
-        "Nome informado": "Ana Silva",
-        "ID informado": "`001`",
-        "Aprovado por": "<@20>",
-        "Cargo aplicado": "<@&30>",
-        "Apelido aplicado": "Ana Silva \\| 001",
+        "👤 Membro": "<@10>",
+        "📛 Nome informado": "Ana Silva",
+        "🎮 ID informado": "`001`",
+        "👮 Aprovado por": "<@20>",
+        "🎭 Cargo aplicado": "<@&30>",
+        "🏷️ Apelido aplicado": "Ana Silva \\| 001",
     }
 
     rejected_data = RegistrationLogData.from_payload(
@@ -248,9 +248,9 @@ def test_registration_log_renderer_builds_commercial_approved_and_rejected_embed
     assert rejected["color"] == REJECTED_COLOR
     assert rejected["timestamp"].endswith("+00:00")
     assert "thumbnail" not in rejected
-    assert rejected_fields["Rejeitado por"] == "<@21>"
-    assert rejected_fields["Nome informado"] != "**Bia**"
-    assert rejected_fields["Motivo"] != "**Dados divergentes** @everyone"
+    assert rejected_fields["👮 Rejeitado por"] == "<@21>"
+    assert rejected_fields["📛 Nome informado"] != "**Bia**"
+    assert rejected_fields["📄 Motivo"] != "**Dados divergentes** @everyone"
 
 
 def test_registration_log_renderer_accepts_legacy_payload_without_exposing_uuid() -> None:

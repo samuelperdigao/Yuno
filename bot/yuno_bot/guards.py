@@ -28,10 +28,10 @@ async def ensure_allowed(interaction: discord.Interaction, api: YunoAPI, module:
         )
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 403:
-            return False, "Servidor sem licenca ativa."
-        return False, "Nao consegui validar a permissao deste comando."
+            return False, "Servidor sem licença ativa."
+        return False, "Não consegui validar a permissão deste comando."
     except httpx.HTTPError:
-        return False, "A API do Yuno esta temporariamente indisponivel. Tente novamente."
+        return False, "A API do Yuno esta temporariamente indisponível. Tente novamente."
 
 
 async def deny(interaction: discord.Interaction, reason: str) -> None:

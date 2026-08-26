@@ -10,11 +10,46 @@ import discord
 import httpx
 
 from yuno_bot import dashboard
+from yuno_bot.platform import ui_kit as uk
 from yuno_bot.platform.components_v2 import action_row, button, container, edit_message, payload, separator, text_display
 from yuno_bot.platform.contracts import ActorContext, RetryableJobError
 
 
-COLOR = 0xFFC72C
+COLOR = uk.BRAND
+
+# Ciclo de vida do módulo traduzido para os estados do kit: mesma cor e mesmo
+# emoji que Registro, Metas e Tickets usam para dizer a mesma coisa.
+LIFECYCLE_STATES: dict[str, tuple[uk.State, str]] = {
+    "active": (uk.State.APPROVED, "Ativo"),
+    "paused": (uk.State.RUNNING, "Pausado"),
+    "degraded": (uk.State.FAILED, "Degradado"),
+    "inactive": (uk.State.DISABLED, "Inativo"),
+}
+
+
+def _lifecycle(value: Any) -> tuple[uk.State, str]:
+    return LIFECYCLE_STATES.get(str(value or ""), (uk.State.PENDING, "Indisponível"))
+
+
+# O status do run vem do backend em inglês. Ele não pode chegar cru na tela do
+# cliente — "succeeded" não é português e não explica nada.
+RUN_STATES: dict[str, tuple[uk.State, str]] = {
+    "pending": (uk.State.PENDING, "Na fila"),
+    "planning": (uk.State.RUNNING, "Planejando"),
+    "running": (uk.State.RUNNING, "Aplicando"),
+    "succeeded": (uk.State.APPROVED, "Concluída"),
+    "partial": (uk.State.RUNNING, "Concluída com pendências"),
+    "failed": (uk.State.FAILED, "Falhou"),
+    "cancelled": (uk.State.CLOSED, "Cancelada"),
+    "superseded": (uk.State.CLOSED, "Substituída"),
+}
+
+
+def _run_badge(status: Any) -> str:
+    state, label = RUN_STATES.get(
+        str(status or "").strip().casefold(), (uk.State.PENDING, str(status or "—"))
+    )
+    return uk.badge(state, label)
 log = logging.getLogger("yuno.tags")
 _pages: dict[tuple[int, int], int] = {}
 
@@ -39,7 +74,7 @@ def actor_from(interaction: discord.Interaction) -> ActorContext:
 
 def system_actor(bot: discord.Client, guild_id: int, correlation_id: str) -> ActorContext:
     if bot.user is None:
-        raise RuntimeError("Identidade do bot indisponivel.")
+        raise RuntimeError("Identidade do bot indisponível.")
     return ActorContext(
         guild_id=guild_id,
         user_id=bot.user.id,
@@ -63,7 +98,7 @@ def _error_text(exc: Exception) -> str:
                 return str(detail)
         except Exception:
             pass
-    return "Nao foi possivel concluir a acao de Tags. Reabra o modulo e tente novamente."
+    return "Não foi possível concluir a ação de Tags. Reabra o módulo e tente novamente."
 
 
 async def _reply(interaction: discord.Interaction, message: str) -> None:
@@ -85,7 +120,7 @@ async def _replace(
     target_channel = channel_id or interaction.channel_id
     target_message = message_id or getattr(interaction.message, "id", None)
     if target_channel is None or target_message is None:
-        raise RuntimeError("Referencia da Central indisponivel.")
+        raise RuntimeError("Referência da Central indisponível.")
     await edit_message(interaction.client, target_channel, target_message, data)
 
 
@@ -115,37 +150,58 @@ def _overview_payload(
     highest_role: str,
     missing_roles: int,
 ) -> dict:
-    lifecycle = instance["lifecycle"]
+    state, state_label = _lifecycle(instance["lifecycle"])
     published = int(draft["base_published_version"] or 0)
-    status = {
-        "active": "🟢 Ativo",
-        "paused": "🟡 Pausado",
-        "degraded": "🔴 Degradado",
-        "inactive": "⚪ Inativo",
-    }.get(lifecycle, "⚪ Indisponível")
     last_run = diagnostics.get("last_run") or {}
     run_text = (
-        f"{last_run.get('status')} · {last_run.get('planned_items', 0)}/{last_run.get('total_items', 0)}"
+        f"{_run_badge(last_run.get('status'))} · "
+        f"{last_run.get('planned_items', 0)}/{last_run.get('total_items', 0)} planejados"
         if last_run
         else "Nenhuma sincronização executada"
     )
     return payload(
-        container(
-            dashboard.module_navigation("tags"),
-            separator(),
-            text_display("# 🏷️ Sistema de Tags\n\nEscolhe uma Tag pela hierarquia atual dos cargos e mantém o apelido do membro reconciliado."),
-            separator(),
-            text_display(
-                f"### Status\n**{status}** · versão publicada **{published or 'nenhuma'}**\n"
-                f"Rascunho: **{len(draft['bindings'])} vínculo(s)** · revisão **{draft['revision']}**\n"
-                f"Cargo configurado mais alto: **{highest_role}** · ausentes: **{missing_roles}**\n"
-                f"Último run: **{run_text}**"
-            ),
-            action_row(
-                button(custom_id=dashboard.central_custom_id("tags", "open_system"), label="Configurar vínculos", emoji="⚙️", style=2),
-                button(custom_id=dashboard.central_custom_id("tags", "preview"), label="Pré-visualizar", emoji="👁️", style=2),
-            ),
-            accent_color=COLOR,
+        uk.panel(
+            header=[
+                dashboard.module_navigation("tags"),
+                uk.space(),
+                uk.heading("Sistema de Tags", emoji="🏷️")
+                + "\n\nEscolhe uma Tag pela hierarquia atual dos cargos e mantém o "
+                "apelido do membro reconciliado.",
+            ],
+            blocks=[
+                "\n\n".join(
+                    (
+                        uk.field(
+                            "Status",
+                            uk.badge(state, state_label, bold=True)
+                            + " · "
+                            + uk.inline_fields(
+                                ("Versão publicada", published or "nenhuma"),
+                                ("Revisão do rascunho", draft["revision"]),
+                            ),
+                            emoji="📌",
+                        ),
+                        uk.field(
+                            "Vínculos",
+                            uk.inline_fields(
+                                ("No rascunho", len(draft["bindings"])),
+                                ("Cargo mais alto", highest_role),
+                                ("Ausentes", missing_roles),
+                            ),
+                            emoji="🔗",
+                        ),
+                        uk.field("Última sincronização", run_text, emoji="🔄"),
+                    )
+                )
+            ],
+            actions=[
+                action_row(
+                    button(custom_id=dashboard.central_custom_id("tags", "open_system"), label="Configurar vínculos", emoji="⚙️", style=2),
+                    button(custom_id=dashboard.central_custom_id("tags", "preview"), label="Pré-visualizar", emoji="👁️", style=2),
+                )
+            ],
+            footer="A Tag entra no apelido só depois de você confirmar a aplicação.",
+            state=state,
         )
     )
 
@@ -159,18 +215,14 @@ def _detail_payload(
     current_page: int,
     max_page: int,
 ) -> dict:
-    status = {
-        "active": "🟢 ativo",
-        "paused": "🟡 pausado",
-        "degraded": "🔴 com problema",
-        "inactive": "⚪ inativo",
-    }.get(lifecycle, "⚪ indisponível")
+    state, state_label = _lifecycle(lifecycle)
     processed = sum(
         int(last_run.get(key, 0) or 0)
         for key in ("succeeded_items", "skipped_items", "blocked_items", "failed_items")
     )
     run_text = (
-        f"{last_run.get('status')} · {processed}/{int(last_run.get('total_items', 0) or 0)} processados"
+        f"{_run_badge(last_run.get('status'))} · "
+        f"{processed}/{int(last_run.get('total_items', 0) or 0)} processados"
         if last_run
         else "nenhuma aplicação executada"
     )
@@ -178,12 +230,28 @@ def _detail_payload(
         dashboard.module_navigation("tags"),
         separator(),
         text_display(
-            "# 🏷️ Sistema de Tags\n\n"
-            "As alterações ficam salvas aqui e só mudam os apelidos quando você confirma.\n\n"
-            f"### Vínculos para confirmar · página {current_page + 1}/{max_page + 1}\n"
+            uk.heading("Sistema de Tags", emoji="🏷️")
+            + "\n\nAs alterações ficam salvas aqui e só mudam os apelidos quando você confirma."
+        ),
+        separator(),
+        text_display(
+            uk.section_number(1, "Vínculos para confirmar", emoji="🔗")
+            + f"\n{uk.subtext(f'Página {current_page + 1} de {max_page + 1}')}\n\n"
             + "\n".join(lines)
-            + f"\n\nSistema **{status}** · publicação **{draft['base_published_version'] or 'nenhuma'}**"
-            + f"\nÚltima aplicação: **{run_text}**"
+        ),
+        separator(),
+        text_display(
+            uk.field(
+                "Estado do sistema",
+                uk.badge(state, state_label, bold=True)
+                + " · "
+                + uk.inline_fields(
+                    ("Publicação", draft["base_published_version"] or "nenhuma"),
+                ),
+                emoji="📌",
+            )
+            + "\n\n"
+            + uk.field("Última aplicação", run_text, emoji="🔄")
         ),
         action_row(
             button(custom_id=dashboard.central_custom_id("tags", "add_binding"), label="Adicionar vínculo", emoji="➕", style=1),
@@ -209,7 +277,17 @@ def _detail_payload(
             ),
         ]
     )
-    return payload(container(*components, accent_color=COLOR))
+    components.extend(
+        (
+            separator(spacing=1, divider=False),
+            text_display(
+                uk.subtext(
+                    "Nenhum apelido muda antes de você clicar em Confirmar e aplicar."
+                )
+            ),
+        )
+    )
+    return payload(container(*components, accent_color=uk.accent_for(state)))
 
 
 async def render_admin(interaction: discord.Interaction, api: Any) -> None:
@@ -254,8 +332,12 @@ async def _render_detail(
     lines = []
     for item, role in rows:
         role_text = role.mention if role else f"⚠️ Cargo ausente ({item['discord_role_id']})"
-        state = "ativo" if item["enabled"] else "inativo"
-        lines.append(f"{role_text} → `{item['tag']}` · {state}")
+        binding_state = (
+            uk.badge(uk.State.APPROVED, "ativo")
+            if item["enabled"]
+            else uk.badge(uk.State.DISABLED, "inativo")
+        )
+        lines.append(f"{role_text} → `{item['tag']}` · {binding_state}")
     if not lines:
         lines.append("_Nenhum vínculo no rascunho._")
     await _replace(
@@ -276,6 +358,7 @@ async def _render_detail(
 async def _render_advanced(interaction: discord.Interaction, api: Any) -> None:
     instance, draft, diagnostics_data = await _state(api, interaction.guild_id)
     lifecycle = instance["lifecycle"]
+    state, state_label = _lifecycle(lifecycle)
     last_run = diagnostics_data.get("last_run") or {}
     toggle_label = "Desativar sistema" if lifecycle == "active" else "Ativar sistema"
     await _replace(
@@ -285,10 +368,17 @@ async def _render_advanced(interaction: discord.Interaction, api: Any) -> None:
                 dashboard.module_navigation("tags"),
                 separator(),
                 text_display(
-                    "# ⚙️ Opções avançadas\n\n"
-                    f"Sistema: **{lifecycle}**\n"
-                    f"Última execução: **{last_run.get('status', 'nenhuma')}**\n\n"
-                    "Use estas ações apenas para operação e diagnóstico."
+                    uk.heading("Opções avançadas", emoji="⚙️")
+                    + "\n\n"
+                    + uk.field("Sistema", uk.badge(state, state_label, bold=True), emoji="📌")
+                    + "\n\n"
+                    + uk.field(
+                        "Última execução",
+                        last_run.get("status", "nenhuma"),
+                        emoji="🔄",
+                    )
+                    + "\n\n"
+                    + uk.subtext("Use estas ações apenas para operação e diagnóstico.")
                 ),
                 action_row(
                     button(custom_id=dashboard.central_custom_id("tags", "toggle_lifecycle"), label=toggle_label, style=2, disabled=not draft["base_published_version"]),
@@ -300,7 +390,7 @@ async def _render_advanced(interaction: discord.Interaction, api: Any) -> None:
                     button(custom_id=dashboard.central_custom_id("tags", "diagnose_member"), label="Diagnosticar membro", style=2),
                     button(custom_id=dashboard.central_custom_id("tags", "open_system"), label="Voltar aos vínculos", emoji="↩️", style=2),
                 ),
-                accent_color=COLOR,
+                accent_color=uk.accent_for(state),
             )
         ),
     )
@@ -718,16 +808,20 @@ async def cleanup(interaction: discord.Interaction, api: Any) -> None:
                 dashboard.module_navigation("tags"),
                 separator(),
                 text_display(
-                    "# 🧹 Limpar todas as Tags\n\n"
-                    "Isso remove as Tags dos apelidos de todos os membros registrados. "
-                    "Os vínculos continuarão salvos, mas o sistema ficará inativo ao terminar para não recolocá-las.\n\n"
-                    "Para usar as Tags novamente, basta clicar em **Confirmar e aplicar**."
+                    uk.heading("Limpar todas as Tags", emoji="🧹")
+                    + "\n\n"
+                    + uk.empty_state(
+                        "Esta ação altera o apelido de todos os membros registrados",
+                        "Os vínculos continuam salvos, mas o sistema fica inativo ao "
+                        "terminar para não recolocar as Tags.",
+                    )
+                    + "\n\nPara usar as Tags novamente, basta clicar em **Confirmar e aplicar**."
                 ),
                 action_row(
                     button(custom_id=dashboard.central_custom_id("tags", "confirm_cleanup"), label="Sim, limpar todas", emoji="🧹", style=4),
                     button(custom_id=dashboard.central_custom_id("tags", "open_system"), label="Cancelar", style=2),
                 ),
-                accent_color=0xD83C3E,
+                accent_color=uk.DANGER,
             )
         ),
     )
@@ -855,7 +949,7 @@ async def run_job(bot: discord.Client, api: Any, item: dict) -> dict:
     user_id = int(data["discord_user_id"])
     guild = bot.get_guild(guild_id)
     if guild is None:
-        raise RetryableJobError("Guild indisponivel no cache do bot.", retry_at=datetime.now(timezone.utc) + timedelta(seconds=60))
+        raise RetryableJobError("Guild indisponível no cache do bot.", retry_at=datetime.now(timezone.utc) + timedelta(seconds=60))
     try:
         member = guild.get_member(user_id) or await guild.fetch_member(user_id)
     except discord.NotFound:
@@ -906,7 +1000,7 @@ async def run_job(bot: discord.Client, api: Any, item: dict) -> dict:
     except discord.Forbidden:
         await api.tags_fail(
             guild_id,
-            {**common, "error_code": "discord_forbidden", "error_detail": "Discord recusou a edicao.", "retryable": False},
+            {**common, "error_code": "discord_forbidden", "error_detail": "Discord recusou a edição.", "retryable": False},
             actor=actor,
         )
         log.warning("member_sync_blocked guild_id=%s user_id=%s code=discord_forbidden", guild_id, user_id)

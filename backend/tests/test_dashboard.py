@@ -4,25 +4,92 @@ import pytest
 from yuno_bot import dashboard
 from yuno_bot.domain_modules.tags import ui as tags_ui
 from yuno_bot.modules import discover_modules
+from yuno_bot.platform import ui_kit as uk
+
+SECTION = 9
+
+ACTIVE_STATES = {
+    "registration": {"lifecycle": "active", "published_config_version_id": "7"},
+    "tags": {"lifecycle": "active"},
+    "farm_tickets": {"lifecycle": "inactive", "published_config_version_id": "3"},
+    "meta": {"lifecycle": "inactive"},
+}
 
 
 def _text_content(payload: dict) -> str:
     return payload["components"][0]["components"][0]["content"]
 
 
-def test_central_uses_a_module_selector_with_stable_custom_id() -> None:
+def _rows(payload: dict) -> dict[str, dict]:
+    """Linhas da Central indexadas pelo módulo que o botão abre."""
+
+    return {
+        item["accessory"]["custom_id"].split(":")[-2]: item
+        for item in payload["components"][0]["components"]
+        if item["type"] == SECTION
+    }
+
+
+def _row_text(row: dict) -> str:
+    return row["components"][0]["content"]
+
+
+def test_central_lists_one_row_per_module_with_a_stable_open_button() -> None:
     payload = dashboard.build_payload({})
-    content = _text_content(payload)
-    select = payload["components"][0]["components"][1]["components"][0]
-    options = {item["value"]: item["label"] for item in select["options"]}
+    rows = _rows(payload)
+    specs = dashboard.dashboard_specs()
 
-    for spec in dashboard.dashboard_specs().values():
-        assert options[spec.key] == spec.nome
+    assert list(rows) == list(specs)
+    for key, spec in specs.items():
+        assert spec.nome in _row_text(rows[key])
+        assert spec.descricao in _row_text(rows[key])
+        assert rows[key]["accessory"]["custom_id"] == f"yuno:central:v1:{key}:open"
 
-    assert select["custom_id"] == "yuno:central:v1:core:select_module"
     assert payload["allowed_mentions"] == {"parse": [], "replied_user": False}
-    assert "Selecione um modulo" in content
-    assert "set" not in options
+    assert "Selecione um módulo" in _text_content(payload)
+    assert "set" not in rows
+
+
+def test_central_row_translates_lifecycle_into_status_and_next_step() -> None:
+    payload = dashboard.build_payload({}, control_states=ACTIVE_STATES)
+    rows = _rows(payload)
+    labels = {key: row["accessory"]["label"] for key, row in rows.items()}
+    styles = {key: row["accessory"]["style"] for key, row in rows.items()}
+
+    assert "No ar" in _row_text(rows["registration"])
+    assert labels["registration"] == "Gerenciar"
+    assert styles["registration"] == 2
+
+    # `active` sem configuração publicada é rascunho, não módulo no ar.
+    assert "Aguardando publicação" in _row_text(rows["tags"])
+    assert labels["tags"] == "Revisar e publicar"
+    assert styles["tags"] == 1
+
+    assert "Desligado" in _row_text(rows["farm_tickets"])
+    assert labels["farm_tickets"] == "Reativar"
+    assert "Não configurado" in _row_text(rows["meta"])
+    assert labels["meta"] == "Configurar"
+
+    assert "**No ar** 1" in _text_content(payload)
+
+
+def test_central_row_announces_the_plan_a_module_requires() -> None:
+    rows = _rows(dashboard.build_payload({}, control_states=ACTIVE_STATES))
+
+    assert "Requer o plano Pro" in _row_text(rows["farm_tickets"])
+    assert "Requer o plano" not in _row_text(rows["registration"])
+
+
+def test_inactive_license_keeps_the_list_readable_and_blocks_every_button() -> None:
+    payload = dashboard.build_payload(
+        {}, control_states=ACTIVE_STATES, license_active=False
+    )
+    rows = _rows(payload)
+
+    assert payload["components"][0]["accent_color"] == uk.DANGER
+    assert "Licença inativa" in _text_content(payload)
+    assert list(rows) == list(dashboard.dashboard_specs())
+    assert all(row["accessory"]["disabled"] for row in rows.values())
 
 
 def test_legacy_catalog_has_no_runtime_implementation() -> None:
@@ -47,11 +114,26 @@ def test_module_navigation_switches_between_released_modules() -> None:
     options = {item["value"]: item for item in select["options"]}
 
     assert select["custom_id"] == "yuno:central:v1:core:select_module"
-    assert select["placeholder"] == "Trocar de modulo"
+    assert select["placeholder"] == "Trocar de módulo"
     assert options["registration"]["default"] is True
     assert options["tags"]["default"] is False
     assert options["meta"]["default"] is False
-    assert set(options) == {"registration", "tags", "farm_tickets", "meta"}
+    assert set(options) == {
+        dashboard.CENTRAL_HOME_VALUE,
+        "registration",
+        "tags",
+        "farm_tickets",
+        "meta",
+    }
+
+
+def test_module_navigation_opens_with_the_way_back_to_the_central() -> None:
+    options = dashboard.module_navigation("tags")["components"][0]["options"]
+
+    # Primeira opção: a página do módulo substitui a mensagem da Central, então
+    # sem esta entrada só se sai de um módulo entrando em outro.
+    assert options[0]["value"] == dashboard.CENTRAL_HOME_VALUE
+    assert options[0]["default"] is False
 
 
 def test_tags_primary_screen_keeps_only_the_simple_daily_flow() -> None:
@@ -228,8 +310,7 @@ async def test_startup_refresh_updates_only_the_registered_central(monkeypatch) 
 
     assert refreshed is True
     assert edited[0][1:3] == (10, 20)
-    options = edited[0][3]["components"][0]["components"][1]["components"][0]["options"]
-    assert {item["value"] for item in options} == {
+    assert set(_rows(edited[0][3])) == {
         "registration", "tags", "farm_tickets", "meta"
     }
 
@@ -284,6 +365,72 @@ async def test_raw_v2_module_select_is_acknowledged_before_dispatch(monkeypatch)
 
     assert handled is True
     assert called == ["registration"]
+
+
+@pytest.mark.asyncio
+async def test_open_button_routes_to_the_module_page(monkeypatch) -> None:
+    interaction = _FakeInteraction("yuno:central:v1:meta:open", component_type=2)
+    called = []
+
+    async def dispatch_page(current, module_key):
+        # Botão não é seleção: quem defere é a própria página do módulo.
+        assert not current.response.is_done()
+        called.append(module_key)
+
+    monkeypatch.setattr(dashboard, "_dispatch_page", dispatch_page)
+
+    assert await dashboard.dispatch_components_v2(interaction) is True
+    assert called == ["meta"]
+
+
+@pytest.mark.asyncio
+async def test_module_keeps_its_own_open_action_when_it_declares_one(monkeypatch) -> None:
+    interaction = _FakeInteraction("yuno:central:v1:meta:open", component_type=2)
+    handled = []
+
+    monkeypatch.setattr(
+        dashboard.ui_registry,
+        "admin_action",
+        lambda module_key, action_key: SimpleNamespace(key=action_key),
+    )
+
+    async def dispatch_action(current, module_key, action_key):
+        handled.append((module_key, action_key))
+
+    monkeypatch.setattr(dashboard, "_dispatch_action", dispatch_action)
+
+    assert await dashboard.dispatch_components_v2(interaction) is True
+    assert handled == [("meta", "open")]
+
+
+@pytest.mark.asyncio
+async def test_navigation_home_rewrites_the_central_message(monkeypatch) -> None:
+    edited = []
+
+    async def central_config(current):
+        return {"settings": {}}
+
+    async def states(api, guild_id, actor_id, *, platform_api=None):
+        return {"meta": {"lifecycle": "active", "published_config_version_id": "1"}}
+
+    async def edit(bot, channel_id, message_id, data):
+        edited.append((channel_id, message_id, data))
+
+    monkeypatch.setattr(dashboard, "_central_config", central_config)
+    monkeypatch.setattr(dashboard, "fetch_control_states", states)
+    monkeypatch.setattr(dashboard, "_edit_v2", edit)
+
+    interaction = SimpleNamespace(
+        client=SimpleNamespace(api=object(), platform_api=object()),
+        channel_id=10,
+        guild_id=100,
+        message=SimpleNamespace(id=20),
+        user=SimpleNamespace(id=900),
+    )
+    await dashboard._dispatch_page(interaction, dashboard.CENTRAL_HOME_VALUE)
+
+    assert edited[0][:2] == (10, 20)
+    assert "No ar" in _row_text(_rows(edited[0][2])["meta"])
 
 
 @pytest.mark.asyncio

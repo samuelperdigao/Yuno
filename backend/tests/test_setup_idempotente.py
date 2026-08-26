@@ -220,7 +220,7 @@ def test_diagnostico_sem_licenca_nunca_esta_pronto():
 
     assert not relatorio.pronto
     embed = diagnostics.diagnostic_embed(relatorio, guild.name)
-    assert "licenca" in embed.title.lower()
+    assert "licença" in embed.title.lower()
 
 
 def test_diagnostico_aponta_canal_apagado():

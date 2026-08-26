@@ -24,15 +24,32 @@ from yuno_bot.platform.contracts import (
     RoutedContext,
 )
 from yuno_bot.platform.router import RoutedModal, module_custom_id
+from yuno_bot.platform import ui_kit as uk
 
 _PROOF_PAGES: dict[tuple[int, int | None, str], int] = {}
 
 
 MODULE_KEY = "farm_tickets"
 CONTRACT_VERSION = 2
-ACCENT_COLOR = 0xFFC72C
+ACCENT_COLOR = uk.BRAND
 ITEMS_PER_MODAL = 5
 PROOFS_PER_PAGE = 10
+
+# O vocabulário do domínio traduzido para os estados do kit: é daqui que saem a
+# cor do container e o emoji do selo, do mesmo jeito nos três módulos.
+TICKET_STATES: dict[str, tuple[uk.State, str]] = {
+    "IN_PROGRESS": (uk.State.RUNNING, "Em andamento"),
+    "APPROVED": (uk.State.APPROVED, "Aprovado"),
+    "FINALIZED_INCOMPLETE": (uk.State.FAILED, "Finalizado incompleto"),
+    "CLOSED_MANUALLY": (uk.State.CLOSED, "Encerrado manualmente"),
+}
+
+#: Rodapé do painel público. Descreve a regra de permissão que o próprio
+#: módulo publica (`admin.build_grants`), sem citar cargo, prazo ou guild.
+GLOBAL_PANEL_FOOTER = (
+    "Abrir o próprio ticket é liberado para todos os membros. "
+    "As demais ações são restritas aos cargos administradores."
+)
 
 GLOBAL_ACTIONS = (
     ("open_ticket", "Abrir Ticket", "🎫", 3),
@@ -64,24 +81,14 @@ def _safe_text(value: Any, *, fallback: str = "Não informado") -> str:
     return text[:500] if text else fallback
 
 
-def _discord_timestamp(value: Any) -> str:
-    parsed = discord.utils.parse_time(str(value or ""))
-    return f"<t:{int(parsed.timestamp())}:f>" if parsed is not None else "Não informado"
+def _discord_timestamp(value: Any, style: str = "f") -> str:
+    return uk.timestamp(value, style)
 
 
-def _chunk_lines(lines: Sequence[str], *, limit: int = 3000) -> list[str]:
-    chunks: list[str] = []
-    current = ""
-    for line in lines:
-        candidate = f"{current}\n\n{line}" if current else line
-        if current and len(candidate) > limit:
-            chunks.append(current)
-            current = line
-        else:
-            current = candidate
-    if current:
-        chunks.append(current)
-    return chunks
+def _chunk_lines(lines: Sequence[str], *, limit: int = uk.CHUNK_LIMIT) -> list[str]:
+    """Mesma regra de corte do kit — um único teto de 4000 por `text_display`."""
+
+    return uk.chunk_lines(lines, limit=limit)
 
 
 def _action_button(
@@ -102,6 +109,31 @@ def _action_button(
     )
 
 
+def _instruction_steps(value: Any) -> str:
+    """Instruções configuradas na Central viram onboarding numerado.
+
+    Aceita lista de textos, lista de pares título/corpo ou um texto com uma
+    instrução por linha. Sem instrução configurada não inventa nenhuma — o
+    conteúdo é do cliente, o formato é do kit.
+    """
+
+    if not value:
+        return ""
+    if isinstance(value, str):
+        items: list[Any] = [line for line in value.splitlines() if line.strip()]
+    else:
+        items = list(value)
+    entries: list[Any] = []
+    for item in items:
+        if isinstance(item, dict):
+            entries.append((item.get("title") or item.get("label"), item.get("body") or ""))
+        elif isinstance(item, (list, tuple)):
+            entries.append(item)
+        else:
+            entries.append((str(item), ""))
+    return uk.steps(*entries)
+
+
 async def render_global(context: dict[str, Any]) -> ComponentsV2Payload:
     config = context.get("config") or {}
     title = _safe_text(config.get("panel_title"), fallback="Tickets de Farm")
@@ -117,25 +149,42 @@ async def render_global(context: dict[str, Any]) -> ComponentsV2Payload:
     )
     return ComponentsV2Payload(
         payload(
-            container(
-                text_display(f"# {title}\n\n{description}"),
-                separator(),
-                controls,
+            uk.panel(
+                header=f"{uk.heading(title, emoji='🎫')}\n\n{description}",
+                blocks=[_instruction_steps(config.get("panel_instructions"))],
+                actions=[controls],
+                footer=config.get("panel_footer") or GLOBAL_PANEL_FOOTER,
                 accent_color=ACCENT_COLOR,
             )
         )
     )
 
 
+def _measure(value: Any, unit: Any) -> str:
+    return uk.quantity(value if value is not None else 0, unit, fallback="0")
+
+
+def _ticket_footer(ticket: dict[str, Any], config: dict[str, Any]) -> str:
+    """Regra do sistema no rodapé, sempre derivada do ciclo — nunca prazo literal."""
+
+    configured = str(config.get("panel_footer") or "").strip()
+    if configured:
+        return configured
+    ends_at = uk.timestamp(ticket.get("cycle_ends_at"), "R", fallback="")
+    if not ends_at:
+        return ""
+    return f"Este ticket segue o ciclo da Meta e encerra {ends_at}."
+
+
 async def render_ticket(context: dict[str, Any]) -> ComponentsV2Payload:
     ticket = context.get("ticket") or {}
+    config = context.get("config") or {}
     member_name = _safe_text(
         ticket.get("member_display_name") or ticket.get("member_name"),
         fallback="Membro indisponível",
     )
     status = _safe_text(ticket.get("status"), fallback="Estado indisponível")
     progress = ticket.get("progress_percent", context.get("progress_percent"))
-    progress_text = f"{progress}%" if progress is not None else "Não calculado"
     responsible_id = str(
         ticket.get("assigned_admin_id") or ticket.get("assigned_to") or ""
     )
@@ -144,30 +193,40 @@ async def render_ticket(context: dict[str, Any]) -> ComponentsV2Payload:
         if responsible_id.isascii() and responsible_id.isdigit()
         else "Não atribuído"
     )
-    status_label = {
-        "IN_PROGRESS": "🟡 Em andamento",
-        "APPROVED": "✅ Aprovado",
-        "FINALIZED_INCOMPLETE": "🔴 Finalizado incompleto",
-        "CLOSED_MANUALLY": "⚫ Encerrado manualmente",
-    }.get(status, status)
-    objective_lines: list[str] = []
-    for objective in ticket.get("objectives") or []:
-        suffix = f" {objective.get('unit')}" if objective.get("unit") else ""
-        objective_lines.append(
-            f"**{_safe_text(objective.get('name'))}** — "
-            f"{objective.get('launched', '0')}/{objective.get('target', '0')}{suffix}\n"
-            f"Restante da Meta: {objective.get('remaining_to_goal', '0')}{suffix} · "
-            f"Recolhido: {objective.get('withdrawn', '0')}{suffix} · "
-            f"Saldo: {objective.get('available', '0')}{suffix}"
+    state, state_text = TICKET_STATES.get(status, (None, status))
+    status_label = uk.badge(state, state_text) if state is not None else status
+
+    objective_lines = [
+        uk.objective_row(
+            objective.get("name"),
+            objective.get("launched"),
+            objective.get("target"),
+            unit=objective.get("unit"),
+            remaining=objective.get("remaining_to_goal", 0),
+            remaining_label="Restante da Meta",
+            extra=(
+                f"Recolhido: {_measure(objective.get('withdrawn'), objective.get('unit'))}",
+                f"Saldo: {_measure(objective.get('available'), objective.get('unit'))}",
+            ),
         )
+        for objective in ticket.get("objectives") or []
+    ]
+    objective_chunks = _chunk_lines(
+        objective_lines
+        or [uk.empty_state("Sem objetivo neste ciclo", "A Meta ainda não definiu o que farmar.")]
+    )
     period = (
         f"{_discord_timestamp(ticket.get('cycle_starts_at'))} → "
         f"{_discord_timestamp(ticket.get('cycle_ends_at'))}"
     )
+    ends_in = uk.timestamp(ticket.get("cycle_ends_at"), "R", fallback="")
+    if ends_in:
+        period = f"{period}\nEncerra {ends_in}"
     member_left = (
-        "\n\n⚠️ **Membro saiu do servidor**" if ticket.get("member_left_at") else ""
+        f"\n\n{uk.badge(uk.State.BLOCKED, 'Membro saiu do servidor', bold=True)}"
+        if ticket.get("member_left_at")
+        else ""
     )
-    objective_chunks = _chunk_lines(objective_lines or ["Nenhum objetivo"])
 
     supplied_actions = ticket.get("allowed_actions", context.get("allowed_actions"))
     allowed_actions = set(supplied_actions) if supplied_actions is not None else None
@@ -190,28 +249,55 @@ async def render_ticket(context: dict[str, Any]) -> ComponentsV2Payload:
             )
         )
 
+    identity = "\n\n".join(
+        (
+            uk.field("Membro", f"<@{ticket.get('member_id')}> · {_safe_text(ticket.get('base_nickname'))}", emoji="👤"),
+            uk.field("ID do Jogo", f"`{_safe_text(ticket.get('player_id'))}`", emoji="🎮"),
+        )
+    )
+
     return ComponentsV2Payload(
         payload(
-            container(
-                text_display(
-                    f"# Ticket de Farm · {member_name}\n\n"
-                    f"**Membro**\n<@{ticket.get('member_id')}> · "
-                    f"{_safe_text(ticket.get('base_nickname'))} · "
-                    f"ID `{_safe_text(ticket.get('player_id'))}`\n\n"
-                    f"**Meta e ciclo**\n{_safe_text(ticket.get('goal_name'))}\n{period}\n\n"
-                    f"**Estado**\n{status_label}\n\n"
-                    f"**Progresso geral**\n{progress_text}"
-                ),
-                text_display(f"**Objetivos**\n{objective_chunks[0]}"),
-                *(text_display(chunk) for chunk in objective_chunks[1:]),
-                text_display(
-                    f"**Operação**\nLançamentos: {ticket.get('entry_count', 0)} · "
-                    f"Recolhimentos: {ticket.get('withdrawal_count', 0)}\n\n"
-                    f"**Responsável**\n{responsible}{member_left}"
-                ),
-                separator(),
-                *rows,
-                accent_color=ACCENT_COLOR,
+            uk.panel(
+                header=uk.heading(f"Ticket de Farm · {member_name}", emoji="🎫"),
+                blocks=[
+                    uk.avatar_section(
+                        identity,
+                        avatar_url=context.get("avatar_url"),
+                        description="Foto do membro",
+                    ),
+                    uk.space(),
+                    "\n\n".join(
+                        (
+                            uk.field("Meta e ciclo", _safe_text(ticket.get("goal_name")), emoji="🎯"),
+                            uk.field("Período", period, emoji="📅"),
+                            uk.field("Status", status_label, emoji="📌"),
+                        )
+                    ),
+                    uk.rule(),
+                    uk.progress_block(progress),
+                    uk.space(),
+                    uk.field("Objetivos", objective_chunks[0], emoji="📦"),
+                    *objective_chunks[1:],
+                    uk.rule(),
+                    "\n\n".join(
+                        (
+                            uk.field(
+                                "Operação",
+                                uk.inline_fields(
+                                    ("Lançamentos", ticket.get("entry_count", 0)),
+                                    ("Recolhimentos", ticket.get("withdrawal_count", 0)),
+                                ),
+                                emoji="🧾",
+                            ),
+                            f"{uk.field('Responsável', responsible, emoji='👮')}{member_left}",
+                        )
+                    ),
+                ],
+                actions=rows,
+                footer=_ticket_footer(ticket, config),
+                state=state,
+                accent_color=None if state is not None else ACCENT_COLOR,
             )
         )
     )
@@ -238,12 +324,20 @@ def proof_gallery_payload(
     start = current_page * PROOFS_PER_PAGE
     visible = urls[start : start + PROOFS_PER_PAGE]
     components: list[dict[str, Any]] = [
-        text_display(f"# Comprovantes\n\nPágina {current_page + 1} de {total_pages}")
+        text_display(uk.heading("Comprovantes", emoji="🖼️")),
+        text_display(uk.subtext(f"Página {current_page + 1} de {total_pages}")),
     ]
     if visible:
         components.extend((separator(), media_gallery(visible)))
     else:
-        components.append(text_display("Nenhum comprovante disponível."))
+        components.append(
+            text_display(
+                uk.empty_state(
+                    "Nenhum comprovante disponível",
+                    "Os comprovantes aparecem aqui assim que um lançamento for enviado.",
+                )
+            )
+        )
     if total_pages > 1:
         components.append(
             action_row(
@@ -478,7 +572,7 @@ async def _items_action(
     dispatcher = getattr(module_api(context.api), "farm_tickets_action", None)
     if dispatcher is None:
         return InteractionResult(
-            content="A API de Tickets de Farm nao esta disponivel."
+            content="A API de Tickets de Farm não está disponível."
         )
     values = _modal_values((context.interaction.data or {}).get("components"))
     if values:
@@ -516,7 +610,7 @@ async def _items_action(
                 )
             )
         return InteractionResult(
-            content=str(result.get("message") or "Operacao concluida.")
+            content=str(result.get("message") or "Operação concluída.")
         )
     result = await dispatcher(
         context.actor.guild_id,
@@ -532,7 +626,7 @@ async def _items_action(
     form = result.get("form")
     if not form:
         return InteractionResult(
-            content=str(result.get("message") or "Formulario indisponivel.")
+            content=str(result.get("message") or "Formulário indisponível.")
         )
     return InteractionResult(
         modal=_form_modal(
@@ -590,7 +684,7 @@ class MemberTicketView(discord.ui.View):
                 disabled=self.page == 0,
             )
             following = discord.ui.Button(
-                label="Proxima",
+                label="Próxima",
                 style=discord.ButtonStyle.secondary,
                 disabled=self.page == last_page,
             )
@@ -611,7 +705,7 @@ class MemberTicketView(discord.ui.View):
             },
         )
         await interaction.response.edit_message(
-            content=str(result.get("message") or "Acao concluida."), view=None
+            content=str(result.get("message") or "Ação concluída."), view=None
         )
 
     async def _previous(self, interaction: discord.Interaction) -> None:
@@ -645,13 +739,13 @@ class EntrySelectView(discord.ui.View):
             )
             options.append(
                 discord.SelectOption(
-                    label=f"Lancamento #{entry['number']}",
+                    label=f"Lançamento #{entry['number']}",
                     value=entry["id"],
                     description=(summary or "Sem itens")[:100],
                 )
             )
         select = discord.ui.Select(
-            placeholder="Selecione o lancamento", options=options
+            placeholder="Selecione o lançamento", options=options
         )
         select.callback = self._selected  # type: ignore[method-assign]
         self.select = select
@@ -663,7 +757,7 @@ class EntrySelectView(discord.ui.View):
                 disabled=self.page == 0,
             )
             following = discord.ui.Button(
-                label="Proxima",
+                label="Próxima",
                 style=discord.ButtonStyle.secondary,
                 disabled=self.page == last_page,
             )
@@ -703,7 +797,7 @@ class EntrySelectView(discord.ui.View):
                 action_key="edit_entry",
                 form=result["form"],
                 ticket_revision=int(result["ticket"]["revision"]),
-                title="Editar lancamento",
+                title="Editar lançamento",
             )
         )
 
@@ -732,16 +826,16 @@ async def create_entry(context: RoutedContext) -> InteractionResult:
 
 async def edit_entry(context: RoutedContext) -> InteractionResult:
     if (context.interaction.data or {}).get("components"):
-        return await _items_action(context, "edit_entry", "Editar lancamento")
+        return await _items_action(context, "edit_entry", "Editar lançamento")
     entries = await module_api(context.api).farm_tickets_entries(
         context.actor.guild_id,
         str(context.panel.get("resource_id") or ""),
         editable_only=True,
     )
     if not entries:
-        return InteractionResult(content="Nao existem lancamentos editaveis.")
+        return InteractionResult(content="Não existem lançamentos editáveis.")
     return InteractionResult(
-        content="Selecione o lancamento.", view=EntrySelectView(context, entries)
+        content="Selecione o lançamento.", view=EntrySelectView(context, entries)
     )
 
 
@@ -749,7 +843,7 @@ async def list_proofs(context: RoutedContext) -> InteractionResult:
     dispatcher = getattr(module_api(context.api), "farm_tickets_action", None)
     if dispatcher is None:
         return InteractionResult(
-            content="A API de Tickets de Farm nao esta disponivel."
+            content="A API de Tickets de Farm não está disponível."
         )
     result = await dispatcher(
         context.actor.guild_id,
@@ -781,7 +875,7 @@ async def _proof_page(context: RoutedContext, direction: int) -> InteractionResu
     dispatcher = getattr(module_api(context.api), "farm_tickets_action", None)
     if dispatcher is None:
         return InteractionResult(
-            content="A API de Tickets de Farm nao esta disponivel."
+            content="A API de Tickets de Farm não está disponível."
         )
     result = await dispatcher(
         context.actor.guild_id,

@@ -34,7 +34,7 @@ class PanelPublisher:
         correlation_id = actor.correlation_id
         actor_id = actor.user_id or getattr(self.bot.user, "id", None)
         if actor_id is None:
-            raise RuntimeError("Nao foi possivel identificar o ator da publicacao.")
+            raise RuntimeError("Não foi possível identificar o ator da publicação.")
         panel = await self.api.ensure_panel(
             guild.id,
             module_key,
@@ -50,7 +50,7 @@ class PanelPublisher:
             correlation_id=correlation_id,
         )
         if panel["state"] == "archived":
-            raise RuntimeError("Painel arquivado nao pode ser republicado.")
+            raise RuntimeError("Painel arquivado não pode ser republicado.")
         channel = guild.get_channel(channel_id)
         if channel is None:
             channel = await guild.fetch_channel(channel_id)
@@ -97,7 +97,7 @@ class PanelPublisher:
                 actor,
                 correlation_id,
                 state="missing",
-                last_error="Mensagem do painel nao encontrada.",
+                last_error="Mensagem do painel não encontrada.",
                 verified=True,
             )
         if panel["state"] in {"draft", "missing", "error"}:

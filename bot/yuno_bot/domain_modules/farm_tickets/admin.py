@@ -1,8 +1,11 @@
-"""Configuracao dos Tickets de Farm dentro da Central de Gestao.
+"""Configuração dos Tickets de Farm dentro da Central de Gestão.
 
-O modulo exige configuracao publicada (`LifecyclePolicy(requires_published_configuration=True)`)
-antes de provisionar categoria, canais e painel.  Esta superficie e o unico caminho
-que cria essa publicacao: rascunho -> selecoes -> revisao -> publicacao.
+O módulo exige configuração publicada (`LifecyclePolicy(requires_published_configuration=True)`)
+antes de provisionar categoria, canais e painel.  Esta superfície é o único caminho
+que cria essa publicação: rascunho -> seleções -> revisão -> publicação.
+
+A tipografia (numeração das seções, selos de estado, rodapé `-#`) vem de
+`platform/ui_kit.py`, o mesmo kit usado pelo painel público do módulo.
 """
 
 from __future__ import annotations
@@ -24,10 +27,11 @@ from yuno_bot.platform.components_v2 import (
     separator,
     text_display,
 )
+from yuno_bot.platform import ui_kit as uk
 from yuno_bot.platform.contracts import ActorContext
 
 MODULE_KEY = "farm_tickets"
-COLOR = 0xFFC72C
+COLOR = uk.BRAND
 TEXT_CHANNEL_TYPE = 0
 CATEGORY_CHANNEL_TYPE = 4
 MAX_ADMIN_ROLES = 25
@@ -85,18 +89,18 @@ def actor_from(interaction: discord.Interaction) -> ActorContext:
 def error_text(exc: Exception) -> str:
     if isinstance(exc, httpx.HTTPStatusError):
         try:
-            detail = exc.response.json().get("detail", "Operacao recusada.")
+            detail = exc.response.json().get("detail", "Operação recusada.")
             if isinstance(detail, dict):
                 errors = detail.get("errors")
                 if isinstance(errors, list) and errors:
-                    return "\n- ".join([str(detail.get("detail") or "Operacao recusada."), *map(str, errors)])
+                    return "\n- ".join([str(detail.get("detail") or "Operação recusada."), *map(str, errors)])
                 return str(detail.get("message") or detail.get("detail") or detail)
             return str(detail)
         except Exception:
-            return f"API recusou a operacao ({exc.response.status_code})."
+            return f"A API recusou a operação ({exc.response.status_code})."
     if isinstance(exc, (RuntimeError, ValueError)):
         return str(exc)
-    return "Nao consegui concluir a operacao."
+    return "Não consegui concluir a operação."
 
 
 def _selected_ids(interaction: discord.Interaction) -> list[str]:
@@ -126,7 +130,7 @@ async def _replace_central(
     target_channel = channel_id or interaction.channel_id
     target_message = message_id or getattr(interaction.message, "id", None)
     if target_channel is None or target_message is None:
-        raise RuntimeError("Referencia da Central indisponivel.")
+        raise RuntimeError("Referência da Central indisponível.")
     await edit_message(interaction.client, target_channel, target_message, data)
 
 
@@ -167,64 +171,79 @@ def _missing_fields(config: dict[str, Any]) -> list[str]:
     return [label for key, label in labels.items() if not config.get(key)]
 
 
+UNDEFINED = "⚪ Ainda não definido"
+
+
 def _reference(value: Any, *, kind: str) -> str:
     text = str(value or "").strip()
     if not text:
-        return "⚪ Ainda nao definido"
+        return UNDEFINED
     return f"<#{text}>" if kind == "channel" else f"<@&{text}>"
 
 
 def _role_summary(config: dict[str, Any]) -> str:
     roles = list(config.get("administrator_role_ids") or [])
     if not roles:
-        return "⚪ Ainda nao definido"
+        return UNDEFINED
     return ", ".join(f"<@&{role_id}>" for role_id in roles)
 
 
-def _config_lines(config: dict[str, Any]) -> str:
-    return (
-        f"**Categoria principal** — {_reference(config['category_id'], kind='channel')}\n"
-        f"**Canal do painel** — {_reference(config['panel_channel_id'], kind='channel')}\n"
-        f"**Canal de logs** — {_reference(config['log_channel_id'], kind='channel')}\n"
-        f"**Cargos administradores** — {_role_summary(config)}"
-    )
+CONFIG_LINE_ORDER = ("category_id", "panel_channel_id", "log_channel_id", "administrator_role_ids")
+
+
+def _config_lines(config: dict[str, Any], *, keys: tuple[str, ...] = CONFIG_LINE_ORDER) -> str:
+    """Resumo da configuração, opcionalmente só dos campos de uma seção."""
+
+    rendered = {
+        "category_id": f"**📁 Categoria principal** — {_reference(config['category_id'], kind='channel')}",
+        "panel_channel_id": f"**📣 Canal do painel** — {_reference(config['panel_channel_id'], kind='channel')}",
+        "log_channel_id": f"**🗂️ Canal de logs** — {_reference(config['log_channel_id'], kind='channel')}",
+        "administrator_role_ids": f"**👮 Cargos administradores** — {_role_summary(config)}",
+    }
+    return "\n".join(rendered[key] for key in keys)
 
 
 def build_admin_payload(instance: dict, config: dict[str, Any]) -> dict[str, Any]:
     published = int(instance.get("published_config_version_id") is not None)
     is_active = bool(published) and instance.get("lifecycle") == "active"
     if is_active:
-        status = "🟢 **Ativo**"
-        status_detail = "O painel de tickets esta publicado e atendendo os membros."
+        state = uk.State.APPROVED
+        status = uk.badge(state, "Ativo", bold=True)
+        status_detail = "O painel de tickets está publicado e atendendo os membros."
     elif published:
-        status = "🟠 **Publicado, porem inativo**"
-        status_detail = "A configuracao existe, mas o modulo nao esta atendendo."
+        state = uk.State.RUNNING
+        status = uk.badge(state, "Publicado, porém inativo", bold=True)
+        status_detail = "A configuração existe, mas o módulo não está atendendo."
     else:
-        status = "⚪ **Ainda nao publicado**"
+        state = uk.State.PENDING
+        status = uk.badge(state, "Ainda não publicado", bold=True)
         status_detail = (
-            "Enquanto nao houver publicacao, nenhuma categoria, canal ou painel e criado."
+            "Enquanto não houver publicação, nenhuma categoria, canal ou painel é criado."
         )
     return payload(
-        container(
-            dashboard.module_navigation(MODULE_KEY),
-            separator(spacing=1),
-            text_display(
-                "# 🎫 Tickets de Farm\n\n"
-                "Lancamentos comprovados e recolhimentos FIFO vinculados aos ciclos de Metas."
-            ),
-            separator(spacing=1),
-            text_display(f"### Status\n{status}\n{status_detail}"),
-            separator(spacing=1),
-            text_display(f"### Onde o modulo opera\n{_config_lines(config)}"),
-            separator(spacing=1, divider=False),
-            action_row(
-                button(
-                    custom_id=dashboard.central_custom_id(MODULE_KEY, "open_system"),
-                    label="Configurar Tickets de Farm",
-                    style=2,
+        uk.panel(
+            header=[
+                dashboard.module_navigation(MODULE_KEY),
+                uk.space(),
+                uk.heading("Tickets de Farm", emoji="🎫")
+                + "\n\nLançamentos comprovados e recolhimentos FIFO vinculados aos ciclos de Metas.",
+            ],
+            blocks=[
+                uk.field("Status", f"{status}\n{status_detail}", emoji="📌"),
+                uk.rule(),
+                uk.field("Onde o módulo opera", _config_lines(config), emoji="🧭"),
+            ],
+            actions=[
+                action_row(
+                    button(
+                        custom_id=dashboard.central_custom_id(MODULE_KEY, "open_system"),
+                        label="Configurar Tickets de Farm",
+                        emoji="⚙️",
+                        style=2,
+                    )
                 )
-            ),
-            accent_color=COLOR,
+            ],
+            state=state,
         )
     )
 
@@ -240,8 +259,12 @@ async def render_admin(interaction: discord.Interaction, api: Any) -> None:
 
 def build_system_payload(config: dict[str, Any], *, unsaved: bool) -> dict[str, Any]:
     pending_notice = (
-        "\n\n⚠️ As escolhas so viram rascunho gravado depois que ao menos um cargo "
-        "administrador for definido."
+        "\n\n"
+        + uk.empty_state(
+            "Rascunho ainda não gravado",
+            "As escolhas só viram rascunho depois que ao menos um cargo "
+            "administrador for definido.",
+        )
         if unsaved
         else ""
     )
@@ -250,13 +273,19 @@ def build_system_payload(config: dict[str, Any], *, unsaved: bool) -> dict[str, 
             dashboard.module_navigation(MODULE_KEY),
             separator(spacing=1),
             text_display(
-                "# 🎫 Tickets de Farm\n\n"
-                "Escolha onde os tickets vivem e quem pode opera-los. "
-                "Nada e criado no Discord antes da publicacao."
+                uk.heading("Tickets de Farm", emoji="🎫")
+                + "\n\nEscolha onde os tickets vivem e quem pode operá-los. "
+                "Nada é criado no Discord antes da publicação."
                 f"{pending_notice}"
             ),
             separator(spacing=1),
-            text_display(f"### Selecao atual\n{_config_lines(config)}"),
+            text_display(
+                f"{uk.section_number(1, 'Onde os tickets vivem', emoji='📍')}\n\n"
+                + _config_lines(
+                    config,
+                    keys=("category_id", "panel_channel_id", "log_channel_id"),
+                )
+            ),
             action_row(
                 channel_select(
                     custom_id=dashboard.central_custom_id(MODULE_KEY, "set_category"),
@@ -274,9 +303,16 @@ def build_system_payload(config: dict[str, Any], *, unsaved: bool) -> dict[str, 
             action_row(
                 channel_select(
                     custom_id=dashboard.central_custom_id(MODULE_KEY, "set_log_channel"),
-                    placeholder="Registrar o historico e os logs em…",
+                    placeholder="Registrar o histórico e os logs em…",
                     channel_types=[TEXT_CHANNEL_TYPE],
                 )
+            ),
+            separator(spacing=1),
+            text_display(
+                f"{uk.section_number(2, 'Quem administra', emoji='👥')}\n\n"
+                + _config_lines(config, keys=("administrator_role_ids",))
+                + "\n\nEstes cargos recolhem, assumem, aprovam e finalizam os tickets. "
+                "Abrir o próprio ticket continua liberado para todos os membros."
             ),
             action_row(
                 role_select(
@@ -285,6 +321,7 @@ def build_system_payload(config: dict[str, Any], *, unsaved: bool) -> dict[str, 
                     max_values=MAX_ADMIN_ROLES,
                 )
             ),
+            separator(spacing=1),
             action_row(
                 button(
                     custom_id=dashboard.central_custom_id(MODULE_KEY, "review_publish"),
@@ -332,7 +369,7 @@ async def overview(interaction: discord.Interaction, api: Any) -> None:
 
 
 async def _save_draft(interaction: discord.Interaction, api: Any, config: dict[str, Any]) -> None:
-    """Grava o rascunho completo; mantem a selecao em memoria quando invalido."""
+    """Grava o rascunho completo; mantém a seleção em memória quando inválido."""
 
     key = _session_key(interaction)
     if not _is_persistable(config):
@@ -433,14 +470,14 @@ def build_grants(config: dict[str, Any]) -> list[dict[str, Any]]:
 
 def preflight(guild: discord.Guild, config: dict[str, Any]) -> list[str]:
     errors: list[str] = [
-        f"Campo obrigatorio ausente: {label}." for label in _missing_fields(config)
+        f"Campo obrigatório ausente: {label}." for label in _missing_fields(config)
     ]
     bot_member = guild.me
     category = (
         guild.get_channel(int(config["category_id"])) if config.get("category_id") else None
     )
     if config.get("category_id") and not isinstance(category, discord.CategoryChannel):
-        errors.append("A categoria principal nao existe mais neste servidor.")
+        errors.append("A categoria principal não existe mais neste servidor.")
     for key, label in (
         ("panel_channel_id", "Canal do painel"),
         ("log_channel_id", "Canal de logs"),
@@ -450,7 +487,7 @@ def preflight(guild: discord.Guild, config: dict[str, Any]) -> list[str]:
             continue
         channel = guild.get_channel(int(value))
         if not isinstance(channel, discord.TextChannel):
-            errors.append(f"{label} nao aponta para um canal de texto.")
+            errors.append(f"{label} não aponta para um canal de texto.")
             continue
         if bot_member is None:
             continue
@@ -466,7 +503,7 @@ def preflight(guild: discord.Guild, config: dict[str, Any]) -> list[str]:
         if role is None:
             errors.append(f"Cargo administrador inexistente: {role_id}.")
         elif role.is_default():
-            errors.append("@everyone nao pode ser cargo administrador de Tickets.")
+            errors.append("@everyone não pode ser cargo administrador de Tickets.")
     if bot_member is not None and not bot_member.guild_permissions.manage_channels:
         errors.append("Bot sem Gerenciar Canais, exigido para criar os canais de ticket.")
     return errors
@@ -480,7 +517,7 @@ async def review_publish(interaction: discord.Interaction, api: Any) -> None:
         errors = preflight(interaction.guild, config)
         if errors:
             await _send_interaction_error(
-                interaction, "Publicacao bloqueada:\n- " + "\n- ".join(errors)
+                interaction, "Publicação bloqueada:\n- " + "\n- ".join(errors)
             )
             return
         roles = len(config["administrator_role_ids"])
@@ -492,18 +529,16 @@ async def review_publish(interaction: discord.Interaction, api: Any) -> None:
                     dashboard.module_navigation(MODULE_KEY),
                     separator(spacing=1),
                     text_display(
-                        "# Revisar publicacao dos Tickets de Farm\n\n"
-                        f"{_config_lines(config)}\n\n"
-                        f"**{roles}** {role_label} recebem recolhimento, atribuicao, "
-                        "aprovacao, finalizacao e exclusao.\n"
-                        "Abrir o proprio ticket continua liberado para todos os membros.\n\n"
-                        "A confirmacao cria uma versao imutavel e provisiona categoria, "
-                        "canais e painel."
+                        uk.heading("Revisar publicação dos Tickets de Farm", emoji="👁️")
+                        + f"\n\n{_config_lines(config)}\n\n"
+                        f"**{roles}** {role_label} recebem recolhimento, atribuição, "
+                        "aprovação, finalização e exclusão.\n"
+                        "Abrir o próprio ticket continua liberado para todos os membros."
                     ),
                     action_row(
                         button(
                             custom_id=dashboard.central_custom_id(MODULE_KEY, "confirm_publish"),
-                            label="Confirmar publicacao",
+                            label="Confirmar publicação",
                             emoji="✅",
                             style=3,
                         ),
@@ -513,6 +548,13 @@ async def review_publish(interaction: discord.Interaction, api: Any) -> None:
                             emoji="↩️",
                             style=2,
                         ),
+                    ),
+                    separator(spacing=1, divider=False),
+                    text_display(
+                        uk.subtext(
+                            "A confirmação cria uma versão imutável e provisiona "
+                            "categoria, canais e painel."
+                        )
                     ),
                     accent_color=COLOR,
                 )
@@ -531,7 +573,7 @@ async def confirm_publish(interaction: discord.Interaction, api: Any) -> None:
         errors = preflight(interaction.guild, config)
         if errors:
             await _send_interaction_error(
-                interaction, "Publicacao bloqueada:\n- " + "\n- ".join(errors)
+                interaction, "Publicação bloqueada:\n- " + "\n- ".join(errors)
             )
             return
         await _save_draft(interaction, api, config)
@@ -557,8 +599,8 @@ async def confirm_publish(interaction: discord.Interaction, api: Any) -> None:
             )
         await render_admin(interaction, api)
         await interaction.followup.send(
-            f"Tickets de Farm publicado na versao {version['version']}. "
-            "A categoria, os canais e o painel sao provisionados pela reconciliacao.",
+            f"Tickets de Farm publicado na versão {version['version']}. "
+            "A categoria, os canais e o painel são provisionados pela reconciliação.",
             ephemeral=True,
         )
     except Exception as exc:

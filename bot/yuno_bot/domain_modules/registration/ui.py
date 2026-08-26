@@ -37,10 +37,11 @@ from yuno_bot.platform.contracts import (
     InteractionResult,
     RoutedContext,
 )
+from yuno_bot.platform import ui_kit as uk
 from yuno_bot.platform.panels import PanelPublisher
 from yuno_bot.platform.router import RoutedModal, custom_id
 
-COLOR = 0xFFC72C
+COLOR = uk.BRAND
 PANEL_COLOR_CHOICES = (
     ("Amarelo Yuno", "🟡", "#FFC72C"),
     ("Vermelho", "🔴", "#ED4245"),
@@ -95,7 +96,7 @@ def actor_from(interaction: discord.Interaction) -> ActorContext:
 
 def system_actor(bot: discord.Client, guild_id: int, correlation_id: str) -> ActorContext:
     if bot.user is None:
-        raise RuntimeError("Bot ainda nao esta pronto.")
+        raise RuntimeError("Bot ainda não está pronto.")
     return ActorContext(
         guild_id=guild_id,
         user_id=bot.user.id,
@@ -112,15 +113,15 @@ def system_actor(bot: discord.Client, guild_id: int, correlation_id: str) -> Act
 def error_text(exc: Exception) -> str:
     if isinstance(exc, httpx.HTTPStatusError):
         try:
-            detail = exc.response.json().get("detail", "Operacao recusada.")
+            detail = exc.response.json().get("detail", "Operação recusada.")
             if isinstance(detail, dict):
                 return str(detail.get("message") or detail.get("detail") or detail)
             return str(detail)
         except Exception:
-            return f"API recusou a operacao ({exc.response.status_code})."
+            return f"A API recusou a operação ({exc.response.status_code})."
     if isinstance(exc, (RuntimeError, ValueError)):
         return str(exc)
-    return "Nao consegui concluir a operacao."
+    return "Não consegui concluir a operação."
 
 
 def _modal_values(interaction: discord.Interaction) -> dict[str, str]:
@@ -278,6 +279,19 @@ def _discord_ref(value: Any, *, kind: str) -> str:
     return f"<{prefix}{value}>"
 
 
+def _panel_instructions(value: Any) -> str:
+    """Instrução por linha vira passo numerado; texto único fica como está.
+
+    O conteúdo é do cliente: o kit só empresta a numeração quando ele
+    realmente escreveu uma sequência de passos.
+    """
+
+    lines = [line.strip() for line in str(value or "").splitlines() if line.strip()]
+    if len(lines) < 2:
+        return lines[0] if lines else ""
+    return uk.steps(*((line, "") for line in lines))
+
+
 async def render_public(context: dict) -> ComponentsV2Payload:
     config = context.get("config")
     if config is None:
@@ -285,12 +299,16 @@ async def render_public(context: dict) -> ComponentsV2Payload:
     components: list[dict[str, Any]] = []
     if config.get("panel_banner_url"):
         components.append(media(config["panel_banner_url"]))
+    components.append(
+        text_display(
+            f"{uk.heading(config['panel_title'], emoji='📝')}\n\n{config['panel_description']}"
+        )
+    )
+    instructions = _panel_instructions(config.get("panel_instructions"))
+    if instructions:
+        components.extend((separator(), text_display(instructions)))
     components.extend(
         [
-            text_display(
-                f"# {config['panel_title']}\n\n{config['panel_description']}\n\n"
-                f"{config.get('panel_instructions') or ''}"
-            ),
             separator(),
             action_row(
                 button(
@@ -300,7 +318,8 @@ async def render_public(context: dict) -> ComponentsV2Payload:
                     style=1,
                 )
             ),
-            text_display(config.get("panel_footer") or "Yuno"),
+            separator(spacing=1, divider=False),
+            text_display(uk.subtext(config.get("panel_footer") or "Yuno")),
         ]
     )
     return ComponentsV2Payload(
@@ -333,6 +352,13 @@ async def render_review(context: dict) -> ComponentsV2Payload:
         "approved": APPROVED_COLOR,
         "rejected": REJECTED_COLOR,
     }
+    states = {
+        "pending": uk.State.PENDING,
+        "processing": uk.State.RUNNING,
+        "approved": uk.State.APPROVED,
+        "rejected": uk.State.FAILED,
+    }
+    state = states.get(status)
     member_id = str(request.get("discord_user_id") or "")
     member = f"<@{member_id}>" if member_id.isascii() and member_id.isdigit() else "Membro indisponível"
     submitted_name = _safe_display_text(request.get("submitted_name"))
@@ -342,13 +368,17 @@ async def render_review(context: dict) -> ComponentsV2Payload:
         fallback="Será definido na aprovação",
     )
     identity = text_display(
-        f"# {titles.get(status, 'Solicitação de registro')}\n"
-        f"**{status_labels.get(status, 'Estado indisponível')}**\n\n"
-        f"### Dados enviados\n"
-        f"**Membro**\n{member}\n\n"
-        f"**Nome**\n{submitted_name}\n\n"
-        f"**ID**\n`{player_id}`\n\n"
-        f"**Enviado em**\n{_discord_time(request.get('created_at'))}"
+        uk.heading(titles.get(status, "Solicitação de registro"), emoji="📝")
+        + "\n"
+        + uk.badge(state, status_labels.get(status, "Estado indisponível"), bold=True)
+        + "\n\n"
+        + uk.heading("Dados enviados", level=3)
+        + "\n"
+        + uk.field("Membro", member, emoji="👤")
+        + "\n\n"
+        + uk.inline_fields(("📛 Nome", submitted_name), ("🎮 ID", f"`{player_id}`"))
+        + "\n\n"
+        + uk.field("Enviado em", _discord_time(request.get("created_at")), emoji="🕒")
     )
     avatar_url = str(context.get("avatar_url") or "")
     if avatar_url.startswith(("https://", "http://")):
@@ -366,9 +396,11 @@ async def render_review(context: dict) -> ComponentsV2Payload:
             [
                 separator(),
                 text_display(
-                    "### Resultado esperado\n"
-                    f"**Apelido após aprovação**\n{target_nickname}\n\n"
-                    "Confira os dados e escolha uma única decisão."
+                    uk.heading("Resultado esperado", level=3)
+                    + "\n"
+                    + uk.field("Apelido após aprovação", target_nickname, emoji="🏷️")
+                    + "\n\n"
+                    + uk.subtext("Confira os dados e escolha uma única decisão.")
                 ),
                 action_row(
                     button(
@@ -391,8 +423,10 @@ async def render_review(context: dict) -> ComponentsV2Payload:
             [
                 separator(),
                 text_display(
-                    "### Aprovação em andamento\n"
-                    "O Yuno está aplicando o apelido e o cargo. As ações ficam bloqueadas até a conclusão."
+                    uk.heading("Aprovação em andamento", level=3)
+                    + "\n"
+                    + "O Yuno está aplicando o apelido e o cargo. "
+                    "As ações ficam bloqueadas até a conclusão."
                 ),
             ]
         )
@@ -409,11 +443,20 @@ async def render_review(context: dict) -> ComponentsV2Payload:
             [
                 separator(),
                 text_display(
-                    "### Resultado\n"
-                    f"**Aprovado por**\n{reviewer}\n\n"
-                    f"**Cargo aplicado**\n{role}\n\n"
-                    f"**Apelido aplicado**\n{target_nickname}\n\n"
-                    f"**Concluído em**\n{_discord_time(context.get('decision_at') or request.get('approved_at'))}"
+                    uk.heading("Resultado", level=3)
+                    + "\n"
+                    + uk.field("Aprovado por", reviewer, emoji="👮")
+                    + "\n\n"
+                    + uk.inline_fields(
+                        ("🎭 Cargo aplicado", role),
+                        ("🏷️ Apelido aplicado", target_nickname),
+                    )
+                    + "\n\n"
+                    + uk.field(
+                        "Concluído em",
+                        _discord_time(context.get("decision_at") or request.get("approved_at")),
+                        emoji="🕒",
+                    )
                 ),
             ]
         )
@@ -429,10 +472,17 @@ async def render_review(context: dict) -> ComponentsV2Payload:
             [
                 separator(),
                 text_display(
-                    "### Resultado\n"
-                    f"**Rejeitado por**\n{reviewer}\n\n"
-                    f"**Motivo**\n{reason}\n\n"
-                    f"**Concluído em**\n{_discord_time(context.get('decision_at') or request.get('rejected_at'))}"
+                    uk.heading("Resultado", level=3)
+                    + "\n"
+                    + uk.field("Rejeitado por", reviewer, emoji="👮")
+                    + "\n\n"
+                    + uk.field("Motivo", reason, emoji="📄")
+                    + "\n\n"
+                    + uk.field(
+                        "Concluído em",
+                        _discord_time(context.get("decision_at") or request.get("rejected_at")),
+                        emoji="🕒",
+                    )
                 ),
             ]
         )
@@ -513,16 +563,16 @@ async def submit(context: RoutedContext) -> InteractionResult:
 def _validate_delivery_role(guild: discord.Guild, role: discord.Role | None) -> None:
     bot_member = guild.me
     if role is None:
-        raise RuntimeError("Cargo de membro nao encontrado.")
+        raise RuntimeError("Cargo de membro não encontrado.")
     if role.is_default() or role.managed:
-        raise RuntimeError("O cargo entregue nao pode ser @everyone nem gerenciado.")
+        raise RuntimeError("O cargo entregue não pode ser @everyone nem gerenciado.")
     if bot_member is None or not bot_member.guild_permissions.manage_roles:
         raise RuntimeError("O bot precisa de Gerenciar Cargos.")
     if bot_member.top_role <= role:
         raise RuntimeError("O cargo entregue precisa estar abaixo do maior cargo do bot.")
     protected = [name for name in PROTECTED_ROLE_PERMISSIONS if getattr(role.permissions, name, False)]
     if protected:
-        raise RuntimeError("O cargo entregue possui permissoes administrativas protegidas.")
+        raise RuntimeError("O cargo entregue possui permissões administrativas protegidas.")
 
 
 async def approve(context: RoutedContext) -> InteractionResult:
@@ -581,14 +631,14 @@ async def approve(context: RoutedContext) -> InteractionResult:
             compensated = True
             if role_added and role is not None:
                 try:
-                    await member.remove_roles(role, reason="Compensacao de aprovacao do Registro")
+                    await member.remove_roles(role, reason="Compensacao de aprovação do Registro")
                 except Exception:
                     compensated = False
             if nickname_changed:
                 try:
                     await member.edit(
                         nick=previous_nickname,
-                        reason="Compensacao de aprovacao do Registro",
+                        reason="Compensacao de aprovação do Registro",
                     )
                 except Exception:
                     compensated = False
@@ -651,7 +701,7 @@ async def _replace_central(
     target_channel = channel_id or interaction.channel_id
     target_message = message_id or getattr(interaction.message, "id", None)
     if target_channel is None or target_message is None:
-        raise RuntimeError("Referencia da Central indisponivel.")
+        raise RuntimeError("Referência da Central indisponível.")
     await edit_message(interaction.client, target_channel, target_message, data)
 
 
@@ -1044,27 +1094,27 @@ CONFIG_MODAL_FIELDS: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("nickname_template", "Formato do apelido", "{name} | {id}"),
     ),
     "rules": (
-        ("player_id_min_length", "Minimo do ID", "1"),
-        ("player_id_max_length", "Maximo do ID", "16"),
-        ("name_min_length", "Minimo do nome", "2"),
-        ("name_max_length", "Maximo do nome", "24"),
+        ("player_id_min_length", "Mínimo do ID", "1"),
+        ("player_id_max_length", "Máximo do ID", "16"),
+        ("name_min_length", "Mínimo do nome", "2"),
+        ("name_max_length", "Máximo do nome", "24"),
     ),
     "panel": (
-        ("panel_title", "Titulo", "Registro"),
-        ("panel_description", "Descricao", ""),
-        ("panel_instructions", "Instrucoes", ""),
-        ("button_label", "Texto do botao", "Fazer meu registro"),
+        ("panel_title", "Título", "Registro"),
+        ("panel_description", "Descrição", ""),
+        ("panel_instructions", "Instruções", ""),
+        ("button_label", "Texto do botão", "Fazer meu registro"),
         ("panel_banner_url", "URL do banner (opcional)", ""),
     ),
     "messages": (
         ("submitted_message", "Enviado", ""),
         ("approved_message", "Aprovado", ""),
         ("rejected_message", "Rejeitado", ""),
-        ("already_pending_message", "Ja pendente", ""),
-        ("generic_error_message", "Erro generico", ""),
+        ("already_pending_message", "Já pendente", ""),
+        ("generic_error_message", "Erro genérico", ""),
     ),
     "errors": (
-        ("already_registered_message", "Ja registrado", ""),
+        ("already_registered_message", "Já registrado", ""),
         ("duplicate_id_message", "ID duplicado", ""),
         ("resubmit_not_allowed_message", "Reenvio bloqueado", ""),
     ),
@@ -1181,14 +1231,14 @@ async def _preflight(guild: discord.Guild, config: dict) -> list[str]:
     bot_member = guild.me
     for key in ("panel_channel_id", "approval_channel_id", "member_role_id"):
         if not config.get(key):
-            errors.append(f"Campo obrigatorio ausente: {key}.")
+            errors.append(f"Campo obrigatório ausente: {key}.")
     for key in ("panel_channel_id", "approval_channel_id", "log_channel_id"):
         value = config.get(key)
         if not value:
             continue
         channel = guild.get_channel(int(value))
         if not isinstance(channel, discord.TextChannel):
-            errors.append(f"{key} nao aponta para canal de texto.")
+            errors.append(f"{key} não aponta para canal de texto.")
             continue
         if bot_member:
             perms = channel.permissions_for(bot_member)
@@ -1202,7 +1252,7 @@ async def _preflight(guild: discord.Guild, config: dict) -> list[str]:
     for role_id in config.get("approver_role_ids") or []:
         approver = guild.get_role(int(role_id))
         if approver is None or approver.is_default():
-            errors.append(f"Cargo aprovador invalido: {role_id}.")
+            errors.append(f"Cargo aprovador inválido: {role_id}.")
     if bot_member and not bot_member.guild_permissions.manage_nicknames:
         errors.append("Bot sem Gerenciar Apelidos.")
     return errors
@@ -1223,16 +1273,16 @@ async def review_publish(interaction: discord.Interaction, api: Any) -> None:
             dashboard.module_navigation("registration"),
             separator(spacing=1),
             text_display(
-                "# Revisar publicacao do Registro\n\n"
+                "# 👁️ Revisar publicação do Registro\n\n"
                 f"Painel: <#{config['panel_channel_id']}>\n"
                 f"Analise: <#{config['approval_channel_id']}>\n"
                 f"Cargo: <@&{config['member_role_id']}>\n"
                 f"Aprovadores: **{len(config['approver_role_ids'])}**\n"
                 f"Formato do apelido: `{config['nickname_template']}`\n\n"
-                "A confirmacao cria uma versao imutavel e reconcilia o painel publico."
+                "A confirmação cria uma versão imutável e reconcilia o painel público."
             ),
             action_row(
-                button(custom_id=dashboard.central_custom_id("registration", "confirm_publish"), label="Confirmar publicacao", emoji="✅", style=3),
+                button(custom_id=dashboard.central_custom_id("registration", "confirm_publish"), label="Confirmar publicação", emoji="✅", style=3),
                 button(custom_id=dashboard.central_custom_id("registration", "open_system"), label="Voltar", emoji="↩️", style=2),
             ),
             accent_color=COLOR,
@@ -1312,7 +1362,7 @@ async def confirm_publish(interaction: discord.Interaction, api: Any) -> None:
                 },
             )
             await interaction.followup.send(
-                content="Versao publicada, mas o painel visual ficou na versao anterior. A reconciliacao foi enfileirada."
+                content="Versão publicada, mas o painel visual ficou na versão anterior. A reconciliação foi enfileirada."
                 , ephemeral=True
             )
             return
@@ -1358,7 +1408,7 @@ async def _resolve_avatar_url(
 async def deliver_review(bot: discord.Client, item: dict) -> str | None:
     guild = bot.get_guild(int(item["guild_id"]))
     if guild is None:
-        raise RuntimeError("Guild indisponivel para painel de analise.")
+        raise RuntimeError("Guild indisponível para painel de análise.")
     api = bot.platform_api
     request_id = str(item["resource_id"])
     request = await api.registration_request(guild.id, request_id)
@@ -1454,7 +1504,7 @@ async def deliver_dm(bot: discord.Client, item: dict) -> str | None:
 async def run_job(bot: discord.Client, api: Any, item: dict) -> dict:
     guild = bot.get_guild(int(item["guild_id"]))
     if guild is None:
-        raise RuntimeError("Guild indisponivel para recuperacao.")
+        raise RuntimeError("Guild indisponível para recuperação.")
     actor = system_actor(bot, guild.id, item["correlation_id"])
     if item["key"] == "registration.panel.reconcile":
         config_ref = await api.registration_config(guild.id)
@@ -1476,7 +1526,7 @@ async def run_job(bot: discord.Client, api: Any, item: dict) -> dict:
                 lifecycle="active",
                 expected_lifecycle=instance["lifecycle"],
                 actor=actor,
-                reason="Painel publico recuperado apos publicacao.",
+                reason="Painel público recuperado após publicação.",
             )
             activated = True
         return {"changed": True, "panel_key": "public", "activated": activated}
@@ -1487,7 +1537,7 @@ async def run_job(bot: discord.Client, api: Any, item: dict) -> dict:
         (value for value in stale if value["id"] == item["resource_id"]), None
     )
     if request is None:
-        return {"changed": False, "reason": "claim nao esta vencido"}
+        return {"changed": False, "reason": "claim não está vencido"}
     token = request["operation_token"]
     config_ref = await api.registration_config(guild.id)
     instance = await api.module_instance(guild.id, "registration")
@@ -1518,12 +1568,12 @@ async def run_job(bot: discord.Client, api: Any, item: dict) -> dict:
     if member is not None:
         if role and request.get("role_applied") and not request.get("role_was_present") and role in member.roles:
             try:
-                await member.remove_roles(role, reason="Recuperacao do Registro Yuno")
+                await member.remove_roles(role, reason="Recuperação do Registro Yuno")
             except Exception:
                 compensated = False
         if request.get("nickname_applied"):
             try:
-                await member.edit(nick=request.get("previous_nickname"), reason="Recuperacao do Registro Yuno")
+                await member.edit(nick=request.get("previous_nickname"), reason="Recuperação do Registro Yuno")
             except Exception:
                 compensated = False
     await api.registration_release(

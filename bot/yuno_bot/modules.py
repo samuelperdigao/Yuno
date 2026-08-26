@@ -276,7 +276,7 @@ async def load_modules(bot: "YunoBot") -> ModuleContext:
                 await bot.add_cog(cog)
                 context.remember(cog)
             except Exception:
-                bot.log.exception("Falha ao registrar cog do modulo '%s'", spec.key)
+                bot.log.exception("Falha ao registrar cog do módulo '%s'", spec.key)
 
     for spec in discover_modules().values():
         if spec.retired:
@@ -285,6 +285,6 @@ async def load_modules(bot: "YunoBot") -> ModuleContext:
             try:
                 bot.add_view(fabrica(context))
             except Exception:
-                bot.log.exception("Falha ao registrar view do modulo '%s'", spec.key)
+                bot.log.exception("Falha ao registrar view do módulo '%s'", spec.key)
 
     return context

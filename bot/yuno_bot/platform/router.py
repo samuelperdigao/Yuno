@@ -22,7 +22,7 @@ MODULE_FIRST_CUSTOM_ID_PATTERN = re.compile(
 def custom_id(module_key: str, surface: str, action: str, *, version: int = 1) -> str:
     value = f"yuno:v{version}:{module_key}:{surface}:{action}"
     if len(value) > 100 or CUSTOM_ID_PATTERN.fullmatch(value) is None:
-        raise ValueError("custom_id invalido para o Interaction Router.")
+        raise ValueError("custom_id inválido para o Interaction Router.")
     return value
 
 
@@ -33,7 +33,7 @@ def module_custom_id(
 
     value = f"yuno:{module_key}:v{version}:{surface}:{action}"
     if len(value) > 100 or MODULE_FIRST_CUSTOM_ID_PATTERN.fullmatch(value) is None:
-        raise ValueError("custom_id invalido para o Interaction Router.")
+        raise ValueError("custom_id inválido para o Interaction Router.")
     return value
 
 
@@ -66,7 +66,7 @@ class InteractionRouter:
         parsed = parse_custom_id(value)
         assert parsed is not None
         if parsed["version"] not in {1, 2}:
-            await self._deny(interaction, "Versao desta interacao nao e mais suportada.")
+            await self._deny(interaction, "Versão desta interacao não e mais suportada.")
             return True
         await self.dispatch(
             interaction,
@@ -86,14 +86,14 @@ class InteractionRouter:
         panel_override: dict | None = None,
     ) -> None:
         if interaction.guild is None or (interaction.message is None and panel_override is None):
-            await self._deny(interaction, "Esta acao exige um painel publicado em um servidor.")
+            await self._deny(interaction, "Esta ação exige um painel publicado em um servidor.")
             return
         action = self.registry.action(module_key, surface, action_key)
         if action is None:
-            await self._deny(interaction, "Acao indisponivel ou contrato incompatível.")
+            await self._deny(interaction, "Ação indisponível ou contrato incompatível.")
             return
         if action.panel_key and surface != action.panel_key:
-            await self._deny(interaction, "A acao nao pertence a este painel.")
+            await self._deny(interaction, "A ação não pertence a este painel.")
             return
 
         correlation_id = str(interaction.id or uuid4())
@@ -105,10 +105,10 @@ class InteractionRouter:
                     interaction.guild.id, interaction.channel_id, interaction.message.id
                 )
             except Exception:
-                await self._deny(interaction, "Nao consegui validar a identidade deste painel.")
+                await self._deny(interaction, "Não consegui validar a identidade deste painel.")
                 return
         if panel.get("module_key") != module_key or panel.get("panel_key") != surface:
-            await self._deny(interaction, "Este painel nao pertence ao recurso solicitado.")
+            await self._deny(interaction, "Este painel não pertence ao recurso solicitado.")
             return
 
         actor = self._actor_context(interaction, correlation_id)
@@ -129,10 +129,10 @@ class InteractionRouter:
                 },
             )
         except Exception:
-            await self._deny(interaction, "Nao consegui revalidar sua permissao.")
+            await self._deny(interaction, "Não consegui revalidar sua permissão.")
             return
         if not permission.get("allowed"):
-            await self._deny(interaction, permission.get("reason") or "Acao nao autorizada.")
+            await self._deny(interaction, permission.get("reason") or "Ação não autorizada.")
             return
 
         try:
@@ -148,7 +148,7 @@ class InteractionRouter:
                 },
             )
         except Exception:
-            await self._deny(interaction, "Nao consegui iniciar a acao com seguranca.")
+            await self._deny(interaction, "Não consegui iniciar a ação com seguranca.")
             return
         if receipt.get("duplicate"):
             await self._deny(interaction, "Esta interacao ja foi processada.")
@@ -174,9 +174,9 @@ class InteractionRouter:
                 interaction.guild.id,
                 receipt["receipt_id"],
                 result={},
-                error="Falha no handler do modulo.",
+                error="Falha no handler do módulo.",
             )
-            await self._deny(interaction, "Nao consegui concluir a acao. Tente novamente.")
+            await self._deny(interaction, "Não consegui concluir a ação. Tente novamente.")
 
     @staticmethod
     def _actor_context(interaction: discord.Interaction, correlation_id: str) -> ActorContext:
@@ -209,7 +209,7 @@ class InteractionRouter:
             return
         if result.modal is not None:
             if interaction.response.is_done():
-                raise RuntimeError("Modal nao pode ser aberto depois de responder/deferir.")
+                raise RuntimeError("Modal não pode ser aberto depois de responder/deferir.")
             await interaction.response.send_modal(result.modal)
             return
         kwargs: dict = {}
@@ -275,11 +275,11 @@ class RoutedActionButton(
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if self.version != 1:
-            await InteractionRouter._deny(interaction, "Versao desta interacao nao e mais suportada.")
+            await InteractionRouter._deny(interaction, "Versão desta interacao não e mais suportada.")
             return
         router = getattr(interaction.client, "platform_interaction_router", None)
         if router is None:
-            await InteractionRouter._deny(interaction, "Runtime da plataforma indisponivel.")
+            await InteractionRouter._deny(interaction, "Runtime da plataforma indisponível.")
             return
         await router.dispatch(
             interaction,
@@ -326,11 +326,11 @@ class RoutedActionSelect(
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if self.version != 1:
-            await InteractionRouter._deny(interaction, "Versao desta interacao nao e mais suportada.")
+            await InteractionRouter._deny(interaction, "Versão desta interacao não e mais suportada.")
             return
         router = getattr(interaction.client, "platform_interaction_router", None)
         if router is None:
-            await InteractionRouter._deny(interaction, "Runtime da plataforma indisponivel.")
+            await InteractionRouter._deny(interaction, "Runtime da plataforma indisponível.")
             return
         await router.dispatch(
             interaction,
@@ -359,7 +359,7 @@ class RoutedChannelSelect(
     async def callback(self, interaction: discord.Interaction) -> None:
         router = getattr(interaction.client, "platform_interaction_router", None)
         if self.version != 1 or router is None:
-            await InteractionRouter._deny(interaction, "Runtime desta interacao indisponivel.")
+            await InteractionRouter._deny(interaction, "Runtime desta interacao indisponível.")
             return
         await router.dispatch(interaction, module_key=self.module_key, surface=self.surface, action_key=self.action_key)
 
@@ -383,7 +383,7 @@ class RoutedRoleSelect(
     async def callback(self, interaction: discord.Interaction) -> None:
         router = getattr(interaction.client, "platform_interaction_router", None)
         if self.version != 1 or router is None:
-            await InteractionRouter._deny(interaction, "Runtime desta interacao indisponivel.")
+            await InteractionRouter._deny(interaction, "Runtime desta interacao indisponível.")
             return
         await router.dispatch(interaction, module_key=self.module_key, surface=self.surface, action_key=self.action_key)
 
@@ -414,7 +414,7 @@ class RoutedModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         router = getattr(interaction.client, "platform_interaction_router", None)
         if router is None:
-            await InteractionRouter._deny(interaction, "Runtime da plataforma indisponivel.")
+            await InteractionRouter._deny(interaction, "Runtime da plataforma indisponível.")
             return
         await router.dispatch(
             interaction,

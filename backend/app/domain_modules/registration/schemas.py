@@ -33,12 +33,12 @@ class RegistrationConfig(RegistrationSchema):
     allow_resubmit_after_rejection: bool = True
     panel_title: str = Field(default="Registro", min_length=1, max_length=256)
     panel_description: str = Field(
-        default="Registre seu nome e ID para acessar a organizacao.",
+        default="Registre seu nome e ID para acessar a organização.",
         min_length=1,
         max_length=4000,
     )
     panel_instructions: str = Field(
-        default="Clique no botao abaixo e preencha seus dados.",
+        default="Clique no botão abaixo e preencha seus dados.",
         max_length=2000,
     )
     panel_footer: str = Field(default="Yuno", max_length=2048)
@@ -48,7 +48,7 @@ class RegistrationConfig(RegistrationSchema):
     button_label: str = Field(default="Fazer meu registro", min_length=1, max_length=80)
     button_emoji: str = Field(default="📝", max_length=32)
     submitted_message: str = Field(
-        default="Seu registro foi enviado para analise.", min_length=1, max_length=2000
+        default="Seu registro foi enviado para análise.", min_length=1, max_length=2000
     )
     approved_message: str = Field(
         default="Seu registro foi aprovado. Bem-vindo!", min_length=1, max_length=2000
@@ -73,19 +73,19 @@ class RegistrationConfig(RegistrationSchema):
         default="Registro não aprovado", min_length=1, max_length=256
     )
     already_pending_message: str = Field(
-        default="Voce ja possui um registro aguardando analise.", min_length=1, max_length=2000
+        default="Você já possui um registro aguardando análise.", min_length=1, max_length=2000
     )
     already_registered_message: str = Field(
-        default="Voce ja possui um registro ativo.", min_length=1, max_length=2000
+        default="Você já possui um registro ativo.", min_length=1, max_length=2000
     )
     duplicate_id_message: str = Field(
-        default="Este ID ja esta vinculado a outro membro.", min_length=1, max_length=2000
+        default="Este ID já está vinculado a outro membro.", min_length=1, max_length=2000
     )
     resubmit_not_allowed_message: str = Field(
-        default="Um novo envio apos rejeicao nao esta permitido.", min_length=1, max_length=2000
+        default="Um novo envio após rejeição não está permitido.", min_length=1, max_length=2000
     )
     generic_error_message: str = Field(
-        default="Nao foi possivel concluir a operacao. Tente novamente.",
+        default="Não foi possível concluir a operação. Tente novamente.",
         min_length=1,
         max_length=2000,
     )
@@ -95,7 +95,7 @@ class RegistrationConfig(RegistrationSchema):
     def unique_roles(cls, value: list[str]) -> list[str]:
         clean = [item.strip() for item in value if item.strip()]
         if any(len(item) > 32 for item in clean):
-            raise ValueError("ID de cargo invalido.")
+            raise ValueError("ID de cargo inválido.")
         return list(dict.fromkeys(clean))
 
     @field_validator("nickname_template")

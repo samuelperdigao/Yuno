@@ -88,12 +88,12 @@ class YunoBot(commands.Bot):
         except httpx.HTTPError:
             # O legado continua disponivel; apenas o runtime novo fica
             # degradado e o diagnostico explicara a incompatibilidade.
-            self.log.exception("Nao foi possivel validar contratos da Yuno Platform")
+            self.log.exception("Não foi possível validar contratos da Yuno Platform")
 
         # Cogs e views persistentes vem do registry. Adicionar um modulo novo e
         # criar a pasta com MODULE = ModuleSpec(...); este arquivo nao muda.
         self.module_context = await load_modules(self)
-        self.log.info("Modulos carregados: %s", ", ".join(discover_modules()))
+        self.log.info("Módulos carregados: %s", ", ".join(discover_modules()))
         self.platform_coordinator.start()
         if self.platform_ui_registry.get("registration") is not None:
             self._registration_recovery_task = asyncio.create_task(
@@ -165,7 +165,7 @@ class YunoBot(commands.Bot):
                 await adapter.message_handler(self, self.platform_api, message)
             except Exception:
                 self.log.exception(
-                    "Falha no evento de mensagem do modulo %s guild=%s channel=%s",
+                    "Falha no evento de mensagem do módulo %s guild=%s channel=%s",
                     adapter.module_key,
                     getattr(message.guild, "id", None),
                     message.channel.id,
@@ -266,7 +266,7 @@ class YunoBot(commands.Bot):
                 interaction.id,
                 custom_id,
             )
-            message = "Nao consegui concluir esta acao. Tente novamente."
+            message = "Não consegui concluir esta ação. Tente novamente."
             if interaction.response.is_done():
                 await interaction.followup.send(message, ephemeral=True)
             else:
@@ -418,7 +418,7 @@ class YunoBot(commands.Bot):
                     )
             except Exception:
                 self.log.exception(
-                    "Falha ao agendar recuperacao de claims do Registro na guild %s",
+                    "Falha ao agendar recuperação de claims do Registro na guild %s",
                     guild.id,
                 )
 
@@ -446,12 +446,12 @@ class YunoBot(commands.Bot):
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code not in {403, 409}:
                     self.log.exception(
-                        "Falha ao garantir reconciliacao periodica de Tags na guild %s",
+                        "Falha ao garantir reconciliação periodica de Tags na guild %s",
                         guild.id,
                     )
             except httpx.HTTPError:
                 self.log.exception(
-                    "Falha ao garantir reconciliacao periodica de Tags na guild %s",
+                    "Falha ao garantir reconciliação periodica de Tags na guild %s",
                     guild.id,
                 )
 
@@ -522,7 +522,7 @@ class YunoAdminCog(commands.Cog):
 
     yuno = app_commands.Group(name="yuno", description="Comandos administrativos do Yuno")
 
-    @yuno.command(name="status", description="Verifica se o servidor possui licenca ativa")
+    @yuno.command(name="status", description="Verifica se o servidor possui licença ativa")
     async def yuno_status(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             await deny(interaction, "use dentro de um servidor.")
@@ -530,11 +530,11 @@ class YunoAdminCog(commands.Cog):
         data = await self.bot.api.validate_license(interaction.guild.id)
         if data["allowed"]:
             await interaction.response.send_message(
-                "Licenca ativa. O Yuno esta pronto para operar neste servidor.", ephemeral=True
+                "Licença ativa. O Yuno esta pronto para operar neste servidor.", ephemeral=True
             )
             return
         await interaction.response.send_message(
-            "Este servidor ainda nao possui licenca ativa.", ephemeral=True
+            "Este servidor ainda não possui licença ativa.", ephemeral=True
         )
 
     @yuno.command(name="configurar", description="Publica ou reconcilia a Central do Yuno neste canal")
@@ -635,8 +635,8 @@ class YunoAdminCog(commands.Cog):
             )
         except httpx.HTTPError:
             await interaction.followup.send(
-                "Criei os canais, mas nao consegui salvar a configuracao. Rode o comando de novo "
-                "em alguns instantes — nada sera duplicado.",
+                "Criei os canais, mas não consegui salvar a configuração. Rode o comando de novo "
+                "em alguns instantes — nada será duplicado.",
                 ephemeral=True,
             )
             return
@@ -652,7 +652,7 @@ class YunoAdminCog(commands.Cog):
 
         await interaction.followup.send("\n".join(linhas), ephemeral=True)
 
-    @yuno.command(name="painel", description="Publica ou atualiza o painel administrativo dos modulos")
+    @yuno.command(name="painel", description="Publica ou atualiza o painel administrativo dos módulos")
     @app_commands.default_permissions(manage_guild=True)
     async def yuno_painel(self, interaction: discord.Interaction) -> None:
         if not await self._exigir_admin(interaction):
@@ -668,14 +668,14 @@ class YunoAdminCog(commands.Cog):
         channel = interaction.guild.get_channel(channel_id) if channel_id else None
         if not isinstance(channel, discord.TextChannel):
             await interaction.followup.send(
-                "Canal do painel ainda nao existe. Rode `/yuno configurar` primeiro.", ephemeral=True
+                "Canal do painel ainda não existe. Rode `/yuno configurar` primeiro.", ephemeral=True
             )
             return
 
         try:
             message_id = await dashboard.publish_or_update(self.bot, channel, config)
         except discord.HTTPException:
-            await interaction.followup.send("Nao consegui publicar o painel no canal.", ephemeral=True)
+            await interaction.followup.send("Não consegui publicar o painel no canal.", ephemeral=True)
             return
 
         updated_config = dashboard.with_dashboard_ref(config, channel_id=channel.id, message_id=message_id)
@@ -683,7 +683,7 @@ class YunoAdminCog(commands.Cog):
             await self.bot.api.save_guild_config(interaction.guild.id, updated_config)
         except httpx.HTTPError:
             await interaction.followup.send(
-                "Painel publicado, mas nao consegui salvar a referencia da mensagem.", ephemeral=True
+                "Painel publicado, mas não consegui salvar a referência da mensagem.", ephemeral=True
             )
             return
 
@@ -718,7 +718,7 @@ class YunoAdminCog(commands.Cog):
             or interaction.user.guild_permissions.administrator
             or interaction.guild.owner_id == interaction.user.id
         ):
-            await deny(interaction, "voce precisa ter permissao de gerenciar servidor.")
+            await deny(interaction, "você precisa ter permissão de gerenciar servidor.")
             return False
         return True
 
@@ -738,16 +738,16 @@ class YunoAdminCog(commands.Cog):
                 if not exigir_licenca:
                     return {}
                 await interaction.followup.send(
-                    "Este servidor ainda nao possui licenca ativa.", ephemeral=True
+                    "Este servidor ainda não possui licença ativa.", ephemeral=True
                 )
                 return None
             await interaction.followup.send(
-                "Nao consegui carregar a configuracao do servidor.", ephemeral=True
+                "Não consegui carregar a configuração do servidor.", ephemeral=True
             )
             return None
         except httpx.HTTPError:
             await interaction.followup.send(
-                "Nao consegui falar com a API do Yuno. Tente de novo em alguns instantes.",
+                "Não consegui falar com a API do Yuno. Tente de novo em alguns instantes.",
                 ephemeral=True,
             )
             return None

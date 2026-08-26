@@ -22,8 +22,8 @@ from yuno_bot import modules
 from yuno_bot.modules import SetupChannel  # re-export para consumidores existentes
 
 SETUP_CATEGORIES: dict[str, str] = {
-    "admin": "Yuno - Administracao",
-    "operacao": "Yuno - Operacao",
+    "admin": "Yuno - Administração",
+    "operacao": "Yuno - Operação",
     "logs": "Yuno - Logs",
 }
 
@@ -37,9 +37,9 @@ CORE_CHANNELS: tuple[SetupChannel, ...] = (
 PERMISSOES_NECESSARIAS: tuple[tuple[str, str], ...] = (
     ("manage_channels", "criar e organizar os canais do Yuno"),
     ("manage_roles", "ajustar quem enxerga cada canal"),
-    ("view_channel", "enxergar os canais onde os paineis ficam"),
-    ("send_messages", "publicar os paineis e as respostas"),
-    ("embed_links", "enviar os embeds dos formularios"),
+    ("view_channel", "enxergar os canais onde os painéis ficam"),
+    ("send_messages", "publicar os painéis e as respostas"),
+    ("embed_links", "enviar os embeds dos formulários"),
     ("read_message_history", "reaproveitar o painel ja publicado em vez de duplicar"),
 )
 

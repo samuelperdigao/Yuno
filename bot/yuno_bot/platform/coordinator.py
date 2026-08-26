@@ -68,13 +68,13 @@ class PlatformCoordinator:
         for item in tasks:
             handler = self.registry.job(item["module_key"], item["key"])
             if handler is None:
-                await self.api.fail_task(item, self.worker_id, "Handler de job nao registrado no bot.")
+                await self.api.fail_task(item, self.worker_id, "Handler de job não registrado no bot.")
                 continue
             try:
                 result = await handler.handler(self.bot, self.api, item)
                 await self.api.complete_task(item, self.worker_id, result)
             except RetryableJobError as exc:
-                self.bot.log.warning("Job %s:%s sera repetido", item["module_key"], item["key"])
+                self.bot.log.warning("Job %s:%s será repetido", item["module_key"], item["key"])
                 await self.api.fail_task(
                     item, self.worker_id, str(exc), retry_at=exc.retry_at
                 )
@@ -84,7 +84,7 @@ class PlatformCoordinator:
         for item in deliveries:
             renderer = self.registry.delivery(item["module_key"], item["key"])
             if renderer is None:
-                await self.api.fail_delivery(item, self.worker_id, "Renderer de entrega nao registrado.")
+                await self.api.fail_delivery(item, self.worker_id, "Renderer de entrega não registrado.")
                 continue
             try:
                 external_id = await renderer.handler(self.bot, item)
