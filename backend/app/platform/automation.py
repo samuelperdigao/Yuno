@@ -7,6 +7,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.platform.leases import reap_exhausted_leases
 from app.platform.lifecycle import ensure_module_instance
 from app.platform.models import (
     AutomationRun,
@@ -88,6 +89,9 @@ async def claim_tasks(
     session: AsyncSession, *, worker_id: str, limit: int, lease_seconds: int
 ) -> list[AutomationTask]:
     now = datetime.now(timezone.utc)
+    # Antes de reclamar: encerra quem ficou preso em lease vencido sem
+    # tentativa sobrando, senao o `+1` abaixo repete o job para sempre.
+    await reap_exhausted_leases(session, AutomationTask, now=now)
     query = (
         select(AutomationTask)
         .join(
@@ -98,6 +102,7 @@ async def claim_tasks(
         .where(
             ModuleInstance.lifecycle == ModuleLifecycle.active,
             AutomationTask.due_at <= now,
+            AutomationTask.attempts < AutomationTask.max_attempts,
             or_(
                 AutomationTask.state.in_([WorkState.pending, WorkState.retry]),
                 (AutomationTask.state == WorkState.claimed) & (AutomationTask.lease_until < now),

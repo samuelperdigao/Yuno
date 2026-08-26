@@ -7,6 +7,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.platform.leases import reap_exhausted_leases
 from app.platform.models import DeliveryAttempt, DeliveryOutbox, WorkState
 from app.platform.registry import module_registry
 
@@ -86,10 +87,14 @@ async def claim_deliveries(
     session: AsyncSession, *, worker_id: str, limit: int, lease_seconds: int
 ) -> list[DeliveryOutbox]:
     now = datetime.now(timezone.utc)
+    # Mesma regra do claim de jobs: lease vencido so volta para a fila enquanto
+    # ainda houver tentativa.
+    await reap_exhausted_leases(session, DeliveryOutbox, now=now)
     query = (
         select(DeliveryOutbox)
         .where(
             DeliveryOutbox.available_at <= now,
+            DeliveryOutbox.attempts < DeliveryOutbox.max_attempts,
             or_(
                 DeliveryOutbox.state.in_([WorkState.pending, WorkState.retry]),
                 (DeliveryOutbox.state == WorkState.claimed) & (DeliveryOutbox.lease_until < now),
