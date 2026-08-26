@@ -133,6 +133,24 @@ async def _allow_cycle(*args, **kwargs) -> None:
     return None
 
 
+_INTERACTION_IDS: dict[tuple[str, int, str], str] = {}
+
+
+def _interaction_id(ticket: FarmTicket, amount: str) -> str:
+    """Id de interacao no formato que o Discord manda de verdade.
+
+    Em producao isso e `str(interaction.id)`, um snowflake de ~19 digitos, e o
+    schema da API corta em `max_length=32`. Um id descritivo longo aqui faria o
+    teste exercitar um valor que a API rejeitaria com 422 antes de chegar ao
+    banco -- e que o PostgreSQL recusaria de qualquer forma, ja que a coluna e
+    `VARCHAR(32)`.
+    """
+    key = (ticket.id, ticket.revision, amount)
+    if key not in _INTERACTION_IDS:
+        _INTERACTION_IDS[key] = str(1400000000000000000 + len(_INTERACTION_IDS))
+    return _INTERACTION_IDS[key]
+
+
 async def _begin(
     session, ticket: FarmTicket, monkeypatch, *, amount: str = "50"
 ) -> dict:
@@ -148,7 +166,7 @@ async def _begin(
         actor=_actor(),
         expected_version=ticket.revision,
         idempotency_key=f"begin:{ticket.id}:{ticket.revision}:{amount}",
-        interaction_id=f"interaction:{ticket.id}:{ticket.revision}:{amount}",
+        interaction_id=_interaction_id(ticket, amount),
         kind=OperationKind.CREATE_ENTRY,
         values=[(objective.id, Decimal(amount))],
     )

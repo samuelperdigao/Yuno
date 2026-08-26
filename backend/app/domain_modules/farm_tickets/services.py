@@ -54,6 +54,7 @@ from app.domain_modules.farm_tickets.models import (
 from app.domain_modules.meta import contracts as meta_contracts
 from app.domain_modules.registration.identity import read_base_member_identity
 from app.platform.automation import schedule_task
+from app.platform.correlation import clamp_correlation_id
 from app.platform.models import DeliveryOutbox
 from app.platform.registry import discover_domain_modules, module_registry
 from app.platform.schemas import ActorContextIn
@@ -311,14 +312,14 @@ async def _event(
         resource_id=ticket.id,
         payload={"ticket_id": ticket.id, "event_id": item.id},
         idempotency_key=f"event:{item.id}:panel-refresh",
-        correlation_id=deduplication_key[:80],
+        correlation_id=clamp_correlation_id(deduplication_key),
         priority=80,
     )
     await _enqueue_pending_events(
         session,
         guild_id=ticket.guild_id,
         ticket_id=ticket.id,
-        correlation_id=deduplication_key[:80],
+        correlation_id=clamp_correlation_id(deduplication_key),
     )
     return item
 
@@ -2028,13 +2029,13 @@ async def upsert_discord_binding(
             session,
             guild_id=guild_id,
             ticket_id=ticket_id,
-            correlation_id=f"binding:{binding.id}:{idempotency_key}",
+            correlation_id=clamp_correlation_id(f"binding:{binding.id}:{idempotency_key}"),
         )
         await _enqueue_pending_events(
             session,
             guild_id=guild_id,
             ticket_id=ticket_id,
-            correlation_id=f"binding:{binding.id}:{idempotency_key}"[:80],
+            correlation_id=clamp_correlation_id(f"binding:{binding.id}:{idempotency_key}"),
         )
     await session.commit()
     await session.refresh(binding)
@@ -2829,7 +2830,7 @@ async def record_external_resource_deletion(
                 f"resource:{resource_type or 'unknown'}:{resource_id}:recover:"
                 f"{_utc(observed_at).isoformat()}"
             ),
-            correlation_id=f"resource-delete:{resource_id}"[:80],
+            correlation_id=clamp_correlation_id(f"resource-delete:{resource_id}"),
             max_attempts=10,
             commit=False,
         )
@@ -2893,7 +2894,7 @@ async def record_external_resource_deletion(
                 f"resource:{resource_type or 'unknown'}:{resource_id}:recover:"
                 f"{_utc(observed_at).isoformat()}"
             ),
-            correlation_id=f"resource-delete:{resource_id}"[:80],
+            correlation_id=clamp_correlation_id(f"resource-delete:{resource_id}"),
             max_attempts=10,
             commit=False,
         )

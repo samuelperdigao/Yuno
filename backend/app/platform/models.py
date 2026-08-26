@@ -14,6 +14,7 @@ from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String, Text,
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base, JsonType
+from app.platform.correlation import CORRELATION_ID_MAX_LENGTH
 
 
 def new_id() -> str:
@@ -230,7 +231,7 @@ class AutomationTask(Base):
     lease_owner: Mapped[str | None] = mapped_column(String(80), index=True)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     idempotency_key: Mapped[str] = mapped_column(String(160))
-    correlation_id: Mapped[str] = mapped_column(String(80), index=True)
+    correlation_id: Mapped[str] = mapped_column(String(CORRELATION_ID_MAX_LENGTH), index=True)
     result: Mapped[dict] = mapped_column(JsonType, default=dict, server_default=text("'{}'"))
     last_error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -251,7 +252,7 @@ class AutomationRun(Base):
         Enum(WorkState, native_enum=False, length=20), default=WorkState.claimed
     )
     worker_id: Mapped[str] = mapped_column(String(80))
-    correlation_id: Mapped[str] = mapped_column(String(80), index=True)
+    correlation_id: Mapped[str] = mapped_column(String(CORRELATION_ID_MAX_LENGTH), index=True)
     result: Mapped[dict] = mapped_column(JsonType, default=dict, server_default=text("'{}'"))
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -284,7 +285,7 @@ class DeliveryOutbox(Base):
     lease_owner: Mapped[str | None] = mapped_column(String(80), index=True)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     idempotency_key: Mapped[str] = mapped_column(String(160))
-    correlation_id: Mapped[str] = mapped_column(String(80), index=True)
+    correlation_id: Mapped[str] = mapped_column(String(CORRELATION_ID_MAX_LENGTH), index=True)
     last_error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -322,7 +323,7 @@ class AuditEntry(Base):
     after: Mapped[dict] = mapped_column(JsonType, default=dict, server_default=text("'{}'"))
     config_version: Mapped[int | None] = mapped_column(Integer)
     result: Mapped[str] = mapped_column(String(30), default="success", server_default="success")
-    correlation_id: Mapped[str] = mapped_column(String(80), index=True)
+    correlation_id: Mapped[str] = mapped_column(String(CORRELATION_ID_MAX_LENGTH), index=True)
     metadata_json: Mapped[dict] = mapped_column("metadata", JsonType, default=dict, server_default=text("'{}'"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
@@ -373,7 +374,7 @@ class InteractionReceipt(Base):
     state: Mapped[WorkState] = mapped_column(
         Enum(WorkState, native_enum=False, length=20), default=WorkState.claimed
     )
-    correlation_id: Mapped[str] = mapped_column(String(80), index=True)
+    correlation_id: Mapped[str] = mapped_column(String(CORRELATION_ID_MAX_LENGTH), index=True)
     result: Mapped[dict] = mapped_column(JsonType, default=dict, server_default=text("'{}'"))
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
 from app.domain_modules.tags.domain import TagSyncRunMode, TagSyncRunStatus, TagSyncState
+from app.platform.correlation import CORRELATION_ID_MAX_LENGTH
 
 
 def new_id() -> str:
@@ -74,7 +75,7 @@ class TagSyncIntent(Base):
     last_error_code: Mapped[str | None] = mapped_column(String(120))
     last_error_detail: Mapped[str | None] = mapped_column(Text)
     attempts: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
-    correlation_id: Mapped[str | None] = mapped_column(String(80), index=True)
+    correlation_id: Mapped[str | None] = mapped_column(String(CORRELATION_ID_MAX_LENGTH), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -107,7 +108,7 @@ class TagSyncRun(Base):
     blocked_items: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     failed_items: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     requested_by: Mapped[str | None] = mapped_column(String(32))
-    correlation_id: Mapped[str] = mapped_column(String(80), index=True)
+    correlation_id: Mapped[str] = mapped_column(String(CORRELATION_ID_MAX_LENGTH), index=True)
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

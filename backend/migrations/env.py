@@ -17,8 +17,15 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
+#
+# `disable_existing_loggers=False` e obrigatorio: `create_database()` roda o
+# Alembic dentro do lifespan do FastAPI, ou seja, DEPOIS que o uvicorn ja criou
+# `uvicorn.error`, `uvicorn.access` e os loggers das libs. Com o padrao
+# (`True`), este fileConfig desliga todos eles e a API fica cega -- sem access
+# log e, pior, sem o traceback de "Exception in ASGI application" que o uvicorn
+# emite em `uvicorn.error` a cada 500.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # A URL vem de app.core.config (mesma fonte que a aplicacao usa em runtime),
 # nunca de alembic.ini -- assim dev, teste e producao migram para o banco
