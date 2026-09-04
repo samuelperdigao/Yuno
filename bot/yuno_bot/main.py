@@ -32,6 +32,19 @@ INTENTS.guilds = True
 INTENTS.members = True
 INTENTS.message_content = True
 
+#: "Unknown interaction". O token de 3 segundos do Discord venceu antes de
+#: qualquer resposta -- normalmente porque o handler foi fazer I/O antes de
+#: adiar. Depois disso nao ha o que responder: toda tentativa devolve 10062 de
+#: novo, e insistir so empilha traceback em cima da causa real.
+INTERACTION_EXPIRED_CODE = 10062
+
+
+def _interaction_expired(exc: BaseException) -> bool:
+    return (
+        isinstance(exc, discord.HTTPException)
+        and exc.code == INTERACTION_EXPIRED_CODE
+    )
+
 
 class YunoBot(commands.Bot):
     def __init__(self) -> None:
@@ -259,7 +272,18 @@ class YunoBot(commands.Bot):
             if await dashboard.dispatch_components_v2(interaction):
                 return
             await self.platform_interaction_router.dispatch_components_v2(interaction)
-        except Exception:
+        except Exception as exc:
+            if _interaction_expired(exc):
+                # Token vencido: qualquer tentativa de responder devolve 10062
+                # de novo. Uma linha objetiva vale mais do que tres tracebacks
+                # encadeados escondendo o que realmente demorou.
+                self.log.warning(
+                    "Interacao expirou antes da resposta guild=%s interaction=%s custom_id=%s",
+                    interaction.guild_id,
+                    interaction.id,
+                    custom_id,
+                )
+                return
             self.log.exception(
                 "Falha no dispatch Components V2 guild=%s interaction=%s custom_id=%s fase=dispatch",
                 interaction.guild_id,
@@ -267,10 +291,19 @@ class YunoBot(commands.Bot):
                 custom_id,
             )
             message = "Não consegui concluir esta ação. Tente novamente."
-            if interaction.response.is_done():
-                await interaction.followup.send(message, ephemeral=True)
-            else:
-                await interaction.response.send_message(message, ephemeral=True)
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(message, ephemeral=True)
+                else:
+                    await interaction.response.send_message(message, ephemeral=True)
+            except discord.HTTPException as reply_error:
+                if not _interaction_expired(reply_error):
+                    raise
+                self.log.warning(
+                    "Interacao expirou antes do aviso de erro guild=%s interaction=%s",
+                    interaction.guild_id,
+                    interaction.id,
+                )
 
     def _system_actor(self, guild_id: int, correlation_id: str) -> ActorContext | None:
         if self.user is None:

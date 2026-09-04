@@ -347,7 +347,7 @@ class _FakeInteraction:
 
 
 @pytest.mark.asyncio
-async def test_raw_v2_module_select_is_acknowledged_before_dispatch(monkeypatch) -> None:
+async def test_raw_v2_module_select_routes_to_the_selected_module(monkeypatch) -> None:
     interaction = _FakeInteraction(
         "yuno:central:v1:core:select_module",
         component_type=3,
@@ -356,7 +356,6 @@ async def test_raw_v2_module_select_is_acknowledged_before_dispatch(monkeypatch)
     called = []
 
     async def dispatch_page(current, module_key):
-        assert current.response.is_done()
         called.append(module_key)
 
     monkeypatch.setattr(dashboard, "_dispatch_page", dispatch_page)
@@ -373,14 +372,46 @@ async def test_open_button_routes_to_the_module_page(monkeypatch) -> None:
     called = []
 
     async def dispatch_page(current, module_key):
-        # Botão não é seleção: quem defere é a própria página do módulo.
-        assert not current.response.is_done()
         called.append(module_key)
 
     monkeypatch.setattr(dashboard, "_dispatch_page", dispatch_page)
 
     assert await dashboard.dispatch_components_v2(interaction) is True
     assert called == ["meta"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("custom_id", "component_type", "values"),
+    [
+        ("yuno:central:v1:core:select_module", 3, ["meta"]),
+        ("yuno:central:v1:meta:open", 2, None),
+    ],
+    ids=["select", "botao"],
+)
+async def test_pagina_de_modulo_e_reconhecida_antes_de_qualquer_chamada_de_api(
+    monkeypatch, custom_id, component_type, values
+) -> None:
+    """O Discord da 3 segundos; I/O antes do defer gasta esse orcamento.
+
+    O botao de cada linha da Central chegava em `_dispatch_page` sem defer
+    nenhum e a pagina do modulo so adiava depois de buscar dados. Em producao
+    isso virou `discord.NotFound 404 (10062): Unknown interaction` -- para o
+    usuario, "o bot nao respondeu". O select ja estava correto; este teste
+    cobra os dois pelo mesmo criterio.
+    """
+
+    interaction = _FakeInteraction(custom_id, component_type=component_type, values=values)
+    deferido_antes_da_api = []
+
+    async def central_config(current):
+        deferido_antes_da_api.append(current.response.is_done())
+        return None  # corta o fluxo: o que importa ja foi observado
+
+    monkeypatch.setattr(dashboard, "_central_config", central_config)
+
+    assert await dashboard.dispatch_components_v2(interaction) is True
+    assert deferido_antes_da_api == [True]
 
 
 @pytest.mark.asyncio
@@ -426,8 +457,13 @@ async def test_navigation_home_rewrites_the_central_message(monkeypatch) -> None
         guild_id=100,
         message=SimpleNamespace(id=20),
         user=SimpleNamespace(id=900),
+        # Toda interacao real tem `response`, e `_dispatch_page` reconhece a
+        # interacao antes de qualquer I/O.
+        response=_FakeResponse(),
     )
     await dashboard._dispatch_page(interaction, dashboard.CENTRAL_HOME_VALUE)
+
+    assert interaction.response.is_done()
 
     assert edited[0][:2] == (10, 20)
     assert "No ar" in _row_text(_rows(edited[0][2])["meta"])

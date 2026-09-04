@@ -22,8 +22,13 @@ from sqlalchemy import Enum, String, event, inspect
 from sqlalchemy.orm import Session
 
 ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT / "backend") not in sys.path:
-    sys.path.insert(0, str(ROOT / "backend"))
+# `backend` e `bot` no path a partir daqui: varios arquivos de teste importam
+# `yuno_bot` sem inserir o caminho, e so funcionavam porque algum arquivo
+# coletado antes tinha inserido. Isso torna cada arquivo executavel sozinho.
+for _package_root in ("backend", "bot"):
+    _path = str(ROOT / _package_root)
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 
 def _overflows(instance: object) -> list[str]:

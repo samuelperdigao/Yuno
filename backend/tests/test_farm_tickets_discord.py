@@ -65,9 +65,21 @@ def test_farm_ticket_ids_are_stable_module_first_v2_without_breaking_legacy_pars
     }
 
 
-def test_raw_components_dispatch_handles_only_module_first_v2_without_double_v1() -> (
-    None
-):
+def test_raw_components_dispatch_handles_both_custom_id_formats() -> None:
+    """Antes este teste exigia que o formato v1 fosse recusado aqui.
+
+    A premissa era que o DynamicItem do discord.py cobriria os IDs
+    version-first, e que aceita-los tambem no dispatcher bruto causaria dispatch
+    duplo. Producao refutou a premissa: o discord.py 2.4 nao reconstroi filhos
+    aninhados dentro de um container Components V2, entao os tres botoes do
+    Registro nao tinham handler nenhum -- a interacao chegava, era logada, e
+    nenhuma chamada de API acontecia depois.
+
+    O risco de dispatch duplo continua tratado, so que na camada certa:
+    `begin_interaction` e chaveado por `interaction_id` e a segunda passagem
+    para em `receipt["duplicate"]` (ver `router.dispatch`).
+    """
+
     async def run() -> None:
         router = InteractionRouter(SimpleNamespace())
         router.dispatch = AsyncMock()
@@ -77,9 +89,16 @@ def test_raw_components_dispatch_handles_only_module_first_v2_without_double_v1(
         modern = SimpleNamespace(
             data={"custom_id": "yuno:farm_tickets:v2:ticket:create_entry"}
         )
-        assert await router.dispatch_components_v2(legacy) is False
+        assert await router.dispatch_components_v2(legacy) is True
         assert await router.dispatch_components_v2(modern) is True
-        router.dispatch.assert_awaited_once_with(
+        assert router.dispatch.await_count == 2
+        router.dispatch.assert_any_await(
+            legacy,
+            module_key="registration",
+            surface="public",
+            action_key="open_form",
+        )
+        router.dispatch.assert_any_await(
             modern,
             module_key="farm_tickets",
             surface="ticket",

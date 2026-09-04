@@ -528,8 +528,17 @@ async def _deny(interaction: discord.Interaction, message: str) -> None:
         await interaction.response.send_message(message, ephemeral=True)
 
 
-async def _acknowledge_select(interaction: discord.Interaction) -> None:
-    """Acknowledge Components V2 selects before any API round-trip."""
+async def _acknowledge(interaction: discord.Interaction) -> None:
+    """Reconhece a interacao antes de qualquer round-trip de API.
+
+    O Discord da 3 segundos para responder. Qualquer chamada a API antes disso
+    gasta esse orcamento, e quando o `defer` finalmente sai o token ja expirou:
+    `discord.NotFound 404 (10062): Unknown interaction`, que para o usuario e
+    simplesmente "o bot nao respondeu".
+
+    E idempotente (`is_done()`), entao os `defer` que os modulos ja fazem lah na
+    frente viram no-op em vez de erro.
+    """
 
     if not interaction.response.is_done():
         await interaction.response.defer()
@@ -566,7 +575,6 @@ async def dispatch_components_v2(interaction: discord.Interaction) -> bool:
         if component_type != 3 or not values:
             await _deny(interaction, "Seleção da Central inválida.")
             return True
-        await _acknowledge_select(interaction)
         await _dispatch_page(interaction, str(values[0]))
         return True
 
@@ -577,7 +585,7 @@ async def dispatch_components_v2(interaction: discord.Interaction) -> bool:
     if component_type in _SELECT_COMPONENT_TYPES and not (
         module_key == "meta" and action_key == "select_goal"
     ):
-        await _acknowledge_select(interaction)
+        await _acknowledge(interaction)
     await _dispatch_action(interaction, module_key, action_key)
     return True
 
@@ -597,6 +605,12 @@ def _opens_module_page(module_key: str, action_key: str) -> bool:
 
 
 async def _dispatch_page(interaction: discord.Interaction, module_key: str) -> None:
+    # Reconhecer aqui, e nao em cada chamador, porque este e o funil por onde
+    # toda pagina de modulo passa -- e porque o que vem logo abaixo
+    # (`_central_config`, depois o renderer do modulo) sao round-trips de API
+    # que sozinhos ja estouram os 3 segundos do Discord. O botao de cada linha
+    # da Central chegava aqui sem defer nenhum e morria com 10062.
+    await _acknowledge(interaction)
     config = await _central_config(interaction)
     if config is None:
         return
@@ -693,7 +707,7 @@ class CentralModuleSelect(
         ):
             await _deny(interaction, "Seleção da Central inválida.")
             return
-        await _acknowledge_select(interaction)
+        await _acknowledge(interaction)
         await _dispatch_page(interaction, str(values[0]))
 
 
@@ -736,7 +750,7 @@ class CentralActionSelect(
         return cls(item, **cls._arguments(match))
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        await _acknowledge_select(interaction)
+        await _acknowledge(interaction)
         await _dispatch_action(interaction, self.module_key, self.action_key)
 
 
@@ -755,7 +769,7 @@ class CentralChannelSelect(
         return cls(item, **cls._arguments(match))
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        await _acknowledge_select(interaction)
+        await _acknowledge(interaction)
         await _dispatch_action(interaction, self.module_key, self.action_key)
 
 
@@ -774,5 +788,5 @@ class CentralRoleSelect(
         return cls(item, **cls._arguments(match))
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        await _acknowledge_select(interaction)
+        await _acknowledge(interaction)
         await _dispatch_action(interaction, self.module_key, self.action_key)

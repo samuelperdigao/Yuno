@@ -59,12 +59,23 @@ class InteractionRouter:
 
         data = interaction.data or {}
         value = str(data.get("custom_id") or "")
-        # IDs v1 continuam sob o DynamicItem do discord.py. Somente o formato
-        # module-first v2 precisa do dispatcher bruto de Components V2.
-        if MODULE_FIRST_CUSTOM_ID_PATTERN.fullmatch(value) is None:
-            return False
+        # Os dois formatos precisam passar por aqui.
+        #
+        # A versao anterior so aceitava o module-first, apostando que o
+        # DynamicItem do discord.py cobriria os IDs version-first. A aposta e
+        # falsa exatamente onde os paineis vivem: o discord.py 2.4 nao
+        # reconstroi filhos aninhados dentro de um container Components V2 e
+        # descarta a interacao em silencio (ver `dashboard.dispatch_components_v2`).
+        # Resultado: os tres botoes do Registro -- abrir formulario, aprovar e
+        # rejeitar -- nao tinham handler nenhum e o membro so via "Esta
+        # interacao falhou".
+        #
+        # Aceitar os dois nao gera execucao dupla se algum dia o DynamicItem
+        # tambem disparar: `begin_interaction` e chaveado por `interaction_id`
+        # no backend e a segunda passagem para em `receipt["duplicate"]`.
         parsed = parse_custom_id(value)
-        assert parsed is not None
+        if parsed is None:
+            return False
         if parsed["version"] not in {1, 2}:
             await self._deny(interaction, "Versão desta interacao não e mais suportada.")
             return True

@@ -72,10 +72,17 @@ def _error_text(exc: Exception) -> str:
 
 
 async def _reply(interaction: discord.Interaction, message: str) -> None:
-    if interaction.response.is_done():
-        await interaction.followup.send(message, ephemeral=True)
-    else:
-        await interaction.response.send_message(message, ephemeral=True)
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+    except discord.NotFound as exc:
+        # 10062: o token ja tinha vencido quando o erro aconteceu. Avisar o
+        # usuario e impossivel agora, e propagar so gera um segundo traceback
+        # em cima do primeiro.
+        if exc.code != 10062:
+            raise
 
 
 async def _replace_public(interaction: discord.Interaction, data: dict[str, Any]) -> None:
