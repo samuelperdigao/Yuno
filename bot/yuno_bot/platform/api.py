@@ -662,3 +662,93 @@ class PlatformAPIClient:
 
     async def rollback_migration(self, guild_id: int, run_id: str, *, actor: Any) -> dict:
         return await self._request("POST", f"/guilds/{guild_id}/migrations/{run_id}/rollback", json={"actor": actor.as_payload()}, actor_id=actor.user_id, correlation_id=actor.correlation_id)
+
+    async def bau_config(self, guild_id: int) -> dict:
+        return await self._request("GET", f"/guilds/{guild_id}/modules/bau/config")
+
+    async def bau_catalog(self, guild_id: int) -> list[dict]:
+        return await self._request("GET", f"/guilds/{guild_id}/modules/bau/catalog")
+
+    async def bau_summary(self, guild_id: int) -> list[dict]:
+        return await self._request("GET", f"/guilds/{guild_id}/modules/bau/summary")
+
+    async def bau_seed_catalog(self, guild_id: int, *, actor: Any) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/bau/catalog/seed",
+            json={"actor": actor.as_payload(), "confirm": True},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def bau_category_create(self, guild_id: int, name: str, *, actor: Any) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/bau/catalog/categories",
+            json={"actor": actor.as_payload(), "name": name},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def bau_category_rename(self, guild_id: int, name: str, new_name: str, *, actor: Any) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/bau/catalog/categories/rename",
+            json={"actor": actor.as_payload(), "name": name, "new_name": new_name},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def bau_category_remove(self, guild_id: int, name: str, *, actor: Any) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/bau/catalog/categories/remove",
+            json={"actor": actor.as_payload(), "name": name},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def bau_item_create(self, guild_id: int, category_name: str, name: str, *, actor: Any) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/bau/catalog/items",
+            json={"actor": actor.as_payload(), "category_name": category_name, "name": name},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def bau_item_rename(self, guild_id: int, name: str, new_name: str, *, actor: Any) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/bau/catalog/items/rename",
+            json={"actor": actor.as_payload(), "name": name, "new_name": new_name},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def bau_item_remove(self, guild_id: int, name: str, *, actor: Any) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/bau/catalog/items/remove",
+            json={"actor": actor.as_payload(), "name": name},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def bau_movements(self, guild_id: int, items: list[dict], *, actor: Any) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/bau/movements",
+            json={"actor": actor.as_payload(), "items": items},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def bau_clear(self, guild_id: int, *, actor: Any) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/bau/clear",
+            json={"actor": actor.as_payload(), "confirm": True},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )

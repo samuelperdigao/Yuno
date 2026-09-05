@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.platform import (
     audits,
     automation,
+    bau,
     configuration,
     deliveries,
     diagnostics,
@@ -35,5 +36,6 @@ for child in (
     registration.router,
     tags.router,
     audits.router,
+    bau.router,
 ):
     router.include_router(child)
