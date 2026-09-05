@@ -381,6 +381,58 @@ class PlatformAPIClient:
             correlation_id=actor.correlation_id,
         )
 
+    async def adv_config(self, guild_id: int) -> dict:
+        return await self._request("GET", f"/guilds/{guild_id}/modules/adv/config")
+
+    async def adv_apply(
+        self,
+        guild_id: int,
+        apply: dict,
+        *,
+        member_display_name: str,
+        moderator_display_name: str,
+        actor: Any,
+    ) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/adv/warnings",
+            json={
+                "actor": actor.as_payload(),
+                "apply": apply,
+                "member_display_name": member_display_name,
+                "moderator_display_name": moderator_display_name,
+            },
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def adv_recent(self, guild_id: int, *, limit: int = 50) -> list[dict]:
+        return await self._request(
+            "GET",
+            f"/guilds/{guild_id}/modules/adv/warnings",
+            params={"limit": limit},
+        )
+
+    async def adv_revoke(
+        self,
+        guild_id: int,
+        revoke: dict,
+        *,
+        actor_display_name: str,
+        actor: Any,
+    ) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/adv/warnings/revoke",
+            json={
+                "actor": actor.as_payload(),
+                "revoke": revoke,
+                "actor_display_name": actor_display_name,
+            },
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
     async def tags_draft_bindings(self, guild_id: int) -> dict:
         return await self._request("GET", f"/guilds/{guild_id}/modules/tags/bindings/draft")
 

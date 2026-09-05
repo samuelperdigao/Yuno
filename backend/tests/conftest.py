@@ -15,6 +15,22 @@ arquivos de teste precisem saber que ele existe.
 
 from __future__ import annotations
 
+import os
+
+# `app.core.config.get_settings()` e `@lru_cache`: a primeira chamada no
+# processo fixa os valores para sempre. `app.db` chama `get_settings()` no
+# import (para montar a engine), e qual arquivo de teste importa `app.db`
+# primeiro depende so da ordem alfabetica de coleta do pytest -- um arquivo
+# novo que ordene antes de `test_api.py` (que e quem define estes valores)
+# faz a suite cachear a `Settings()` default, com o segredo do webhook vazio,
+# e todo teste que depende do webhook do Mercado Pago comeca a devolver 503.
+# `conftest.py` e sempre importado antes de qualquer teste do diretorio, entao
+# fixar aqui remove a dependencia de ordem.
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test-yuno.db")
+os.environ.setdefault("ADMIN_TOKEN", "admin-test")
+os.environ.setdefault("BOT_INTERNAL_TOKEN", "bot-test")
+os.environ.setdefault("MERCADO_PAGO_WEBHOOK_SECRET", "webhook-test")
+
 import sys
 from pathlib import Path
 

@@ -1,0 +1,53 @@
+from yuno_bot.domain_modules.adv.ui import (
+    confirm_publish,
+    deliver_channel_embed,
+    open_form,
+    open_system,
+    render_admin,
+    render_public,
+    revoke_open,
+    review_publish,
+    run_job,
+    set_log_channel,
+    set_panel_channel,
+    set_staff_roles,
+    submit,
+    view_recent,
+)
+from yuno_bot.platform.contracts import (
+    ActionDefinition,
+    AdminActionDefinition,
+    AdminPageDefinition,
+    DeliveryRendererDefinition,
+    JobHandlerDefinition,
+    ModuleUIAdapter,
+    PanelDefinition,
+)
+
+MODULE_UI = ModuleUIAdapter(
+    module_key="adv",
+    contract_version=1,
+    name="Sistema de Advertência",
+    description="Registro de advertências aplicadas a membros, com histórico e log.",
+    icon="⚠️",
+    order=90,
+    minimum_plan="basico",
+    admin_pages=(AdminPageDefinition("overview", render_admin),),
+    admin_actions=(
+        AdminActionDefinition("open_system", open_system),
+        AdminActionDefinition("set_panel_channel", set_panel_channel),
+        AdminActionDefinition("set_log_channel", set_log_channel),
+        AdminActionDefinition("set_staff_roles", set_staff_roles),
+        AdminActionDefinition("view_recent", view_recent),
+        AdminActionDefinition("revoke_open", revoke_open),
+        AdminActionDefinition("review_publish", review_publish),
+        AdminActionDefinition("confirm_publish", confirm_publish),
+    ),
+    panels=(PanelDefinition("staff", render_public, recovery_policy="automatic"),),
+    actions=(
+        ActionDefinition("open_form", "staff", "adv.apply", open_form, panel_key="staff"),
+        ActionDefinition("submit", "staff", "adv.apply", submit, panel_key="staff"),
+    ),
+    jobs=(JobHandlerDefinition("adv.panel.reconcile", run_job),),
+    deliveries=(DeliveryRendererDefinition("adv.log", deliver_channel_embed),),
+)
