@@ -209,6 +209,58 @@ class YunoBot(commands.Bot):
                     resource_id,
                 )
 
+    async def on_member_join(self, member: discord.Member) -> None:
+        # Dispatch generico para modulos domain-first, no mesmo molde de
+        # `on_message`/`_dispatch_resource_delete`: cada adapter que declarar
+        # `member_join_handler` decide o que fazer com o evento cru do
+        # Discord. `log_membros` e o primeiro a usar este par de hooks.
+        for adapter in self.platform_ui_registry.all():
+            if adapter.member_join_handler is None:
+                continue
+            try:
+                await adapter.member_join_handler(self, self.platform_api, member)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code not in {403, 404, 409}:
+                    self.log.exception(
+                        "Falha no evento de entrada do módulo %s guild=%s member=%s",
+                        adapter.module_key,
+                        member.guild.id,
+                        member.id,
+                    )
+            except Exception:
+                self.log.exception(
+                    "Falha no evento de entrada do módulo %s guild=%s member=%s",
+                    adapter.module_key,
+                    member.guild.id,
+                    member.id,
+                )
+
+    async def on_member_remove(self, member: discord.Member) -> None:
+        # Complementa `on_raw_member_remove` (que so tem o `User` cru e ja
+        # atende registration/tags/meta): aqui o membro ainda esta em cache,
+        # entao da para ler cargos e `joined_at` antes do Discord descartar o
+        # objeto -- e o que `log_membros` precisa para o log de saida.
+        for adapter in self.platform_ui_registry.all():
+            if adapter.member_remove_handler is None:
+                continue
+            try:
+                await adapter.member_remove_handler(self, self.platform_api, member)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code not in {403, 404, 409}:
+                    self.log.exception(
+                        "Falha no evento de saída do módulo %s guild=%s member=%s",
+                        adapter.module_key,
+                        member.guild.id,
+                        member.id,
+                    )
+            except Exception:
+                self.log.exception(
+                    "Falha no evento de saída do módulo %s guild=%s member=%s",
+                    adapter.module_key,
+                    member.guild.id,
+                    member.id,
+                )
+
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel) -> None:
         resource_type = (
             "category" if isinstance(channel, discord.CategoryChannel) else "channel"

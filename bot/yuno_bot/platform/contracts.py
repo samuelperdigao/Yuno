@@ -69,6 +69,8 @@ ResourceDeleteHandler = Callable[
     [discord.Client, Any, int, int, str | None], Awaitable[None]
 ]
 StartupHandler = Callable[[discord.Client, Any, discord.Guild], Awaitable[None]]
+MemberJoinHandler = Callable[[discord.Client, Any, discord.Member], Awaitable[None]]
+MemberRemoveHandler = Callable[[discord.Client, Any, discord.Member], Awaitable[None]]
 @dataclass(frozen=True)
 class ComponentsV2Payload:
     data: dict[str, Any]
@@ -141,3 +143,5 @@ class ModuleUIAdapter:
     message_handler: MessageHandler | None = None
     resource_delete_handler: ResourceDeleteHandler | None = None
     startup_handler: StartupHandler | None = None
+    member_join_handler: MemberJoinHandler | None = None
+    member_remove_handler: MemberRemoveHandler | None = None
