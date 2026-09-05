@@ -104,7 +104,7 @@ def test_legacy_catalog_has_no_runtime_implementation() -> None:
         assert spec.control_plane is None
         assert spec.retired is True
     assert list(dashboard.dashboard_specs()) == [
-        "registration", "tags", "farm_tickets", "meta"
+        "registration", "tags", "farm_tickets", "meta", "anuncio"
     ]
 
 
@@ -124,6 +124,7 @@ def test_module_navigation_switches_between_released_modules() -> None:
         "tags",
         "farm_tickets",
         "meta",
+        "anuncio",
     }
 
 
@@ -311,7 +312,7 @@ async def test_startup_refresh_updates_only_the_registered_central(monkeypatch) 
     assert refreshed is True
     assert edited[0][1:3] == (10, 20)
     assert set(_rows(edited[0][3])) == {
-        "registration", "tags", "farm_tickets", "meta"
+        "registration", "tags", "farm_tickets", "meta", "anuncio"
     }
 
 

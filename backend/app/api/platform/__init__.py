@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.platform import (
+    anuncio,
     audits,
     automation,
     configuration,
@@ -34,6 +35,7 @@ for child in (
     farm_tickets.router,
     registration.router,
     tags.router,
+    anuncio.router,
     audits.router,
 ):
     router.include_router(child)

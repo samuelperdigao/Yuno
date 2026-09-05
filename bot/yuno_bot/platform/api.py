@@ -381,6 +381,24 @@ class PlatformAPIClient:
             correlation_id=actor.correlation_id,
         )
 
+    async def anuncio_config(self, guild_id: int) -> dict:
+        return await self._request("GET", f"/guilds/{guild_id}/modules/anuncio/config")
+
+    async def anuncio_publish(
+        self,
+        guild_id: int,
+        anuncio: dict,
+        *,
+        actor: Any,
+    ) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/anuncio/publish",
+            json={"actor": actor.as_payload(), "anuncio": anuncio},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
     async def tags_draft_bindings(self, guild_id: int) -> dict:
         return await self._request("GET", f"/guilds/{guild_id}/modules/tags/bindings/draft")
 
