@@ -93,10 +93,15 @@ def test_inactive_license_keeps_the_list_readable_and_blocks_every_button() -> N
 
 
 def test_legacy_catalog_has_no_runtime_implementation() -> None:
+    """`disparo` saiu desta trava: e o primeiro modulo do catalogo legado com
+    implementacao propria (cog/views/dashboard_fields), fora do padrao
+    domain-first. Os demais continuam aposentados sem nenhum runtime."""
     modules = discover_modules(force=True)
 
     assert len(modules) == 15
     for spec in modules.values():
+        if spec.key == "disparo":
+            continue
         assert spec.cogs == ()
         assert spec.views == ()
         assert spec.setup_channels == ()
@@ -104,7 +109,7 @@ def test_legacy_catalog_has_no_runtime_implementation() -> None:
         assert spec.control_plane is None
         assert spec.retired is True
     assert list(dashboard.dashboard_specs()) == [
-        "registration", "tags", "farm_tickets", "meta"
+        "registration", "tags", "farm_tickets", "meta", "disparo"
     ]
 
 
@@ -124,6 +129,7 @@ def test_module_navigation_switches_between_released_modules() -> None:
         "tags",
         "farm_tickets",
         "meta",
+        "disparo",
     }
 
 
@@ -311,7 +317,7 @@ async def test_startup_refresh_updates_only_the_registered_central(monkeypatch) 
     assert refreshed is True
     assert edited[0][1:3] == (10, 20)
     assert set(_rows(edited[0][3])) == {
-        "registration", "tags", "farm_tickets", "meta"
+        "registration", "tags", "farm_tickets", "meta", "disparo"
     }
 
 
