@@ -15,11 +15,25 @@ arquivos de teste precisem saber que ele existe.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 from sqlalchemy import Enum, String, event, inspect
 from sqlalchemy.orm import Session
+
+# `get_settings()` tem cache por processo: o primeiro import de `app.db` (direto
+# ou via `app.domain_modules.*`/`app.platform.*`) trava esses valores. Antes só
+# `test_api.py` setava isso, e como nada era coletado antes dele em ordem
+# alfabética, funcionava por acidente. Um novo arquivo de teste que ordene antes
+# (ex.: `test_anuncio_domain.py`) e importe a cadeia do backend faz o cache
+# travar sem esses valores, e os testes de `test_api.py` voltam 401/503.
+# `conftest.py` é sempre importado antes de qualquer `test_*.py` da pasta, então
+# fixar os defaults aqui independe da ordem de coleta.
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test-yuno.db")
+os.environ.setdefault("ADMIN_TOKEN", "admin-test")
+os.environ.setdefault("BOT_INTERNAL_TOKEN", "bot-test")
+os.environ.setdefault("MERCADO_PAGO_WEBHOOK_SECRET", "webhook-test")
 
 ROOT = Path(__file__).resolve().parents[2]
 # `backend` e `bot` no path a partir daqui: varios arquivos de teste importam
