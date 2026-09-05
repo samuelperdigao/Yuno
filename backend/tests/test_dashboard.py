@@ -92,26 +92,35 @@ def test_inactive_license_keeps_the_list_readable_and_blocks_every_button() -> N
     assert all(row["accessory"]["disabled"] for row in rows.values())
 
 
-def test_legacy_catalog_has_no_runtime_implementation() -> None:
+def test_retired_legacy_modules_have_no_runtime_implementation() -> None:
+    """Um modulo do catalogo legado (`commands/<modulo>`) so ganha runtime -- cogs,
+    views, canais de setup, campos de dashboard -- quando sai de proposito da
+    aposentadoria (`retired=False`). Os que continuam aposentados ficam inertes."""
+
     modules = discover_modules(force=True)
 
     assert len(modules) == 15
     for spec in modules.values():
+        if not spec.retired:
+            continue
         assert spec.cogs == ()
         assert spec.views == ()
         assert spec.setup_channels == ()
         assert spec.dashboard_fields == ()
         assert spec.control_plane is None
-        assert spec.retired is True
-    assert list(dashboard.dashboard_specs()) == [
+
+    liberados_do_catalogo_legado = {key for key, spec in modules.items() if not spec.retired}
+    assert set(dashboard.dashboard_specs()) == {
         "registration", "tags", "farm_tickets", "meta"
-    ]
+    } | liberados_do_catalogo_legado
 
 
 def test_module_navigation_switches_between_released_modules() -> None:
     navigation = dashboard.module_navigation("registration")
     select = navigation["components"][0]
     options = {item["value"]: item for item in select["options"]}
+    modules = discover_modules(force=True)
+    liberados_do_catalogo_legado = {key for key, spec in modules.items() if not spec.retired}
 
     assert select["custom_id"] == "yuno:central:v1:core:select_module"
     assert select["placeholder"] == "Trocar de módulo"
@@ -124,7 +133,7 @@ def test_module_navigation_switches_between_released_modules() -> None:
         "tags",
         "farm_tickets",
         "meta",
-    }
+    } | liberados_do_catalogo_legado
 
 
 def test_module_navigation_opens_with_the_way_back_to_the_central() -> None:
@@ -310,9 +319,11 @@ async def test_startup_refresh_updates_only_the_registered_central(monkeypatch) 
 
     assert refreshed is True
     assert edited[0][1:3] == (10, 20)
+    modules = discover_modules(force=True)
+    liberados_do_catalogo_legado = {key for key, spec in modules.items() if not spec.retired}
     assert set(_rows(edited[0][3])) == {
         "registration", "tags", "farm_tickets", "meta"
-    }
+    } | liberados_do_catalogo_legado
 
 
 def test_central_dynamic_patterns_do_not_compete_for_string_selects() -> None:

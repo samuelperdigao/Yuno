@@ -50,14 +50,27 @@ def test_bot_e_backend_declaram_os_mesmos_modulos(registry):
     assert set(registry) == set(_backend_modules())
 
 
-def test_modulos_estao_sem_cogs_ate_configuracao_individual(registry):
-    assert all(not spec.cogs for spec in registry.values())
+def test_modulos_aposentados_nao_contribuem_cogs_ou_views(registry):
+    """Um modulo so ganha cogs/views quando sai da aposentadoria de proposito."""
+    assert all(not spec.cogs and not spec.views for spec in registry.values() if spec.retired)
 
 
-def test_catalogo_legado_fica_aposentado_e_nao_recria_estrutura(registry):
-    assert all(spec.retired for spec in registry.values())
-    assert server_setup.setup_channels() == server_setup.CORE_CHANNELS
-    assert server_setup.log_channels() == {}
+def test_catalogo_legado_nao_recria_estrutura_alem_dos_modulos_ativos(registry):
+    """`setup_channels`/`log_channels` refletem só quem saiu da aposentadoria.
+
+    Generalizado (em vez de comparar com `CORE_CHANNELS` fixo) porque cada
+    módulo reconstruído soma seus próprios canais aqui — travar a lista teria
+    que ser reescrito a cada módulo que sai da aposentadoria.
+    """
+    esperado_canais = server_setup.CORE_CHANNELS + tuple(
+        canal for spec in registry.values() if not spec.retired for canal in spec.setup_channels
+    )
+    assert server_setup.setup_channels() == esperado_canais
+
+    esperado_logs = {
+        spec.key: spec.log_channel for spec in registry.values() if not spec.retired and spec.log_channel
+    }
+    assert server_setup.log_channels() == esperado_logs
 
 
 def test_command_keys_usam_o_prefixo_do_proprio_modulo(registry):
@@ -128,8 +141,9 @@ def views(registry):
     return asyncio.run(_construir_views(registry))
 
 
-def test_modulos_estao_sem_views_ate_configuracao_individual(views):
-    assert views == []
+def test_views_so_existem_para_modulos_fora_da_aposentadoria(registry, views):
+    ativos = {key for key, spec in registry.items() if not spec.retired}
+    assert all(key in ativos for key, _ in views)
 
 
 def test_views_persistentes_tem_custom_id_estavel(views):
