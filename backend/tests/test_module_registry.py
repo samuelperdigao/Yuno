@@ -51,13 +51,21 @@ def test_bot_e_backend_declaram_os_mesmos_modulos(registry):
 
 
 def test_modulos_estao_sem_cogs_ate_configuracao_individual(registry):
-    assert all(not spec.cogs for spec in registry.values())
+    """Um modulo sai desta trava quando e configurado individualmente (`retired=False`)."""
+    assert all(not spec.cogs for spec in registry.values() if spec.retired)
 
 
 def test_catalogo_legado_fica_aposentado_e_nao_recria_estrutura(registry):
-    assert all(spec.retired for spec in registry.values())
-    assert server_setup.setup_channels() == server_setup.CORE_CHANNELS
-    assert server_setup.log_channels() == {}
+    aposentados = [spec for spec in registry.values() if spec.retired]
+    assert all(not spec.cogs and not spec.views and not spec.setup_channels and not spec.log_channel for spec in aposentados)
+
+    configurados = [spec for spec in registry.values() if not spec.retired]
+    canais_esperados = server_setup.CORE_CHANNELS + tuple(
+        canal for spec in configurados for canal in spec.setup_channels
+    )
+    assert server_setup.setup_channels() == canais_esperados
+    logs_esperados = {spec.key: spec.log_channel for spec in configurados if spec.log_channel}
+    assert server_setup.log_channels() == logs_esperados
 
 
 def test_command_keys_usam_o_prefixo_do_proprio_modulo(registry):
@@ -128,8 +136,9 @@ def views(registry):
     return asyncio.run(_construir_views(registry))
 
 
-def test_modulos_estao_sem_views_ate_configuracao_individual(views):
-    assert views == []
+def test_modulos_estao_sem_views_ate_configuracao_individual(views, registry):
+    configurados = {spec.key for spec in registry.values() if not spec.retired}
+    assert all(key in configurados for key, _ in views)
 
 
 def test_views_persistentes_tem_custom_id_estavel(views):
