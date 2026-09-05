@@ -1,0 +1,56 @@
+from yuno_bot.domain_modules.ausencia.ui import (
+    confirm_publish,
+    deliver_channel_embed,
+    deliver_overdue_reminder,
+    edit_max_dias,
+    open_form,
+    open_system,
+    render_admin,
+    render_public,
+    review_publish,
+    run_job,
+    set_log_channel,
+    set_panel_channel,
+    submit,
+    view_active,
+)
+from yuno_bot.platform.contracts import (
+    ActionDefinition,
+    AdminActionDefinition,
+    AdminPageDefinition,
+    DeliveryRendererDefinition,
+    JobHandlerDefinition,
+    ModuleUIAdapter,
+    PanelDefinition,
+)
+
+MODULE_UI = ModuleUIAdapter(
+    module_key="ausencia",
+    contract_version=1,
+    name="Sistema de Ausência",
+    description="Registro de ausências temporárias com aviso automático de vencimento.",
+    icon="🏖️",
+    order=60,
+    minimum_plan="basico",
+    admin_pages=(AdminPageDefinition("overview", render_admin),),
+    admin_actions=(
+        AdminActionDefinition("open_system", open_system),
+        AdminActionDefinition("set_panel_channel", set_panel_channel),
+        AdminActionDefinition("set_log_channel", set_log_channel),
+        AdminActionDefinition("edit_max_dias", edit_max_dias),
+        AdminActionDefinition("view_active", view_active),
+        AdminActionDefinition("review_publish", review_publish),
+        AdminActionDefinition("confirm_publish", confirm_publish),
+    ),
+    panels=(PanelDefinition("public", render_public, recovery_policy="automatic"),),
+    actions=(
+        ActionDefinition("open_form", "public", "ausencia.register", open_form, panel_key="public"),
+        ActionDefinition("submit", "public", "ausencia.register", submit, panel_key="public"),
+    ),
+    jobs=(JobHandlerDefinition("ausencia.panel.reconcile", run_job),),
+    deliveries=(
+        DeliveryRendererDefinition("ausencia.confirmation", deliver_channel_embed),
+        DeliveryRendererDefinition("ausencia.log", deliver_channel_embed),
+        DeliveryRendererDefinition("ausencia.overdue_reminder", deliver_overdue_reminder),
+    ),
+)

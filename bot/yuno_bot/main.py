@@ -66,6 +66,7 @@ class YunoBot(commands.Bot):
         self._registration_recovery_task: asyncio.Task | None = None
         self._tags_periodic_task: asyncio.Task | None = None
         self._meta_recovery_task: asyncio.Task | None = None
+        self._ausencia_periodic_task: asyncio.Task | None = None
         self._tag_role_debounce: dict[int, asyncio.Task] = {}
         self._tag_hierarchy_fingerprints: dict[int, str] = {}
         self._central_refreshed_guilds: set[int] = set()
@@ -122,6 +123,11 @@ class YunoBot(commands.Bot):
             self._meta_recovery_task = asyncio.create_task(
                 self._run_meta_recovery_sweeper(),
                 name="yuno-meta-recovery-sweeper",
+            )
+        if self.platform_ui_registry.get("ausencia") is not None:
+            self._ausencia_periodic_task = asyncio.create_task(
+                self._run_ausencia_periodic_sweeper(),
+                name="yuno-ausencia-periodic-sweeper",
             )
 
         settings = get_settings()
@@ -497,6 +503,34 @@ class YunoBot(commands.Bot):
             except asyncio.CancelledError:
                 return
 
+    async def sweep_ausencia_overdue_once(self) -> None:
+        for guild in self.guilds:
+            actor = self._system_actor(
+                guild.id, f"ausencia-overdue-sweep:{guild.id}:{uuid4().hex}"
+            )
+            if actor is None:
+                return
+            try:
+                await self.platform_api.ausencia_sweep_overdue(guild.id, actor=actor)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code not in {403, 409}:
+                    self.log.exception(
+                        "Falha ao varrer ausencias vencidas na guild %s", guild.id
+                    )
+            except httpx.HTTPError:
+                self.log.exception(
+                    "Falha ao varrer ausencias vencidas na guild %s", guild.id
+                )
+
+    async def _run_ausencia_periodic_sweeper(self) -> None:
+        await self.wait_until_ready()
+        while not self.is_closed():
+            await self.sweep_ausencia_overdue_once()
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                return
+
     async def sweep_meta_recovery_once(self) -> None:
         boundary = datetime.now(timezone.utc).replace(second=0, microsecond=0).isoformat()
         for guild in self.guilds:
@@ -538,6 +572,13 @@ class YunoBot(commands.Bot):
             except asyncio.CancelledError:
                 pass
             self._tags_periodic_task = None
+        if self._ausencia_periodic_task is not None:
+            self._ausencia_periodic_task.cancel()
+            try:
+                await self._ausencia_periodic_task
+            except asyncio.CancelledError:
+                pass
+            self._ausencia_periodic_task = None
         if self._registration_recovery_task is not None:
             self._registration_recovery_task.cancel()
             try:
