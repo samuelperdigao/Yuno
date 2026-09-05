@@ -81,6 +81,7 @@ class YunoBot(commands.Bot):
             RoutedChannelSelect,
             RoutedRoleSelect,
             dashboard.CentralModuleSelect,
+            dashboard.CentralPageButton,
             dashboard.CentralActionButton,
             dashboard.CentralActionSelect,
             dashboard.CentralChannelSelect,

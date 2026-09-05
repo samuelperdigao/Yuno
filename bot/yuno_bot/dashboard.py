@@ -42,6 +42,15 @@ CENTRAL_ACTION_PATTERN = re.compile(
     r"^yuno:central:v(?P<version>\d+):(?P<module>(?!core:)[a-z0-9_]{1,32}):"
     r"(?P<action>[a-z0-9_]{1,40})$"
 )
+CENTRAL_PAGE_BUTTON_PATTERN = re.compile(
+    r"^yuno:central:v(?P<version>\d+):(?P<module>core):"
+    r"(?P<action>page_\d+)$"
+)
+
+#: Extrai o número de página do action_key dos botões Voltar/Avançar
+#: (`page_0`, `page_1`, ...). O alvo já vem calculado no render — o clique só
+#: precisa ler o número, nenhum estado de sessão é necessário.
+PAGE_ACTION_RE = re.compile(r"^page_(\d+)$")
 
 _SELECT_COMPONENT_TYPES = frozenset({3, 5, 6, 7, 8})
 
@@ -99,8 +108,9 @@ CENTRAL_HOME_VALUE = "__central__"
 CENTRAL_OPEN_ACTION = "open"
 
 #: Uma mensagem Components V2 aceita 40 componentes. Cada linha da lista gasta
-#: dois (seção + separador), então acima deste teto a Central volta a navegar
-#: pelo seletor em vez de estourar o limite no servidor do cliente.
+#: dois (seção + separador), então este é o tamanho de página: acima disso a
+#: Central pagina de verdade (botões Voltar/Avançar) em vez de estourar o
+#: limite no servidor do cliente.
 MAX_MODULE_ROWS = 12
 
 BUTTON_PRIMARY = 1
@@ -144,6 +154,32 @@ def module_navigation(current_module: str | None = None) -> dict[str, Any]:
             options=options,
             placeholder="Trocar de módulo",
         )
+    )
+
+
+def pagination_row(page: int, total_pages: int) -> dict[str, Any]:
+    """Botões reais de Voltar/Avançar no rodapé da lista de módulos.
+
+    O alvo de cada botão já vem calculado aqui — a página não muda, o
+    `custom_id` é que já aponta pra próxima. `disabled` cobre as pontas
+    (primeira e última página) sem o handler precisar saber onde está.
+    """
+
+    prev_page = max(0, page - 1)
+    next_page = min(total_pages - 1, page + 1)
+    return action_row(
+        button(
+            custom_id=central_custom_id("core", f"page_{prev_page}"),
+            label="◀ Voltar",
+            style=BUTTON_SECONDARY,
+            disabled=page <= 0,
+        ),
+        button(
+            custom_id=central_custom_id("core", f"page_{next_page}"),
+            label="Avançar ▶",
+            style=BUTTON_SECONDARY,
+            disabled=page >= total_pages - 1,
+        ),
     )
 
 
@@ -293,9 +329,14 @@ def build_payload(
     control_states: dict[str, dict[str, Any]] | None = None,
     license_active: bool = True,
 ) -> dict[str, Any]:
-    """Primeira tela da Central: um módulo por linha, com estado e próximo passo."""
+    """Primeira tela da Central: um módulo por linha, com estado e próximo passo.
 
-    del config, page
+    `page` pagina de verdade a lista — cada página mostra até
+    `MAX_MODULE_ROWS` módulos, com botões Voltar/Avançar no rodapé. Página
+    fora do intervalo é sanada (clamp), nunca vira índice inválido.
+    """
+
+    del config
     specs = dashboard_specs()
     header = uk.heading("Central de Gestão Yuno", emoji="🟡")
     if license_active:
@@ -332,7 +373,11 @@ def build_payload(
     if summary:
         header += f"\n\n{summary}"
 
-    listed = list(specs.values())[:MAX_MODULE_ROWS]
+    total_pages = max(1, (len(specs) + MAX_MODULE_ROWS - 1) // MAX_MODULE_ROWS)
+    page = max(0, min(page, total_pages - 1))
+    start = page * MAX_MODULE_ROWS
+    listed = list(specs.values())[start : start + MAX_MODULE_ROWS]
+
     blocks: list[Any] = []
     for index, spec in enumerate(listed):
         if index:
@@ -341,16 +386,26 @@ def build_payload(
             _module_row(spec, statuses.get(spec.key), license_active=license_active)
         )
 
-    # O seletor só volta quando a lista não cabe: com poucos módulos ele seria um
-    # segundo caminho para a mesma tela, e dois caminhos para a mesma coisa é o
-    # que faz um painel parecer improvisado.
-    actions = [module_navigation()] if len(specs) > MAX_MODULE_ROWS else []
+    # Botão real de Voltar/Avançar quando há mais de uma página. O seletor
+    # continua junto quando os módulos não cabem numa página só: paginar
+    # percorre a lista, o seletor pula direto pra um módulo sem passar pelas
+    # páginas do meio — funções diferentes, não dois caminhos pra mesma coisa.
+    actions: list[dict[str, Any]] = []
+    if total_pages > 1:
+        actions.append(pagination_row(page, total_pages))
+    if len(specs) > MAX_MODULE_ROWS:
+        actions.append(module_navigation())
+
+    footer = "Yuno · nenhuma alteração entra no ar antes da sua confirmação."
+    if total_pages > 1:
+        footer += f" · Página {page + 1} de {total_pages}"
+
     return payload(
         uk.panel(
             header=header,
             blocks=blocks,
             actions=actions,
-            footer="Yuno · nenhuma alteração entra no ar antes da sua confirmação.",
+            footer=footer,
             accent_color=accent,
         )
     )
@@ -570,13 +625,18 @@ async def dispatch_components_v2(interaction: discord.Interaction) -> bool:
     except (TypeError, ValueError):
         component_type = 0
 
-    if module_key == "core" and action_key == "select_module":
-        values = list(data.get("values") or [])
-        if component_type != 3 or not values:
-            await _deny(interaction, "Seleção da Central inválida.")
+    if module_key == "core":
+        page_match = PAGE_ACTION_RE.fullmatch(action_key)
+        if page_match is not None:
+            await _dispatch_home_page(interaction, int(page_match.group(1)))
             return True
-        await _dispatch_page(interaction, str(values[0]))
-        return True
+        if action_key == "select_module":
+            values = list(data.get("values") or [])
+            if component_type != 3 or not values:
+                await _deny(interaction, "Seleção da Central inválida.")
+                return True
+            await _dispatch_page(interaction, str(values[0]))
+            return True
 
     if _opens_module_page(module_key, action_key):
         await _dispatch_page(interaction, module_key)
@@ -628,7 +688,9 @@ async def _dispatch_page(interaction: discord.Interaction, module_key: str) -> N
     await page.renderer(interaction, interaction.client.platform_api)
 
 
-async def _render_home(interaction: discord.Interaction, config: dict) -> None:
+async def _render_home(
+    interaction: discord.Interaction, config: dict, *, page: int = 0
+) -> None:
     """Reescreve a mensagem da Central com a lista de módulos.
 
     As páginas de módulo editam a mesma mensagem, então a volta também edita —
@@ -652,8 +714,18 @@ async def _render_home(interaction: discord.Interaction, config: dict) -> None:
         bot,
         channel_id,
         message_id,
-        build_payload(config, control_states=states),
+        build_payload(config, page=page, control_states=states),
     )
+
+
+async def _dispatch_home_page(interaction: discord.Interaction, page: int) -> None:
+    """Troca de página da lista de módulos sem sair da Central."""
+
+    await _acknowledge(interaction)
+    config = await _central_config(interaction)
+    if config is None:
+        return
+    await _render_home(interaction, config, page=page)
 
 
 async def _dispatch_action(
@@ -709,6 +781,31 @@ class CentralModuleSelect(
             return
         await _acknowledge(interaction)
         await _dispatch_page(interaction, str(values[0]))
+
+
+class CentralPageButton(
+    _CentralDynamic,
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=CENTRAL_PAGE_BUTTON_PATTERN,
+):
+    def __init__(self, item, **kwargs) -> None:
+        super().__init__(item)
+        self._init_central(**kwargs)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        del interaction
+        return cls(item, **cls._arguments(match))
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.version != 1:
+            await _deny(interaction, "Versão da Central não suportada.")
+            return
+        match = PAGE_ACTION_RE.fullmatch(self.action_key)
+        if match is None:
+            await _deny(interaction, "Página da Central inválida.")
+            return
+        await _dispatch_home_page(interaction, int(match.group(1)))
 
 
 class CentralActionButton(
