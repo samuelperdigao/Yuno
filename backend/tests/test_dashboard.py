@@ -1,10 +1,11 @@
 from types import SimpleNamespace
+import json
 
 import pytest
 from yuno_bot import dashboard
 from yuno_bot.domain_modules.tags import ui as tags_ui
 from yuno_bot.modules import discover_modules
-from yuno_bot.platform.components_v2 import string_select
+from yuno_bot.platform.components_v2 import send_message, string_select
 from yuno_bot.platform import ui_kit as uk
 
 SECTION = 9
@@ -17,8 +18,12 @@ ACTIVE_STATES = {
 }
 
 
+def _central_container(data: dict) -> dict:
+    return next(item for item in data["components"] if item["type"] == 17)
+
+
 def _text_content(payload: dict) -> str:
-    return payload["components"][0]["components"][0]["content"]
+    return _central_container(payload)["components"][0]["content"]
 
 
 def _rows(payload: dict) -> dict[str, dict]:
@@ -26,7 +31,7 @@ def _rows(payload: dict) -> dict[str, dict]:
 
     return {
         item["accessory"]["custom_id"].split(":")[-2]: item
-        for item in payload["components"][0]["components"]
+        for item in _central_container(payload)["components"]
         if item["type"] == SECTION
     }
 
@@ -39,7 +44,7 @@ def test_home_is_a_summary_and_does_not_render_the_module_catalog() -> None:
     data = dashboard.build_payload({}, control_states=ACTIVE_STATES)
     content = "\n".join(
         component.get("content", "")
-        for component in data["components"][0]["components"]
+        for component in _central_container(data)["components"]
     )
 
     assert data["allowed_mentions"] == {"parse": [], "replied_user": False}
@@ -49,6 +54,45 @@ def test_home_is_a_summary_and_does_not_render_the_module_catalog() -> None:
     assert "Configuração pendente" in content
     assert "parceria:open" not in str(data)
     assert dashboard.route_custom_id("core", "modules") in str(data)
+
+
+def test_central_shell_puts_the_official_banner_first() -> None:
+    data = dashboard.build_payload({}, control_states=ACTIVE_STATES)
+
+    assert data["components"][0] == {
+        "type": 12,
+        "items": [{"media": {"url": dashboard.CENTRAL_BANNER_URL}}],
+    }
+    assert dashboard.CENTRAL_BANNER_PATH.is_file()
+
+
+@pytest.mark.asyncio
+async def test_central_banner_is_sent_as_a_multipart_attachment() -> None:
+    class FakeHTTP:
+        def __init__(self) -> None:
+            self.kwargs = None
+
+        async def request(self, route, **kwargs):
+            self.kwargs = kwargs
+            return {"id": "123"}
+
+    http = FakeHTTP()
+    bot = SimpleNamespace(http=http)
+
+    message_id = await send_message(
+        bot,
+        456,
+        dashboard.build_payload({}, control_states=ACTIVE_STATES),
+        files=[dashboard._central_banner_file()],
+    )
+
+    assert message_id == 123
+    assert "json" not in http.kwargs
+    assert http.kwargs["files"][0].filename == dashboard.CENTRAL_BANNER_FILENAME
+    multipart_payload = json.loads(http.kwargs["form"][0]["value"])
+    assert multipart_payload["attachments"] == [
+        {"id": 0, "filename": dashboard.CENTRAL_BANNER_FILENAME}
+    ]
 
 
 def test_modules_screen_scales_with_groups_without_truncating_options(monkeypatch) -> None:
@@ -67,12 +111,12 @@ def test_modules_screen_scales_with_groups_without_truncating_options(monkeypatc
     second = dashboard.build_modules_payload({}, page=1)
     first_select = next(
         item
-        for item in first["components"][0]["components"]
+        for item in _central_container(first)["components"]
         if item["type"] == 1 and item["components"][0]["type"] == 3
     )["components"][0]
     second_select = next(
         item
-        for item in second["components"][0]["components"]
+        for item in _central_container(second)["components"]
         if item["type"] == 1 and item["components"][0]["type"] == 3
     )["components"][0]
 
@@ -126,7 +170,7 @@ def test_inactive_license_keeps_home_readable() -> None:
         {}, control_states=ACTIVE_STATES, license_active=False
     )
 
-    assert data["components"][0]["accent_color"] == uk.DANGER
+    assert _central_container(data)["accent_color"] == uk.DANGER
     assert "Licença inativa" in str(data)
 
 
@@ -189,7 +233,7 @@ def test_tags_primary_screen_keeps_only_the_simple_daily_flow() -> None:
     )
     rows = [
         component["components"]
-        for component in data["components"][0]["components"]
+        for component in _central_container(data)["components"]
         if component["type"] == 1
     ]
     buttons = {

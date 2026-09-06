@@ -14,9 +14,10 @@ from yuno_bot.platform.registry import discover_ui_modules  # noqa: E402
 
 
 def _rows(data: dict) -> dict[str, dict]:
+    container = next(item for item in data["components"] if item["type"] == 17)
     return {
         item["accessory"]["custom_id"].split(":")[-2]: item
-        for item in data["components"][0]["components"]
+        for item in container["components"]
         if item["type"] == 9
     }
 
@@ -29,7 +30,7 @@ def test_parceria_entra_na_central_pelo_comando_yuno_configurar() -> None:
     assert "parceria" in specs
     options = next(
         item["components"][0]["options"]
-        for item in data["components"][0]["components"]
+        for item in next(item for item in data["components"] if item["type"] == 17)["components"]
         if item["type"] == 1 and item["components"][0]["type"] == 3
     )
     parceria = next(item for item in options if item["value"] == "parceria")
@@ -80,7 +81,12 @@ def test_parceria_admin_payload_uses_components_v2_header_components() -> None:
 
     data = build_admin_payload({}, {"data": {}})
 
-    header = data["components"][0]["components"][:3]
+    assert data["components"][0] == {
+        "type": 12,
+        "items": [{"media": {"url": dashboard.CENTRAL_BANNER_URL}}],
+    }
+    container = next(item for item in data["components"] if item["type"] == 17)
+    header = container["components"][:3]
     assert header[0]["type"] == 10
     assert header[1]["type"] == 10
     assert "Parcerias" in header[1]["content"]

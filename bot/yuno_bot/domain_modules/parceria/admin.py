@@ -7,7 +7,7 @@ import httpx
 
 from yuno_bot import dashboard
 from yuno_bot.platform import ui_kit as uk
-from yuno_bot.platform.components_v2 import action_row, button, channel_select, edit_message, payload, role_select
+from yuno_bot.platform.components_v2 import action_row, button, channel_select, payload, role_select
 from yuno_bot.platform.contracts import ActorContext
 from yuno_bot.platform.panels import PanelPublisher
 
@@ -80,7 +80,12 @@ def _config_text(config: dict[str, Any]) -> str:
 async def _replace(interaction: discord.Interaction, data: dict[str, Any]) -> None:
     if not interaction.response.is_done():
         await interaction.response.defer()
-    await edit_message(interaction.client, interaction.channel_id, interaction.message.id, data)
+    await dashboard.edit_central_message(
+        interaction.client,
+        interaction.channel_id,
+        interaction.message.id,
+        data,
+    )
 
 
 def build_admin_payload(instance: dict, draft: dict) -> dict[str, Any]:
@@ -89,7 +94,7 @@ def build_admin_payload(instance: dict, draft: dict) -> dict[str, Any]:
     active = published and instance.get("lifecycle") == "active"
     state = uk.State.APPROVED if active else (uk.State.RUNNING if published else uk.State.PENDING)
     status = "Ativo" if active else ("Publicado, mas inativo" if published else "Aguardando publicação")
-    return payload(
+    return dashboard.central_shell(payload(
         uk.panel(
             header=[
                 uk.breadcrumb("YUNO", "Módulos", "Parcerias"),
@@ -109,7 +114,7 @@ def build_admin_payload(instance: dict, draft: dict) -> dict[str, Any]:
             ],
             state=state,
         )
-    )
+    ))
 
 
 async def render_admin(interaction: discord.Interaction, api: Any) -> None:

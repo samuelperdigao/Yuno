@@ -6,6 +6,8 @@ usado pelos painéis públicos dos módulos."""
 from __future__ import annotations
 
 from dataclasses import dataclass
+import io
+from pathlib import Path
 import re
 from typing import Any
 
@@ -20,6 +22,7 @@ from yuno_bot.platform.components_v2 import (
     button,
     container,
     edit_message,
+    media,
     payload,
     section,
     send_message,
@@ -107,6 +110,9 @@ CENTRAL_HOME_VALUE = "__central__"
 #: Ação reservada pela Central: é o botão de cada linha da lista. O dispatcher
 #: só a trata como atalho quando o módulo não declara uma ação com esse nome.
 CENTRAL_OPEN_ACTION = "open"
+CENTRAL_BANNER_FILENAME = "yuno-central-banner.jpg"
+CENTRAL_BANNER_URL = f"attachment://{CENTRAL_BANNER_FILENAME}"
+CENTRAL_BANNER_PATH = Path(__file__).with_name("assets") / CENTRAL_BANNER_FILENAME
 
 MAX_MODULE_OPTIONS = 25
 
@@ -234,6 +240,29 @@ def route_custom_id(module_key: str, route: str) -> str:
     """ID estável de uma rota visual; não representa uma ação de negócio."""
 
     return central_custom_id(module_key, f"route_{route}")
+
+
+def central_shell(data: dict[str, Any]) -> dict[str, Any]:
+    """Aplica a identidade comum da Central a qualquer tela Components V2."""
+
+    components = list(data.get("components") or [])
+    if components:
+        first = components[0]
+        if (
+            first.get("type") == 12
+            and first.get("items") == [{"media": {"url": CENTRAL_BANNER_URL}}]
+        ):
+            return data
+    return {**data, "components": [media(CENTRAL_BANNER_URL), *components]}
+
+
+def _central_banner_file() -> discord.File:
+    if not CENTRAL_BANNER_PATH.is_file():
+        raise FileNotFoundError(f"Banner da Central ausente: {CENTRAL_BANNER_PATH}")
+    return discord.File(
+        io.BytesIO(CENTRAL_BANNER_PATH.read_bytes()),
+        filename=CENTRAL_BANNER_FILENAME,
+    )
 
 
 def navigation_row(
@@ -441,7 +470,7 @@ def build_payload(
         accent = uk.DANGER
 
     if not specs:
-        return payload(
+        return central_shell(payload(
             container(
                 *[text_display(item) for item in header if item],
                 separator(spacing=1),
@@ -450,7 +479,7 @@ def build_payload(
                 route_navigation("core", "home"),
                 accent_color=accent,
             )
-        )
+        ))
 
     statuses = (
         {key: module_status(control_states.get(key)) for key in specs}
@@ -467,7 +496,7 @@ def build_payload(
     )]
     footer = "Yuno · alterações só entram no ar após confirmação."
 
-    return payload(
+    return central_shell(payload(
         uk.panel(
             header=header,
             blocks=blocks,
@@ -475,7 +504,7 @@ def build_payload(
             footer=footer,
             accent_color=accent,
         )
-    )
+    ))
 
 
 def build_modules_payload(
@@ -519,7 +548,7 @@ def build_modules_payload(
             button(custom_id=central_custom_id("core", f"group_{previous}"), label="‹ Anteriores", style=BUTTON_SECONDARY, disabled=page == 0),
             button(custom_id=central_custom_id("core", f"group_{following}"), label="Mais módulos ›", style=BUTTON_SECONDARY, disabled=page == total_pages - 1),
         ))
-    return payload(
+    return central_shell(payload(
         uk.panel(
             header=[uk.breadcrumb("YUNO", "Módulos"), uk.heading("Módulos"), "Selecione um módulo para administrar."],
             blocks=blocks,
@@ -527,7 +556,7 @@ def build_modules_payload(
             footer=f"Grupo {page + 1} de {total_pages}" if total_pages > 1 else "Yuno · seleção direta para a administração.",
             accent_color=uk.BRAND if license_active else uk.DANGER,
         )
-    )
+    ))
 
 
 def build_system_payload(config: dict) -> dict[str, Any]:
@@ -536,7 +565,7 @@ def build_system_payload(config: dict) -> dict[str, Any]:
     dashboard_ref = (config.get("settings") or {}).get("dashboard") or {}
     channel = dashboard_ref.get("panel_channel_id")
     value = f"Canal da Central: <#{channel}>" if channel else "Canal da Central: ainda não definido"
-    return payload(
+    return central_shell(payload(
         uk.panel(
             header=[uk.breadcrumb("YUNO", "Sistema"), uk.heading("Sistema")],
             blocks=[
@@ -548,30 +577,49 @@ def build_system_payload(config: dict) -> dict[str, Any]:
             footer="Yuno · sem alterações de backend neste piloto.",
             accent_color=uk.INFO,
         )
-    )
+    ))
 
 
 def build_invalid_route_payload(message: str = "Esta rota da Central não é mais válida.") -> dict[str, Any]:
     """Estado seguro para links antigos ou forjados, com retorno funcional."""
 
-    return payload(
+    return central_shell(payload(
         uk.panel(
             header=[uk.breadcrumb("YUNO", "Estado"), uk.heading("Rota inválida")],
             blocks=[text_display(uk.notice(message, kind="warning"))],
             actions=[action_row(button(custom_id=route_custom_id("core", "home"), label="Voltar à Home", style=BUTTON_SECONDARY))],
             accent_color=uk.WARNING,
         )
-    )
+    ))
 
 
 async def _send_v2(bot: commands.Bot, channel_id: int, data: dict) -> int:
-    return await send_message(bot, channel_id, data)
+    return await send_message(
+        bot,
+        channel_id,
+        central_shell(data),
+        files=[_central_banner_file()],
+    )
 
 
 async def _edit_v2(
     bot: commands.Bot, channel_id: int, message_id: int, data: dict
 ) -> None:
-    await edit_message(bot, channel_id, message_id, data)
+    await edit_message(
+        bot,
+        channel_id,
+        message_id,
+        central_shell(data),
+        files=[_central_banner_file()],
+    )
+
+
+async def edit_central_message(
+    bot: commands.Bot, channel_id: int, message_id: int, data: dict[str, Any]
+) -> None:
+    """Edita uma tela interna usando o mesmo shell e banner da Central."""
+
+    await _edit_v2(bot, channel_id, message_id, data)
 
 
 def dashboard_message_ref(config: dict) -> tuple[int | None, int | None]:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import discord
@@ -238,14 +239,25 @@ def meta_notice_payload(*components: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def send_message(bot: discord.Client, channel_id: int, data: dict[str, Any]) -> int:
+async def send_message(
+    bot: discord.Client,
+    channel_id: int,
+    data: dict[str, Any],
+    *,
+    files: list[discord.File] | tuple[discord.File, ...] | None = None,
+) -> int:
     route = discord.http.Route("POST", "/channels/{channel_id}/messages", channel_id=channel_id)
-    response = await bot.http.request(route, json=_restricted(data))
+    response = await _message_request(bot, route, data, files=files)
     return int(response["id"])
 
 
 async def edit_message(
-    bot: discord.Client, channel_id: int, message_id: int, data: dict[str, Any]
+    bot: discord.Client,
+    channel_id: int,
+    message_id: int,
+    data: dict[str, Any],
+    *,
+    files: list[discord.File] | tuple[discord.File, ...] | None = None,
 ) -> None:
     route = discord.http.Route(
         "PATCH",
@@ -253,7 +265,37 @@ async def edit_message(
         channel_id=channel_id,
         message_id=message_id,
     )
-    await bot.http.request(route, json=_restricted(data))
+    await _message_request(bot, route, data, files=files)
+
+
+async def _message_request(
+    bot: discord.Client,
+    route: discord.http.Route,
+    data: dict[str, Any],
+    *,
+    files: list[discord.File] | tuple[discord.File, ...] | None = None,
+) -> Any:
+    """Envia JSON ou multipart mantendo a mesma API de Components V2."""
+
+    body = _restricted(data)
+    if not files:
+        return await bot.http.request(route, json=body)
+
+    body["attachments"] = [
+        file.to_dict(index)
+        for index, file in enumerate(files)
+    ]
+    form = [
+        {
+            "name": "payload_json",
+            "value": json.dumps(body, ensure_ascii=False, separators=(",", ":")),
+        }
+    ]
+    try:
+        return await bot.http.request(route, files=list(files), form=form)
+    finally:
+        for file in files:
+            file.close()
 
 
 async def send_meta_notice(
