@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import asyncio
 import json
 
 import pytest
@@ -93,6 +94,58 @@ async def test_central_banner_is_sent_as_a_multipart_attachment() -> None:
     assert multipart_payload["attachments"] == [
         {"id": 0, "filename": dashboard.CENTRAL_BANNER_FILENAME}
     ]
+
+
+@pytest.mark.asyncio
+async def test_central_navigation_edit_reuses_the_existing_banner(monkeypatch) -> None:
+    captured = {}
+
+    async def edit_message(bot, channel_id, message_id, data, *, files=None):
+        captured.update(
+            channel_id=channel_id,
+            message_id=message_id,
+            data=data,
+            files=files,
+        )
+
+    monkeypatch.setattr(dashboard, "edit_message", edit_message)
+
+    await dashboard._edit_v2(object(), 456, 123, dashboard.build_payload({}))
+
+    assert captured["channel_id"] == 456
+    assert captured["message_id"] == 123
+    assert captured["files"] is None
+    assert captured["data"]["components"][0]["type"] == 12
+
+
+@pytest.mark.asyncio
+async def test_control_states_are_fetched_concurrently(monkeypatch) -> None:
+    adapters = [
+        SimpleNamespace(module_key="registration"),
+        SimpleNamespace(module_key="meta"),
+    ]
+    started: set[str] = set()
+    both_started = asyncio.Event()
+
+    class PlatformAPI:
+        async def module_instance(self, guild_id, module_key):
+            assert guild_id == 100
+            started.add(module_key)
+            if len(started) == len(adapters):
+                both_started.set()
+            await asyncio.wait_for(both_started.wait(), timeout=0.1)
+            return {"lifecycle": "active"}
+
+    monkeypatch.setattr(dashboard.ui_registry, "all", lambda: adapters)
+
+    states = await dashboard.fetch_control_states(
+        object(), 100, 900, platform_api=PlatformAPI()
+    )
+
+    assert states == {
+        "registration": {"lifecycle": "active"},
+        "meta": {"lifecycle": "active"},
+    }
 
 
 def test_modules_screen_scales_with_groups_without_truncating_options(monkeypatch) -> None:

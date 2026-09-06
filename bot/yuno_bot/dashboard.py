@@ -5,6 +5,7 @@ usado pelos painéis públicos dos módulos."""
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import io
 from pathlib import Path
@@ -686,14 +687,26 @@ async def _send_v2(bot: commands.Bot, channel_id: int, data: dict) -> int:
 
 
 async def _edit_v2(
-    bot: commands.Bot, channel_id: int, message_id: int, data: dict
+    bot: commands.Bot,
+    channel_id: int,
+    message_id: int,
+    data: dict,
+    *,
+    attach_banner: bool = False,
 ) -> None:
+    """Atualiza a Central sem reenviar o banner já persistido na mensagem.
+
+    O ``attachment://`` do Media Gallery continua válido para anexos existentes.
+    Reenviar o mesmo arquivo em cada navegação cria uma atualização multipart
+    inválida no Discord e deixa a interação já reconhecida sem conseguir editar
+    a mensagem. O anexo só é necessário ao criar ou migrar uma Central legada.
+    """
     await edit_message(
         bot,
         channel_id,
         message_id,
         central_shell(data),
-        files=[_central_banner_file()],
+        files=[_central_banner_file()] if attach_banner else None,
     )
 
 
@@ -703,6 +716,19 @@ async def edit_central_message(
     """Edita uma tela interna usando o mesmo shell e banner da Central."""
 
     await _edit_v2(bot, channel_id, message_id, data)
+
+
+async def _edit_existing_central(
+    bot: commands.Bot, channel_id: int, message_id: int, data: dict
+) -> None:
+    """Edita uma Central existente e migra uma mensagem legada uma única vez."""
+
+    try:
+        await _edit_v2(bot, channel_id, message_id, data)
+    except discord.HTTPException:
+        # Mensagens publicadas antes do banner não possuem o attachment que o
+        # Media Gallery referencia. Só nesse caso reenviamos o arquivo.
+        await _edit_v2(bot, channel_id, message_id, data, attach_banner=True)
 
 
 def dashboard_message_ref(config: dict) -> tuple[int | None, int | None]:
@@ -743,7 +769,7 @@ async def publish_or_update(
             known_message = await channel.fetch_message(previous_message_id)
             if channel.guild.me and known_message.author.id != channel.guild.me.id:
                 return await _send_v2(bot, channel.id, data)
-            await _edit_v2(bot, channel.id, previous_message_id, data)
+            await _edit_existing_central(bot, channel.id, previous_message_id, data)
             return previous_message_id
         except discord.HTTPException:
             pass
@@ -775,7 +801,7 @@ async def refresh_existing(
         bot_member = guild.me
         if bot_member is not None and known_message.author.id != bot_member.id:
             return False
-        await _edit_v2(
+        await _edit_existing_central(
             bot,
             channel_id,
             message_id,
@@ -829,15 +855,19 @@ async def fetch_control_states(
     del api, actor_id
     if platform_api is None:
         return {}
-    states: dict[str, dict[str, Any]] = {}
-    for adapter in ui_registry.all():
+    async def fetch_state(adapter: Any) -> tuple[str, dict[str, Any]]:
         try:
-            states[adapter.module_key] = await platform_api.module_instance(
+            state = await platform_api.module_instance(
                 guild_id, adapter.module_key
             )
         except Exception:
-            states[adapter.module_key] = {"lifecycle": "unknown"}
-    return states
+            state = {"lifecycle": "unknown"}
+        return adapter.module_key, state
+
+    states = await asyncio.gather(
+        *(fetch_state(adapter) for adapter in ui_registry.all())
+    )
+    return dict(states)
 
 
 async def _central_config(interaction: discord.Interaction) -> dict | None:
