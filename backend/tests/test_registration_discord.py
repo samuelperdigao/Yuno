@@ -222,12 +222,12 @@ def test_registration_log_renderer_builds_commercial_approved_and_rejected_embed
     assert approved["timestamp"].startswith("2026-08-22T12:05:00")
     assert approved["footer"]["text"] == "Yuno • Organização"
     assert approved_fields == {
-        "👤 Membro": "<@10>",
-        "📛 Nome informado": "Ana Silva",
-        "🎮 ID informado": "`001`",
-        "👮 Aprovado por": "<@20>",
-        "🎭 Cargo aplicado": "<@&30>",
-        "🏷️ Apelido aplicado": "Ana Silva \\| 001",
+        "Membro": "<@10>",
+        "Nome informado": "Ana Silva",
+        "ID informado": "`001`",
+        "Aprovado por": "<@20>",
+        "Cargo aplicado": "<@&30>",
+        "Apelido aplicado": "Ana Silva \\| 001",
     }
 
     rejected_data = RegistrationLogData.from_payload(
@@ -248,9 +248,9 @@ def test_registration_log_renderer_builds_commercial_approved_and_rejected_embed
     assert rejected["color"] == REJECTED_COLOR
     assert rejected["timestamp"].endswith("+00:00")
     assert "thumbnail" not in rejected
-    assert rejected_fields["👮 Rejeitado por"] == "<@21>"
-    assert rejected_fields["📛 Nome informado"] != "**Bia**"
-    assert rejected_fields["📄 Motivo"] != "**Dados divergentes** @everyone"
+    assert rejected_fields["Rejeitado por"] == "<@21>"
+    assert rejected_fields["Nome informado"] != "**Bia**"
+    assert rejected_fields["Motivo"] != "**Dados divergentes** @everyone"
 
 
 def test_registration_log_renderer_accepts_legacy_payload_without_exposing_uuid() -> None:
@@ -574,12 +574,12 @@ def test_registration_admin_uses_six_clear_configuration_steps() -> None:
         "notifications",
     ]
     assert [item["label"] for item in options] == [
-        "1 · Canais",
-        "2 · Equipe e cargo",
-        "3 · Regras do formulário",
-        "4 · Aparência do painel",
-        "5 · Mensagens",
-        "6 · Logs e avisos",
+        "01 · Canais",
+        "02 · Equipe e cargo",
+        "03 · Regras do formulário",
+        "04 · Painel público",
+        "05 · Mensagens",
+        "06 · Logs e avisos",
     ]
 
 
@@ -722,6 +722,57 @@ def test_registration_notification_section_supports_drafts_from_previous_version
     assert "Mostrar foto do membro" in rendered
 
 
+def test_registration_admin_configuration_uses_the_nexus_shell_and_mobile_safe_count(
+    monkeypatch,
+) -> None:
+    captured: dict = {}
+
+    async def admin_state(_api, _guild_id):
+        return ({"lifecycle": "inactive"}, {"base_published_version": None, "data": {}})
+
+    async def replace(_interaction, data, **_kwargs):
+        captured.update(data)
+
+    monkeypatch.setattr(registration_ui, "_admin_state", admin_state)
+    monkeypatch.setattr(registration_ui, "_replace_central", replace)
+
+    asyncio.run(registration_ui._render_section(SimpleNamespace(guild_id=100), object(), "rules"))
+
+    assert captured["components"][0]["type"] == 12
+    container = captured["components"][1]
+    assert container["type"] == 17
+    assert len(container["components"]) <= 40
+    rendered = str(container)
+    assert "YUNO NEXUS // MODULES / REGISTRATION / CONFIG" in rendered
+    assert "set_id_format" in rendered
+    assert "set_resubmit_policy" in rendered
+    assert "route_overview" in rendered
+    assert "route_diagnostic" in rendered
+    assert "emoji" not in rendered
+
+
+def test_registration_publish_incident_is_contextual_and_returns_to_configuration(
+    monkeypatch,
+) -> None:
+    captured: dict = {}
+
+    async def replace(_interaction, data, **_kwargs):
+        captured.update(data)
+
+    monkeypatch.setattr(registration_ui, "_replace_central", replace)
+
+    asyncio.run(
+        registration_ui._render_publish_incident(
+            SimpleNamespace(), ["Bot sem acesso de envio em <#10>."]
+        )
+    )
+
+    rendered = str(captured)
+    assert "// INCIDENTE" in rendered
+    assert "CORRIGIR CONFIGURAÇÃO" in rendered
+    assert "route_configuration" in rendered
+
+
 def test_central_replacement_acknowledges_silently_without_receipt(monkeypatch) -> None:
     calls: list[tuple] = []
 
@@ -738,7 +789,7 @@ def test_central_replacement_acknowledges_silently_without_receipt(monkeypatch) 
     async def edit_message(bot, channel_id, message_id, data) -> None:
         calls.append(("edit", bot, channel_id, message_id, data))
 
-    monkeypatch.setattr(registration_ui, "edit_message", edit_message)
+    monkeypatch.setattr(registration_ui.dashboard, "edit_central_message", edit_message)
     interaction = SimpleNamespace(
         response=SilentResponse(),
         client="bot",
@@ -781,21 +832,18 @@ def test_unpublished_admin_summary_hides_internal_state(monkeypatch) -> None:
 
     asyncio.run(registration_ui.render_admin(SimpleNamespace(guild_id=100), object()))
 
-    children = captured["components"][0]["components"]
+    assert captured["components"][0]["type"] == 12
+    children = captured["components"][1]["components"]
     content = "\n".join(item["content"] for item in children if item["type"] == 10)
-    navigation = next(
-        item for item in children if item["type"] == 1 and item["components"][0]["type"] == 3
-    )
-    action = next(
-        item for item in children if item["type"] == 1 and item["components"][0]["type"] == 2
-    )
+    navigation = next(item for item in children if item["type"] == 1 and len(item["components"]) == 2 and item["components"][0]["custom_id"].endswith("route_modules"))
+    action = next(item for item in children if item["type"] == 1 and item["components"][0]["custom_id"].endswith("open_system"))
     button_data = action["components"][0]
-    assert navigation["components"][0]["custom_id"] == "yuno:central:v1:core:select_module"
-    assert "Ainda não publicado" in content
+    assert navigation["components"][0]["custom_id"] == "yuno:central:v1:core:route_modules"
+    assert "Aguardando publicação" in content
     assert "lifecycle" not in content.lower()
-    assert "rascunho" not in content.lower()
-    assert button_data["label"] == "Configurar Registro"
-    assert button_data["style"] == 2
+    assert "YUNO NEXUS // MODULES / REGISTRATION" in content
+    assert button_data["label"] == "CONFIGURAR"
+    assert button_data["style"] == 1
     assert "emoji" not in button_data
 
 
@@ -812,12 +860,13 @@ def test_published_admin_summary_has_clean_visual_hierarchy() -> None:
             },
         },
     )
-    children = data["components"][0]["components"]
+    assert data["components"][0]["type"] == 12
+    children = data["components"][1]["components"]
     content = "\n".join(item["content"] for item in children if item["type"] == 10)
 
-    assert content.startswith("# Registro")
-    assert "### Status" in content
-    assert "### Fluxo atual" in content
+    assert content.startswith("# YUNO NEXUS // MODULES / REGISTRATION")
+    assert "// CONFIGURAÇÃO" in content
+    assert "**ESTADO**\nOperacional" in content
     assert "<#10>" in content
     assert "<#20>" in content
     assert "<@&30>" in content

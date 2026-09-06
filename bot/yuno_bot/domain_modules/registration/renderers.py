@@ -120,20 +120,19 @@ class RegistrationLogRenderer:
     def _identity_fields(embed: discord.Embed, data: RegistrationLogData) -> None:
         member = _user_mention(data.discord_user_id)
         if member:
-            embed.add_field(name="👤 Membro", value=member, inline=True)
+            embed.add_field(name="Membro", value=member, inline=True)
         name = _safe_text(data.submitted_name)
         if name:
-            embed.add_field(name="📛 Nome informado", value=name, inline=True)
+            embed.add_field(name="Nome informado", value=name, inline=True)
         player_id = _safe_text(data.player_id)
         if player_id:
-            embed.add_field(name="🎮 ID informado", value=f"`{player_id}`", inline=True)
+            embed.add_field(name="ID informado", value=f"`{player_id}`", inline=True)
 
     def render_submitted(self, data: RegistrationLogData) -> discord.Embed:
         embed = self._base(
             data,
             title="Nova solicitação de registro",
-            description=uk.badge(uk.State.PENDING, "**Aguardando análise**")
-            + "\nUma nova solicitação aguarda análise da equipe responsável.",
+            description="// AGUARDANDO ANÁLISE\nUma nova solicitação aguarda análise da equipe responsável.",
             color=PENDING_COLOR,
         )
         self._identity_fields(embed, data)
@@ -143,72 +142,68 @@ class RegistrationLogRenderer:
         embed = self._base(
             data,
             title=data.log_approved_title,
-            description=uk.badge(uk.State.APPROVED, "**Aprovado**")
-            + "\nO cadastro foi concluído e o acesso do membro foi liberado.",
+            description="// APROVADO\nO cadastro foi concluído e o acesso do membro foi liberado.",
             color=APPROVED_COLOR,
         )
         self._identity_fields(embed, data)
         reviewer = _user_mention(data.reviewed_by)
         if reviewer:
-            embed.add_field(name="👮 Aprovado por", value=reviewer, inline=True)
+            embed.add_field(name="Aprovado por", value=reviewer, inline=True)
         role = _role_mention(data.member_role_id)
         if role:
-            embed.add_field(name="🎭 Cargo aplicado", value=role, inline=True)
+            embed.add_field(name="Cargo aplicado", value=role, inline=True)
         nickname = _safe_text(data.target_nickname)
         if nickname:
-            embed.add_field(name="🏷️ Apelido aplicado", value=nickname, inline=False)
+            embed.add_field(name="Apelido aplicado", value=nickname, inline=False)
         return embed
 
     def render_rejected(self, data: RegistrationLogData) -> discord.Embed:
         embed = self._base(
             data,
             title=data.log_rejected_title,
-            description=uk.badge(uk.State.FAILED, "**Rejeitado**")
-            + "\nA solicitação foi analisada e não foi aprovada.",
+            description="// REJEITADO\nA solicitação foi analisada e não foi aprovada.",
             color=REJECTED_COLOR,
         )
         self._identity_fields(embed, data)
         reviewer = _user_mention(data.reviewed_by)
         if reviewer:
-            embed.add_field(name="👮 Rejeitado por", value=reviewer, inline=True)
+            embed.add_field(name="Rejeitado por", value=reviewer, inline=True)
         reason = _safe_text(data.reason)
         if reason:
-            embed.add_field(name="📄 Motivo", value=reason, inline=False)
+            embed.add_field(name="Motivo", value=reason, inline=False)
         return embed
 
     def render_member_approved(self, data: RegistrationLogData) -> discord.Embed:
         embed = self._base(
             data,
             title=data.approved_dm_title,
-            description=uk.badge(uk.State.APPROVED, "**Aprovado**")
-            + "\n"
+            description="// APROVADO\n"
             + (_safe_text(data.message, limit=4000) or "Seu registro foi aprovado."),
             color=APPROVED_COLOR,
         )
         name = _safe_text(data.submitted_name)
         player_id = _safe_text(data.player_id)
         if name:
-            embed.add_field(name="📛 Nome", value=name, inline=True)
+            embed.add_field(name="Nome", value=name, inline=True)
         if player_id:
-            embed.add_field(name="🎮 ID", value=f"`{player_id}`", inline=True)
+            embed.add_field(name="ID", value=f"`{player_id}`", inline=True)
         nickname = _safe_text(data.target_nickname)
         if nickname:
-            embed.add_field(name="🏷️ Seu novo apelido", value=nickname, inline=False)
+            embed.add_field(name="Seu novo apelido", value=nickname, inline=False)
         role = _role_mention(data.member_role_id)
         if role:
-            embed.add_field(name="🎭 Cargo recebido", value=role, inline=False)
+            embed.add_field(name="Cargo recebido", value=role, inline=False)
         return embed
 
     def render_member_rejected(self, data: RegistrationLogData) -> discord.Embed:
         embed = self._base(
             data,
             title=data.rejected_dm_title,
-            description=uk.badge(uk.State.FAILED, "**Não aprovado**")
-            + "\n"
+            description="// NÃO APROVADO\n"
             + (_safe_text(data.message, limit=4000) or "Seu registro não foi aprovado."),
             color=REJECTED_COLOR,
         )
         reason = _safe_text(data.reason)
         if reason:
-            embed.add_field(name="📄 Motivo", value=reason, inline=False)
+            embed.add_field(name="Motivo", value=reason, inline=False)
         return embed

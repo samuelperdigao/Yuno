@@ -153,6 +153,15 @@ CENTRAL_ROUTES: dict[tuple[str, str], CentralRoute] = {
     ("parceria", "diagnostic"): CentralRoute(
         "parceria", "diagnostic", parent=("parceria", "configuration")
     ),
+    ("registration", "overview"): CentralRoute(
+        "registration", "overview", parent=("core", "modules"), next_route=("registration", "configuration")
+    ),
+    ("registration", "configuration"): CentralRoute(
+        "registration", "configuration", parent=("registration", "overview"), next_route=("registration", "diagnostic")
+    ),
+    ("registration", "diagnostic"): CentralRoute(
+        "registration", "diagnostic", parent=("registration", "configuration")
+    ),
 }
 
 
@@ -657,7 +666,14 @@ def build_module_diagnostic_payload(
         uk.panel(
             header=[uk.nexus_title("DIAGNÓSTICO", path=f"MODULES / {module_key}", subtitle="Verificação do subsistema")],
             blocks=[text_display(content)],
-            actions=[route_navigation(module_key, "diagnostic")],
+            actions=[
+                action_row(button(
+                    custom_id=route_custom_id(module_key, "diagnostic"),
+                    label="ATUALIZAR",
+                    style=BUTTON_SECONDARY,
+                )),
+                route_navigation(module_key, "diagnostic"),
+            ],
             footer="SYS://YUNO/NEXUS • DIAGNOSTIC COMPLETE",
             accent_color=uk.NEXUS_VIOLET,
         )
@@ -1047,6 +1063,19 @@ async def _dispatch_visual_route(
             "overview": None,
             "configuration": "open_system",
             "diagnostic": "diagnose",
+        }.get(route, "__invalid__")
+        if target_action == "__invalid__":
+            await _render_invalid_route(interaction)
+            return
+        if target_action is None:
+            await _dispatch_page(interaction, module_key)
+            return
+        await _dispatch_action(interaction, module_key, target_action)
+        return
+    if module_key == "registration" and route != "diagnostic":
+        target_action = {
+            "overview": None,
+            "configuration": "open_system",
         }.get(route, "__invalid__")
         if target_action == "__invalid__":
             await _render_invalid_route(interaction)

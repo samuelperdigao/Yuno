@@ -67,6 +67,50 @@ def test_central_shell_puts_the_official_banner_first() -> None:
     assert dashboard.CENTRAL_BANNER_PATH.is_file()
 
 
+def test_module_diagnostic_uses_refresh_and_deterministic_return() -> None:
+    data = dashboard.build_module_diagnostic_payload(
+        "registration", [{"status": "ONLINE", "summary": "Serviço disponível."}]
+    )
+    rendered = str(data)
+
+    assert "YUNO NEXUS // MODULES / REGISTRATION" in rendered
+    assert dashboard.route_custom_id("registration", "diagnostic") in rendered
+    assert dashboard.route_custom_id("registration", "configuration") in rendered
+    assert "ATUALIZAR" in rendered
+
+
+@pytest.mark.asyncio
+async def test_registration_diagnostic_route_uses_platform_checks(monkeypatch) -> None:
+    edited: list[dict] = []
+
+    class PlatformAPI:
+        async def diagnostics(self, guild_id, module_key):
+            assert (guild_id, module_key) == (100, "registration")
+            return [{"status": "ONLINE", "summary": "Serviço disponível."}]
+
+    async def central_config(_interaction):
+        return {"settings": {}}
+
+    async def edit(_bot, _channel_id, _message_id, data):
+        edited.append(data)
+
+    monkeypatch.setattr(dashboard, "_central_config", central_config)
+    monkeypatch.setattr(dashboard, "_edit_v2", edit)
+    interaction = SimpleNamespace(
+        response=_FakeResponse(),
+        client=SimpleNamespace(platform_api=PlatformAPI()),
+        guild_id=100,
+        channel_id=10,
+        message=SimpleNamespace(id=20),
+    )
+
+    await dashboard._dispatch_visual_route(interaction, "registration", "diagnostic")
+
+    assert len(edited) == 1
+    assert "Serviço disponível." in str(edited[0])
+    assert dashboard.route_custom_id("registration", "configuration") in str(edited[0])
+
+
 @pytest.mark.asyncio
 async def test_central_banner_is_sent_as_a_multipart_attachment() -> None:
     class FakeHTTP:

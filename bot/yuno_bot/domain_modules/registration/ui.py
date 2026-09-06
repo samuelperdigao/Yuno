@@ -42,6 +42,7 @@ from yuno_bot.platform.panels import PanelPublisher
 from yuno_bot.platform.router import RoutedModal, custom_id
 
 COLOR = uk.BRAND
+ADMIN_COLOR = uk.NEXUS_VIOLET
 PANEL_COLOR_CHOICES = (
     ("Amarelo Yuno", "🟡", "#FFC72C"),
     ("Vermelho", "🔴", "#ED4245"),
@@ -177,10 +178,10 @@ def _hex_color(value: str | None) -> int:
 
 def _panel_color_label(value: str | None) -> str:
     normalized = str(value or "").upper()
-    for label, emoji, hex_value in PANEL_COLOR_CHOICES:
+    for label, _emoji, hex_value in PANEL_COLOR_CHOICES:
         if hex_value == normalized:
-            return f"{emoji} {label}"
-    return "🟡 Amarelo Yuno"
+            return label
+    return "Amarelo Yuno"
 
 
 def _panel_color_options(current: str | None) -> list[dict[str, Any]]:
@@ -189,11 +190,10 @@ def _panel_color_options(current: str | None) -> list[dict[str, Any]]:
         {
             "label": label,
             "value": hex_value,
-            "emoji": {"name": emoji},
             "description": f"Destaque {label.lower()} para o painel",
             "default": hex_value == normalized,
         }
-        for label, emoji, hex_value in PANEL_COLOR_CHOICES
+        for label, _emoji, hex_value in PANEL_COLOR_CHOICES
     ]
 
 
@@ -232,24 +232,24 @@ def _resubmit_policy_options(allowed: bool) -> list[dict[str, Any]]:
 
 
 def _rules_section_components(config: dict[str, Any]) -> list[dict[str, Any]]:
-    numeric_only = bool(config["player_id_numeric_only"])
-    resubmit_allowed = bool(config["allow_resubmit_after_rejection"])
+    numeric_only = bool(config.get("player_id_numeric_only", True))
+    resubmit_allowed = bool(config.get("allow_resubmit_after_rejection", True))
     id_format = "Somente números (0–9)" if numeric_only else "Letras (A–Z) e números (0–9)"
     id_example = "12345" if numeric_only else "ABC123"
     resubmit_label = "Permitido" if resubmit_allowed else "Bloqueado"
 
     return [
         text_display(
-            "## ⚙️ 3 · Regras do formulário\n\n"
+            "// REGRAS DO FORMULÁRIO\n\n"
             "Estas são duas regras independentes. Escolha uma opção em cada campo.\n\n"
             f"**Formato atual do ID:** {id_format}\n"
             f"**Exemplo aceito:** `{id_example}`\n"
             "Espaços, acentos e símbolos não são aceitos no ID.\n\n"
             f"**Novo envio após rejeição:** {resubmit_label}\n"
-            f"**Limites:** ID com {config['player_id_min_length']}–{config['player_id_max_length']} caracteres; "
-            f"nome com {config['name_min_length']}–{config['name_max_length']} caracteres."
+            f"**Limites:** ID com {config.get('player_id_min_length', 1)}–{config.get('player_id_max_length', 16)} caracteres; "
+            f"nome com {config.get('name_min_length', 2)}–{config.get('name_max_length', 24)} caracteres."
         ),
-        text_display("### 1. Quais caracteres o ID pode ter?"),
+        text_display("// FORMATO DO ID"),
         action_row(
             string_select(
                 custom_id=dashboard.central_custom_id("registration", "set_id_format"),
@@ -257,7 +257,7 @@ def _rules_section_components(config: dict[str, Any]) -> list[dict[str, Any]]:
                 placeholder="Escolha o formato do ID",
             )
         ),
-        text_display("### 2. O membro pode tentar novamente após uma rejeição?"),
+        text_display("// NOVO ENVIO"),
         action_row(
             string_select(
                 custom_id=dashboard.central_custom_id("registration", "set_resubmit_policy"),
@@ -266,8 +266,8 @@ def _rules_section_components(config: dict[str, Any]) -> list[dict[str, Any]]:
             )
         ),
         action_row(
-            button(custom_id=dashboard.central_custom_id("registration", "edit_rules"), label="Editar limites", emoji="✏️", style=2),
-            button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="Revisar e publicar", emoji="👁️", style=1),
+            button(custom_id=dashboard.central_custom_id("registration", "edit_rules"), label="EDITAR LIMITES", style=2),
+            button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="REVISAR E PUBLICAR", style=1),
         ),
     ]
 
@@ -368,17 +368,18 @@ async def render_review(context: dict) -> ComponentsV2Payload:
         fallback="Será definido na aprovação",
     )
     identity = text_display(
-        uk.heading(titles.get(status, "Solicitação de registro"), emoji="📝")
+        "// SOLICITAÇÃO DE REGISTRO\n\n"
+        + uk.heading(titles.get(status, "Solicitação de registro"))
+        + "\n\n"
+        + uk.nexus_state("ESTADO", status_labels.get(status, "Estado indisponível"), state=state)
+        + "\n\n"
+        + "// DADOS ENVIADOS"
         + "\n"
-        + uk.badge(state, status_labels.get(status, "Estado indisponível"), bold=True)
+        + uk.field("Membro", member)
         + "\n\n"
-        + uk.heading("Dados enviados", level=3)
-        + "\n"
-        + uk.field("Membro", member, emoji="👤")
+        + uk.inline_fields(("Nome", submitted_name), ("ID", f"`{player_id}`"))
         + "\n\n"
-        + uk.inline_fields(("📛 Nome", submitted_name), ("🎮 ID", f"`{player_id}`"))
-        + "\n\n"
-        + uk.field("Enviado em", _discord_time(request.get("created_at")), emoji="🕒")
+        + uk.field("Enviado em", _discord_time(request.get("created_at")))
     )
     avatar_url = str(context.get("avatar_url") or "")
     if avatar_url.startswith(("https://", "http://")):
@@ -396,9 +397,9 @@ async def render_review(context: dict) -> ComponentsV2Payload:
             [
                 separator(),
                 text_display(
-                    uk.heading("Resultado esperado", level=3)
+                    "// RESULTADO ESPERADO"
                     + "\n"
-                    + uk.field("Apelido após aprovação", target_nickname, emoji="🏷️")
+                    + uk.field("Apelido após aprovação", target_nickname)
                     + "\n\n"
                     + uk.subtext("Confira os dados e escolha uma única decisão.")
                 ),
@@ -406,13 +407,11 @@ async def render_review(context: dict) -> ComponentsV2Payload:
                     button(
                         custom_id=custom_id("registration", "review", "approve"),
                         label="Aprovar",
-                        emoji="✅",
                         style=3,
                     ),
                     button(
                         custom_id=custom_id("registration", "review", "reject"),
                         label="Rejeitar",
-                        emoji="❌",
                         style=4,
                     ),
                 ),
@@ -423,7 +422,7 @@ async def render_review(context: dict) -> ComponentsV2Payload:
             [
                 separator(),
                 text_display(
-                    uk.heading("Aprovação em andamento", level=3)
+                    "// PROCESSAMENTO"
                     + "\n"
                     + "O Yuno está aplicando o apelido e o cargo. "
                     "As ações ficam bloqueadas até a conclusão."
@@ -443,19 +442,18 @@ async def render_review(context: dict) -> ComponentsV2Payload:
             [
                 separator(),
                 text_display(
-                    uk.heading("Resultado", level=3)
+                    "// RESULTADO"
                     + "\n"
-                    + uk.field("Aprovado por", reviewer, emoji="👮")
+                    + uk.field("Aprovado por", reviewer)
                     + "\n\n"
                     + uk.inline_fields(
-                        ("🎭 Cargo aplicado", role),
-                        ("🏷️ Apelido aplicado", target_nickname),
+                        ("Cargo aplicado", role),
+                        ("Apelido aplicado", target_nickname),
                     )
                     + "\n\n"
                     + uk.field(
                         "Concluído em",
                         _discord_time(context.get("decision_at") or request.get("approved_at")),
-                        emoji="🕒",
                     )
                 ),
             ]
@@ -472,16 +470,15 @@ async def render_review(context: dict) -> ComponentsV2Payload:
             [
                 separator(),
                 text_display(
-                    uk.heading("Resultado", level=3)
+                    "// RESULTADO"
                     + "\n"
-                    + uk.field("Rejeitado por", reviewer, emoji="👮")
+                    + uk.field("Rejeitado por", reviewer)
                     + "\n\n"
-                    + uk.field("Motivo", reason, emoji="📄")
+                    + uk.field("Motivo", reason)
                     + "\n\n"
                     + uk.field(
                         "Concluído em",
                         _discord_time(context.get("decision_at") or request.get("rejected_at")),
-                        emoji="🕒",
                     )
                 ),
             ]
@@ -678,12 +675,12 @@ def _section_select() -> dict[str, Any]:
     return string_select(
         custom_id=dashboard.central_custom_id("registration", "section"),
         options=[
-            {"label": "1 · Canais", "value": "channels", "emoji": {"name": "📍"}},
-            {"label": "2 · Equipe e cargo", "value": "team", "emoji": {"name": "👥"}},
-            {"label": "3 · Regras do formulário", "value": "rules", "emoji": {"name": "⚙️"}},
-            {"label": "4 · Aparência do painel", "value": "panel", "emoji": {"name": "🎨"}},
-            {"label": "5 · Mensagens", "value": "messages", "emoji": {"name": "💬"}},
-            {"label": "6 · Logs e avisos", "value": "notifications", "emoji": {"name": "📣"}},
+            {"label": "01 · Canais", "value": "channels"},
+            {"label": "02 · Equipe e cargo", "value": "team"},
+            {"label": "03 · Regras do formulário", "value": "rules"},
+            {"label": "04 · Painel público", "value": "panel"},
+            {"label": "05 · Mensagens", "value": "messages"},
+            {"label": "06 · Logs e avisos", "value": "notifications"},
         ],
         placeholder="Selecione uma etapa do Registro",
     )
@@ -702,7 +699,7 @@ async def _replace_central(
     target_message = message_id or getattr(interaction.message, "id", None)
     if target_channel is None or target_message is None:
         raise RuntimeError("Referência da Central indisponível.")
-    await edit_message(interaction.client, target_channel, target_message, data)
+    await dashboard.edit_central_message(interaction.client, target_channel, target_message, data)
 
 
 async def _defer_if_needed(interaction: discord.Interaction) -> None:
@@ -728,48 +725,46 @@ def build_admin_payload(instance: dict, draft: dict) -> dict[str, Any]:
     published = int(draft["base_published_version"] or 0)
     config = {**REGISTRATION_VISUAL_DEFAULTS, **draft["data"]}
     is_active = published > 0 and instance["lifecycle"] == "active"
-    action_label = "Configurar Registro"
+    action_label = "CONFIGURAR"
     if is_active:
-        status = f"🟢 **Ativo** · versão `{published}`"
+        state = uk.State.APPROVED
+        status = "Operacional"
         status_detail = "O painel está disponível para os membros."
     elif published:
-        status = f"🟠 **Desativado** · versão `{published}`"
+        state = uk.State.DISABLED
+        status = "Desativado"
         status_detail = "A configuração está publicada, mas o módulo não está atendendo membros."
     else:
-        status = "⚪ **Ainda não publicado**"
+        state = uk.State.PENDING
+        status = "Aguardando publicação"
         status_detail = "Conclua as etapas e publique quando estiver pronto."
 
     approver_count = len(config["approver_role_ids"])
     approver_label = "cargo configurado" if approver_count == 1 else "cargos configurados"
-    return payload(
-        container(
-            dashboard.module_navigation("registration"),
-            separator(spacing=1),
-            text_display(
-                "# Registro\n\n"
-                "Formulário, análise e aprovação de novos membros da organização."
-            ),
-            separator(spacing=1),
-            text_display(f"### Status\n{status}\n{status_detail}"),
-            separator(spacing=1),
-            text_display(
-                "### Fluxo atual\n"
-                f"**Painel dos membros** — {_discord_ref(config['panel_channel_id'], kind='channel')}\n"
-                f"**Fila de análise** — {_discord_ref(config['approval_channel_id'], kind='channel')}\n"
-                f"**Cargo após aprovação** — {_discord_ref(config['member_role_id'], kind='role')}\n"
-                f"**Equipe aprovadora** — {approver_count} {approver_label}"
-            ),
-            separator(spacing=1, divider=False),
-            action_row(
-                button(
-                    custom_id=dashboard.central_custom_id("registration", "open_system"),
-                    label=action_label,
-                    style=2,
-                )
-            ),
-            accent_color=COLOR,
+    return dashboard.central_shell(payload(
+        uk.panel(
+            header=[uk.nexus_title("REGISTRO", path="MODULES / REGISTRATION", subtitle="Registro, análise e aprovação de membros")],
+            blocks=[
+                text_display(uk.nexus_state("ESTADO", status, state=state) + "\n" + status_detail),
+                text_display("// CONFIGURAÇÃO\n\n" + uk.nexus_metrics(
+                    ("PAINEL", _discord_ref(config["panel_channel_id"], kind="channel")),
+                    ("ANÁLISE", _discord_ref(config["approval_channel_id"], kind="channel")),
+                    ("CARGO", _discord_ref(config["member_role_id"], kind="role")),
+                    ("APROVADORES", f"{approver_count:02d} {approver_label}"),
+                )),
+            ],
+            actions=[
+                action_row(
+                    button(custom_id=dashboard.central_custom_id("registration", "open_system"), label=action_label, style=1),
+                    button(custom_id=dashboard.route_custom_id("registration", "diagnostic"), label="DIAGNÓSTICO", style=2),
+                ),
+                dashboard.route_navigation("registration", "overview"),
+            ],
+            footer="NEXUS CORE // SESSION ACTIVE",
+            state=state,
+            accent_color=ADMIN_COLOR,
         )
-    )
+    ))
 
 
 async def render_admin(interaction: discord.Interaction, api: Any) -> None:
@@ -796,9 +791,8 @@ async def _render_section(
     _, draft = await _admin_state(api, interaction.guild_id)
     config = {**REGISTRATION_VISUAL_DEFAULTS, **draft["data"]}
     components: list[dict[str, Any]] = [
-        dashboard.module_navigation("registration"),
-        separator(spacing=1),
-        text_display("# 📝 Registro\n\nConfigure uma etapa por vez. As alterações só entram no painel público depois da sua confirmação."),
+        text_display(uk.nexus_title("CONFIGURAÇÃO", path="MODULES / REGISTRATION / CONFIG", subtitle="Altere uma área por vez. As escolhas ficam em rascunho até a publicação.")),
+        text_display("// ÁREA DE CONFIGURAÇÃO"),
         action_row(_section_select()),
         separator(),
     ]
@@ -806,7 +800,7 @@ async def _render_section(
         components.extend(
             [
                 text_display(
-                    "## 📍 1 · Canais\n\n"
+                    "// CANAIS\n\n"
                     "Escolha onde o painel será publicado e onde a equipe trabalhará.\n\n"
                     f"Painel público: {_discord_ref(config['panel_channel_id'], kind='channel')}\n"
                     f"Análise: {_discord_ref(config['approval_channel_id'], kind='channel')}\n"
@@ -815,15 +809,15 @@ async def _render_section(
                 action_row(channel_select(custom_id=dashboard.central_custom_id("registration", "set_panel_channel"), placeholder="Publicar o painel de registro em…", channel_types=[0])),
                 action_row(channel_select(custom_id=dashboard.central_custom_id("registration", "set_approval_channel"), placeholder="Receber solicitações para análise em…", channel_types=[0])),
                 action_row(channel_select(custom_id=dashboard.central_custom_id("registration", "set_log_channel"), placeholder="Enviar histórico e logs em…", channel_types=[0])),
-                action_row(button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="Revisar e publicar", emoji="👁️", style=1)),
+                action_row(button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="REVISAR E PUBLICAR", style=1)),
             ]
         )
     elif section == "team":
-        approvers = ", ".join(f"<@&{value}>" for value in config["approver_role_ids"]) or "⚪ Nenhum definido"
+        approvers = ", ".join(f"<@&{value}>" for value in config["approver_role_ids"]) or "Não definido"
         components.extend(
             [
                 text_display(
-                    "## 👥 2 · Equipe e cargo\n\n"
+                    "// EQUIPE E CARGO\n\n"
                     "Defina quem analisa os pedidos e o que o membro recebe ao ser aprovado.\n\n"
                     f"Cargo entregue: {_discord_ref(config['member_role_id'], kind='role')}\n"
                     f"Equipe responsável: {approvers}\n"
@@ -833,8 +827,8 @@ async def _render_section(
                 action_row(role_select(custom_id=dashboard.central_custom_id("registration", "add_approvers"), placeholder="Adicionar cargos aprovadores", max_values=25)),
                 action_row(role_select(custom_id=dashboard.central_custom_id("registration", "remove_approvers"), placeholder="Remover cargos aprovadores", max_values=25)),
                 action_row(
-                    button(custom_id=dashboard.central_custom_id("registration", "edit_team"), label="Editar formato do apelido", emoji="✏️", style=2),
-                    button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="Revisar e publicar", emoji="👁️", style=1),
+                    button(custom_id=dashboard.central_custom_id("registration", "edit_team"), label="EDITAR APELIDO", style=2),
+                    button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="REVISAR E PUBLICAR", style=1),
                 ),
             ]
         )
@@ -844,11 +838,11 @@ async def _render_section(
         components.extend(
             [
                 text_display(
-                    "## 🎨 4 · Aparência do painel\n\n"
+                    "// PAINEL PÚBLICO\n\n"
                     "**Prévia do conteúdo**\n"
                     f"### {config['panel_title']}\n{config['panel_description']}\n\n"
                     f"{config['panel_instructions']}\n\n"
-                    f"Botão: **{config['button_emoji']} {config['button_label']}**\n"
+                    f"Ação: **{config['button_label']}**\n"
                     f"Cor do destaque: **{_panel_color_label(config['panel_color'])}**"
                 ),
                 action_row(
@@ -859,8 +853,8 @@ async def _render_section(
                     )
                 ),
                 action_row(
-                    button(custom_id=dashboard.central_custom_id("registration", "edit_panel"), label="Editar textos do painel", emoji="✏️", style=2),
-                    button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="Revisar e publicar", emoji="👁️", style=1),
+                    button(custom_id=dashboard.central_custom_id("registration", "edit_panel"), label="EDITAR TEXTOS", style=2),
+                    button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="REVISAR E PUBLICAR", style=1),
                 ),
             ]
         )
@@ -868,16 +862,16 @@ async def _render_section(
         components.extend(
             [
                 text_display(
-                    "## 💬 5 · Mensagens\n\n"
+                    "// MENSAGENS\n\n"
                     f"**Solicitação enviada**\n{config['submitted_message']}\n\n"
                     f"**Registro aprovado**\n{config['approved_message']}\n\n"
                     f"**Registro rejeitado**\n{config['rejected_message']}"
                 ),
                 action_row(
-                    button(custom_id=dashboard.central_custom_id("registration", "edit_messages"), label="Editar respostas", emoji="✏️", style=2),
-                    button(custom_id=dashboard.central_custom_id("registration", "edit_errors"), label="Editar avisos", emoji="⚠️", style=2),
+                    button(custom_id=dashboard.central_custom_id("registration", "edit_messages"), label="EDITAR RESPOSTAS", style=2),
+                    button(custom_id=dashboard.central_custom_id("registration", "edit_errors"), label="EDITAR AVISOS", style=2),
                 ),
-                action_row(button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="Revisar e publicar", emoji="👁️", style=1)),
+                action_row(button(custom_id=dashboard.central_custom_id("registration", "review_publish"), label="REVISAR E PUBLICAR", style=1)),
             ]
         )
     elif section == "notifications":
@@ -885,7 +879,7 @@ async def _render_section(
         components.extend(
             [
                 text_display(
-                    "## 📣 6 · Logs e avisos\n\n"
+                    "// LOGS E AVISOS\n\n"
                     "Personalize a apresentação sem esconder os dados obrigatórios da decisão.\n\n"
                     f"**Log de aprovação**\n{config['log_approved_title']}\n\n"
                     f"**Log de rejeição**\n{config['log_rejected_title']}\n\n"
@@ -915,14 +909,12 @@ async def _render_section(
                 action_row(
                     button(
                         custom_id=dashboard.central_custom_id("registration", "edit_notifications"),
-                        label="Editar títulos e rodapé",
-                        emoji="✏️",
+                        label="EDITAR TÍTULOS E RODAPÉ",
                         style=2,
                     ),
                     button(
                         custom_id=dashboard.central_custom_id("registration", "review_publish"),
-                        label="Revisar e publicar",
-                        emoji="👁️",
+                        label="REVISAR E PUBLICAR",
                         style=1,
                     ),
                 ),
@@ -932,7 +924,15 @@ async def _render_section(
         raise RuntimeError("Seção de configuração do Registro inválida.")
     await _replace_central(
         interaction,
-        payload(container(*components, accent_color=COLOR)),
+        dashboard.central_shell(payload(
+            uk.panel(
+                header=[],
+                blocks=components,
+                actions=[dashboard.route_navigation("registration", "configuration")],
+                footer="SYS://YUNO/NEXUS • CONFIGURATION DRAFT",
+                accent_color=ADMIN_COLOR,
+            )
+        )),
         channel_id=channel_id,
         message_id=message_id,
     )
@@ -1258,36 +1258,64 @@ async def _preflight(guild: discord.Guild, config: dict) -> list[str]:
     return errors
 
 
+async def _render_publish_incident(
+    interaction: discord.Interaction, errors: list[str]
+) -> None:
+    """Mostra bloqueios verificáveis na própria mensagem Nexus, sem vazar detalhes internos."""
+
+    reasons = "\n".join(f"• {error}" for error in errors[:8])
+    await _replace_central(
+        interaction,
+        dashboard.central_shell(payload(
+            uk.panel(
+                header=[uk.nexus_title("INCIDENTE", path="MODULES / REGISTRATION / PUBLISH", subtitle="A publicação não pode continuar")],
+                blocks=[
+                    text_display("// INCIDENTE\n\nNão foi possível publicar a configuração. Corrija a configuração indicada antes de tentar novamente."),
+                    text_display("**MOTIVO**\n" + reasons),
+                ],
+                actions=[
+                    action_row(button(custom_id=dashboard.route_custom_id("registration", "configuration"), label="CORRIGIR CONFIGURAÇÃO", style=1)),
+                    dashboard.route_navigation("registration", "configuration"),
+                ],
+                footer="SYS://YUNO/NEXUS • ACTION REQUIRED",
+                state=uk.State.BLOCKED,
+                accent_color=uk.DANGER,
+            )
+        )),
+    )
+
+
 async def review_publish(interaction: discord.Interaction, api: Any) -> None:
     await _defer_if_needed(interaction)
     draft = await api.configuration_draft(interaction.guild_id, "registration")
     errors = await _preflight(interaction.guild, draft["data"])
     if errors:
-        await _send_interaction_error(
-            interaction, "Publicação bloqueada:\n- " + "\n- ".join(errors)
-        )
+        await _render_publish_incident(interaction, errors)
         return
     config = draft["data"]
-    data = payload(
-        container(
-            dashboard.module_navigation("registration"),
-            separator(spacing=1),
-            text_display(
-                "# 👁️ Revisar publicação do Registro\n\n"
-                f"Painel: <#{config['panel_channel_id']}>\n"
-                f"Analise: <#{config['approval_channel_id']}>\n"
-                f"Cargo: <@&{config['member_role_id']}>\n"
-                f"Aprovadores: **{len(config['approver_role_ids'])}**\n"
-                f"Formato do apelido: `{config['nickname_template']}`\n\n"
-                "A confirmação cria uma versão imutável e reconcilia o painel público."
-            ),
-            action_row(
-                button(custom_id=dashboard.central_custom_id("registration", "confirm_publish"), label="Confirmar publicação", emoji="✅", style=3),
-                button(custom_id=dashboard.central_custom_id("registration", "open_system"), label="Voltar", emoji="↩️", style=2),
-            ),
-            accent_color=COLOR,
+    data = dashboard.central_shell(payload(
+        uk.panel(
+            header=[uk.nexus_title("REVISAR PUBLICAÇÃO", path="MODULES / REGISTRATION / PUBLISH", subtitle="Confirme os recursos que serão ativados")],
+            blocks=[
+                text_display("// CONFIGURAÇÃO\n\n" + uk.nexus_metrics(
+                    ("PAINEL", f"<#{config['panel_channel_id']}>"),
+                    ("ANÁLISE", f"<#{config['approval_channel_id']}>"),
+                    ("CARGO", f"<@&{config['member_role_id']}>"),
+                    ("APROVADORES", f"{len(config['approver_role_ids']):02d}"),
+                )),
+                text_display("A confirmação cria uma versão imutável e reconcilia o painel público."),
+            ],
+            actions=[
+                action_row(
+                    button(custom_id=dashboard.central_custom_id("registration", "confirm_publish"), label="PUBLICAR", style=1),
+                    button(custom_id=dashboard.route_custom_id("registration", "configuration"), label="VOLTAR", style=2),
+                ),
+                dashboard.route_navigation("registration", "configuration"),
+            ],
+            footer="SYS://YUNO/NEXUS • READY TO PUBLISH",
+            accent_color=ADMIN_COLOR,
         )
-    )
+    ))
     await _replace_central(interaction, data)
 
 
@@ -1297,9 +1325,7 @@ async def confirm_publish(interaction: discord.Interaction, api: Any) -> None:
     draft = await api.configuration_draft(interaction.guild_id, "registration")
     errors = await _preflight(interaction.guild, draft["data"])
     if errors:
-        await _send_interaction_error(
-            interaction, "Publicação bloqueada:\n- " + "\n- ".join(errors)
-        )
+        await _render_publish_incident(interaction, errors)
         return
     grants = [
         {
@@ -1362,7 +1388,7 @@ async def confirm_publish(interaction: discord.Interaction, api: Any) -> None:
                 },
             )
             await interaction.followup.send(
-                content="Versão publicada, mas o painel visual ficou na versão anterior. A reconciliação foi enfileirada."
+                content="// PUBLICAÇÃO\nVersão publicada. A reconciliação do painel foi enfileirada."
                 , ephemeral=True
             )
             return
@@ -1377,7 +1403,7 @@ async def confirm_publish(interaction: discord.Interaction, api: Any) -> None:
             )
         await render_admin(interaction, api)
         await interaction.followup.send(
-            f"Registro publicado na versão {version['version']}.", ephemeral=True
+            f"SYS://OPERATION_COMPLETE\nRegistro publicado na versão {version['version']}.", ephemeral=True
         )
     except Exception as exc:
         await _send_interaction_error(interaction, error_text(exc))

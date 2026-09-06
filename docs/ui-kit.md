@@ -335,3 +335,18 @@ conhece contrato.
 | `domain_modules/tags` | migrado (`ui.py`) |
 | `diagnostics.py` | importa os tokens |
 | `commands/*` | legado aposentado (`retired=True`), fora da Central |
+
+### Registro: contrato visual administrativo
+
+O Registro usa as rotas `overview`, `configuration` e `diagnostic` da Central.
+Sua visão geral sempre usa `nexus_title`, `nexus_state`, `nexus_metrics`, o
+banner aplicado por `central_shell` e `route_navigation`; configuração e
+publicação editam a mesma mensagem. As seis áreas permanecem as mesmas
+(`canais`, `equipe`, `regras`, `painel`, `mensagens`, `logs`), assim como seus
+`custom_id`s, selects e modais: a migração é exclusivamente de composição.
+
+Use `// INCIDENTE` somente quando o preflight realmente retornar bloqueios.
+O diagnóstico é a rota compartilhada da Central e só exibe checks retornados
+pela Platform API. Painéis públicos, revisão operacional, DMs e logs não usam
+o shell administrativo; neles a identidade é limpa e contextual, preservando
+os dados e o fluxo operacional.
