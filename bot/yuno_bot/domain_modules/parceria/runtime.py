@@ -1,15 +1,18 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import io
+import re
 from typing import Any
 
 import discord
+import httpx
 
 from yuno_bot.platform.contracts import ActorContext, RetryableJobError
 from yuno_bot.platform.panels import PanelPublisher
 
 
 MODULE_KEY = "parceria"
+MAX_PUBLICATION_IMAGE_BYTES = 8 * 1024 * 1024
 
 
 def system_actor(bot: discord.Client, guild_id: int, correlation_id: str) -> ActorContext:
@@ -55,14 +58,46 @@ async def _channel(guild: discord.Guild, channel_id: str):
     return channel
 
 
-def _embed(item: dict[str, Any]) -> discord.Embed:
+def _image_filename(item: dict[str, Any]) -> str:
+    image = item.get("image") or {}
+    original = str(image.get("original_filename") or "").strip()
+    filename = re.sub(r"[^A-Za-z0-9._-]+", "_", original).strip("._")
+    if not filename:
+        content_type = str(image.get("content_type") or "image/png").casefold()
+        extension = {
+            "image/jpeg": ".jpg",
+            "image/webp": ".webp",
+        }.get(content_type, ".png")
+        filename = f"parceria-{item.get('id') or 'imagem'}{extension}"
+    return filename[:100]
+
+
+async def _publication_image(item: dict[str, Any]) -> tuple[discord.File, str]:
+    image = item.get("image") or {}
+    url = str(image.get("storage_url") or "").strip()
+    if not url.startswith(("https://", "http://")):
+        raise RetryableJobError("Imagem persistida da parceria indisponível para publicação.")
+    filename = _image_filename(item)
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise RetryableJobError("Não foi possível baixar a imagem persistida da parceria.") from exc
+    if len(response.content) > MAX_PUBLICATION_IMAGE_BYTES:
+        raise RetryableJobError("Imagem da parceria excedeu o limite de publicação.")
+    return discord.File(io.BytesIO(response.content), filename=filename), f"attachment://{filename}"
+
+
+def _embed(item: dict[str, Any], *, image_url: str | None = None) -> discord.Embed:
     embed = discord.Embed(title=f"🤝 {item.get('family_name') or 'Parceria'}", description=f"Produto: **{item.get('product_name') or 'Não informado'}**", color=0xFFC72C)
     contacts = item.get("contacts") or []
     if contacts:
         embed.add_field(name="Contato", value="\n".join(str(value) for value in contacts), inline=False)
     image = item.get("image") or {}
-    if image.get("storage_url", "").startswith(("https://", "http://")):
-        embed.set_image(url=image["storage_url"])
+    image_url = image_url or image.get("storage_url")
+    if str(image_url or "").startswith(("https://", "http://", "attachment://")):
+        embed.set_image(url=image_url)
     return embed
 
 
@@ -104,8 +139,15 @@ async def deliver_publication(bot: discord.Client, item: dict[str, Any]) -> str 
                 pass
         await api.parceria_publication_result(guild.id, parceria["id"], {"revision": revision, "status": "published", "channel_id": str(channel.id), "message_id": None}, actor=actor)
         return None
-    if message is None:
-        message = await channel.send(embed=_embed(parceria))
+    image_file, image_url = await _publication_image(parceria)
+    try:
+        embed = _embed(parceria, image_url=image_url)
+        if message is None:
+            message = await channel.send(embed=embed, file=image_file)
+        else:
+            await message.edit(embed=embed, attachments=[image_file])
+    finally:
+        image_file.close()
     await api.parceria_publication_result(guild.id, parceria["id"], {"revision": revision, "status": "published", "channel_id": str(channel.id), "message_id": str(message.id)}, actor=actor)
     return str(message.id)
 

@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT / "bot"))
 from yuno_bot import dashboard  # noqa: E402
 from yuno_bot.domain_modules.parceria import MODULE_UI  # noqa: E402
 from yuno_bot.domain_modules.parceria.admin import build_admin_payload  # noqa: E402
+from yuno_bot.domain_modules.parceria.runtime import _embed  # noqa: E402
 from yuno_bot.platform.registry import discover_ui_modules  # noqa: E402
 
 
@@ -80,3 +81,18 @@ def test_parceria_admin_payload_uses_components_v2_header_components() -> None:
     assert header[0]["type"] == 1
     assert header[1]["type"] == 14
     assert header[2]["type"] == 10
+
+
+def test_parceria_publication_embed_references_the_uploaded_attachment() -> None:
+    embed = _embed(
+        {
+            "id": "parceria-1",
+            "family_name": "Morro do Mineiro",
+            "product_name": "Coletes",
+            "contacts": ["999999"],
+            "image": {"original_filename": "uniforme.png"},
+        },
+        image_url="attachment://uniforme.png",
+    )
+
+    assert embed.image.url == "attachment://uniforme.png"
