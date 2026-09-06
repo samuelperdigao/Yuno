@@ -28,6 +28,7 @@ async def enqueue_delivery(
     idempotency_key: str,
     correlation_id: str,
     max_attempts: int,
+    commit: bool = True,
 ) -> DeliveryOutbox:
     if module_registry.get(module_key) is None:
         raise HTTPException(status_code=404, detail="Modulo desconhecido.")
@@ -79,7 +80,8 @@ async def enqueue_delivery(
                 )
             )
         ).scalar_one()
-    await session.commit()
+    if commit:
+        await session.commit()
     return delivery
 
 

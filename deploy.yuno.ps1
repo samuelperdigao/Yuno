@@ -164,7 +164,7 @@ with sqlite3.connect(sys.argv[1]) as backup, sqlite3.connect(sys.argv[2]) as mig
     if before != after:
         raise SystemExit(f"Contagens protegidas divergiram: {before} != {after}")
     head = migrated.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-    if head != "a9b0c1d2e3f4":
+    if head != "b1c2d3e4f5a6":
         raise SystemExit(f"Head inesperado na copia migrada: {head}")
     legacy = migrated.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='farm_weekly_goals'"
@@ -246,7 +246,7 @@ PY
   v2_event_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_events")
   DATABASE_URL="`$rehearsal_url" .venv/bin/python -m alembic -c backend/alembic.ini upgrade head
   rehearsal_head=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c 'select version_num from alembic_version')
-  test "`$rehearsal_head" = "a9b0c1d2e3f4"
+  test "`$rehearsal_head" = "b1c2d3e4f5a6"
   test "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select to_regclass('public.farm_tickets') is null")" = "t"
   test "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select to_regclass('public.farm_cycles') is null")" = "t"
   archive_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_legacy_archive where source_namespace='yuno.legacy.farm_tickets.cutover'")
@@ -311,7 +311,7 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
 else
   actual_head=`$(.venv/bin/python -m alembic -c backend/alembic.ini current | tail -n 1 | awk '{print `$1}')
 fi
-test "`$actual_head" = "a9b0c1d2e3f4"
+test "`$actual_head" = "b1c2d3e4f5a6"
 echo "ALEMBIC_HEAD=`$actual_head"
 
 echo "DEPLOYED_SHA=`$(git rev-parse HEAD)"

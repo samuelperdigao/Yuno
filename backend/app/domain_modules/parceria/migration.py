@@ -5,7 +5,16 @@ from typing import Any
 from sqlalchemy import select
 
 from app.domain_modules.parceria.domain import ParceriaStatus, normalize_family
-from app.domain_modules.parceria.models import Parceria, ParceriaFamily, ParceriaImage, ParceriaProduct
+from app.domain_modules.parceria.domain import PublicationStatus
+from app.domain_modules.parceria.models import (
+    Parceria,
+    ParceriaContact,
+    ParceriaFamily,
+    ParceriaImage,
+    ParceriaProduct,
+    ParceriaPublication,
+)
+from app.platform.audit import write_audit
 from app.models import GuildConfig, Parceria as LegacyParceria, ParceriaConfig as LegacyConfig
 
 
@@ -50,6 +59,10 @@ class ParceriaMigration:
 async def backfill_legacy(session: Any, *, guild_id: str, correlation_id: str, dry_run: bool = False) -> dict[str, Any]:
     """Backfill repetível: só cria dados novos e nunca apaga os legados."""
 
+    legacy_config = (
+        await session.execute(select(LegacyConfig).where(LegacyConfig.guild_id == guild_id))
+    ).scalar_one_or_none()
+    public_channel_id = getattr(legacy_config, "ativas_channel_id", None)
     legacy_rows = list((await session.execute(select(LegacyParceria).where(LegacyParceria.guild_id == guild_id).order_by(LegacyParceria.id))).scalars())
     created = 0
     skipped = 0
@@ -68,12 +81,39 @@ async def backfill_legacy(session: Any, *, guild_id: str, correlation_id: str, d
             created += 1
             continue
         family = ParceriaFamily(guild_id=guild_id, name=row.nome_familia, name_normalized=normalized, active=bool(row.ativo), legacy_id=row.id)
-        image = ParceriaImage(guild_id=guild_id, storage_key=f"legacy:{guild_id}:{row.id}:{row.nome_arquivo_imagem or 'missing'}", storage_url=None, content_type="application/octet-stream", size_bytes=0, original_filename=row.nome_arquivo_imagem, uploaded_by=row.registrado_por)
+        image = ParceriaImage(guild_id=guild_id, storage_key=f"legacy:{guild_id}:{row.id}:{row.nome_arquivo_imagem or 'missing'}", storage_url=None, content_type="application/octet-stream", size_bytes=0, source_kind="legacy", original_filename=row.nome_arquivo_imagem, uploaded_by=row.registrado_por)
         session.add_all([family, image])
         await session.flush()
-        item = Parceria(guild_id=guild_id, family_id=family.id, status=ParceriaStatus.active if row.ativo else ParceriaStatus.inactive, registered_by=row.registrado_por, image_asset_id=image.id, public_message_id=row.mensagem_lista_id, legacy_id=row.id)
+        item = Parceria(guild_id=guild_id, family_id=family.id, status=ParceriaStatus.active if row.ativo else ParceriaStatus.inactive, registered_by=row.registrado_por, image_asset_id=image.id, public_channel_id=public_channel_id, public_message_id=row.mensagem_lista_id, legacy_id=row.id)
         session.add(item)
         await session.flush()
         session.add(ParceriaProduct(guild_id=guild_id, parceria_id=item.id, name=row.produto))
+        for position, value in enumerate((row.contato_01, row.contato_02), start=1):
+            if value:
+                session.add(ParceriaContact(guild_id=guild_id, parceria_id=item.id, position=position, value=value))
+        if public_channel_id and row.mensagem_lista_id:
+            session.add(
+                ParceriaPublication(
+                    guild_id=guild_id,
+                    parceria_id=item.id,
+                    channel_id=str(public_channel_id),
+                    message_id=str(row.mensagem_lista_id),
+                    revision=1,
+                    status=PublicationStatus.published,
+                    idempotency_key=f"parceria:{guild_id}:{item.id}:publication:1",
+                )
+            )
         created += 1
-    return {"guild_id": guild_id, "created": created, "skipped": skipped, "conflicts": conflicts, "dry_run": dry_run}
+    report = {"guild_id": guild_id, "created": created, "skipped": skipped, "conflicts": conflicts, "dry_run": dry_run}
+    if not dry_run:
+        await write_audit(
+            session,
+            guild_id=guild_id,
+            module_key="parceria",
+            action="parceria.legacy_backfill",
+            resource_type="parceria_migration",
+            actor_type="system",
+            after=report,
+            correlation_id=correlation_id,
+        )
+    return report

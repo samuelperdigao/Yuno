@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.domain_modules.parceria.domain import ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, normalize_family
 from app.platform.schemas import ActorContextIn
@@ -38,12 +38,21 @@ class RegistrationAttemptCommand(RegistrationAttemptCreate):
 
 
 class ImageAttachIn(BaseModel):
-    storage_key: str = Field(min_length=1, max_length=255)
+    storage_key: str | None = Field(default=None, min_length=1, max_length=255)
     storage_url: str | None = Field(default=None, max_length=1000)
-    content_type: str
-    size_bytes: int = Field(gt=0, le=MAX_IMAGE_BYTES)
+    content_type: str | None = None
+    size_bytes: int | None = Field(default=None, gt=0, le=MAX_IMAGE_BYTES)
     checksum: str | None = Field(default=None, max_length=128)
     original_filename: str | None = Field(default=None, max_length=255)
+    source_url: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_source(self) -> "ImageAttachIn":
+        if self.source_url:
+            return self
+        if not self.storage_key or not self.content_type or self.size_bytes is None:
+            raise ValueError("Informe source_url ou os metadados completos do asset.")
+        return self
 
 
 class ImageAttachCommand(ImageAttachIn):
@@ -72,6 +81,7 @@ class PartnershipDeactivateCommand(BaseModel):
 
 class AutomationCommand(BaseModel):
     actor: ActorContextIn
+    attempt_id: str | None = Field(default=None, min_length=1, max_length=36)
 
 
 class PublicationResultCommand(BaseModel):

@@ -28,6 +28,24 @@ def system_actor(bot: discord.Client, guild_id: int, correlation_id: str) -> Act
     )
 
 
+def actor_from_message(message: discord.Message) -> ActorContext:
+    guild = message.guild
+    if guild is None:
+        raise ValueError("A mensagem precisa pertencer a uma guild.")
+    member = message.author if isinstance(message.author, discord.Member) else None
+    return ActorContext(
+        guild_id=guild.id,
+        user_id=message.author.id,
+        role_ids=tuple(role.id for role in member.roles) if member else (),
+        discord_permissions=tuple(name for name, enabled in member.guild_permissions if enabled) if member else (),
+        channel_id=message.channel.id,
+        category_id=getattr(message.channel, "category_id", None),
+        actor_type="user",
+        is_guild_owner=bool(member and guild.owner_id == member.id),
+        correlation_id=f"parceria-image:{message.id}",
+    )
+
+
 async def _channel(guild: discord.Guild, channel_id: str):
     channel = guild.get_channel(int(channel_id))
     if channel is None:
@@ -119,12 +137,15 @@ async def run_job(bot: discord.Client, api: Any, item: dict[str, Any]) -> dict[s
     key = item["key"]
     if key == "parceria.registration.expire":
         actor = system_actor(bot, guild.id, item["correlation_id"])
-        return await api._request("POST", f"/guilds/{guild.id}/modules/parceria/recovery/expire", json={"actor": actor.as_payload()}, actor_id=actor.user_id, correlation_id=actor.correlation_id)
+        return await api._request("POST", f"/guilds/{guild.id}/modules/parceria/recovery/expire", json={"actor": actor.as_payload(), "attempt_id": item.get("payload", {}).get("attempt_id")}, actor_id=actor.user_id, correlation_id=actor.correlation_id)
     if key == "parceria.panel.reconcile":
         version = await api.effective_configuration(guild.id, MODULE_KEY)
         actor = system_actor(bot, guild.id, item["correlation_id"])
         await PanelPublisher(bot, api).reconcile(guild=guild, module_key=MODULE_KEY, panel_key="global", channel_id=int(version["data"]["registrar_channel_id"]), actor=actor, render_context={"config": version["data"], "config_version": version["version"]})
         return {"reconciled": True}
+    if key in {"parceria.publication.reconcile", "parceria.publication.retry"}:
+        actor = system_actor(bot, guild.id, item["correlation_id"])
+        return await api.parceria_reconcile_publications(guild.id, actor=actor)
     return {"handled": key}
 
 
@@ -137,18 +158,14 @@ async def handle_message(bot: discord.Client, api: Any, message: discord.Message
         if not attempt:
             return
         attachment = message.attachments[0]
-        content_type = attachment.content_type or ""
         payload = {
-            "storage_key": f"discord:{message.guild.id}:{attachment.id}:{attachment.filename}",
-            "storage_url": attachment.url,
-            "content_type": content_type,
-            "size_bytes": attachment.size,
+            "source_url": attachment.url,
             "original_filename": attachment.filename,
         }
         actor = system_actor(bot, message.guild.id, f"parceria-image:{message.id}")
         # O ator real é o autor da mensagem; system_actor aqui só fornece a forma
         # estrutural, substituindo identidade e canal antes do transporte.
-        actor = ActorContext(guild_id=message.guild.id, user_id=message.author.id, role_ids=(), discord_permissions=(), channel_id=message.channel.id, category_id=getattr(message.channel, "category_id", None), actor_type="user", is_guild_owner=False, correlation_id=f"parceria-image:{message.id}")
+        actor = actor_from_message(message)
         await api.parceria_attach_image(message.guild.id, attempt["id"], payload, actor=actor)
         await api.parceria_complete_registration(message.guild.id, attempt["id"], actor=actor)
     except Exception:

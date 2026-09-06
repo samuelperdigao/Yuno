@@ -7,6 +7,7 @@ from app.api import (
     auth,
     config,
     control_plane,
+    dashboard_platform,
     health,
     internal,
     licenses,
@@ -50,6 +51,7 @@ app.include_router(auth.router)
 app.include_router(licenses.router)
 app.include_router(internal.router)
 app.include_router(control_plane.router)
+app.include_router(dashboard_platform.router)
 app.include_router(platform_router)
 app.include_router(config.router)
 app.include_router(parceria.router)

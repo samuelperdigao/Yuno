@@ -18,6 +18,7 @@ class ParceriaFamily(Base):
     __tablename__ = "parceria_domain_families"
     __table_args__ = (
         UniqueConstraint("guild_id", "name_normalized", name="uq_parceria_domain_family_guild_name"),
+        UniqueConstraint("guild_id", "legacy_id", name="uq_parceria_domain_family_guild_legacy"),
         Index("ix_parceria_domain_family_guild_active", "guild_id", "active"),
     )
 
@@ -38,6 +39,8 @@ class Parceria(Base):
             "status IN ('active', 'inactive', 'publication_pending', 'degraded')",
             name="ck_parceria_domain_status",
         ),
+        CheckConstraint("publication_revision >= 1", name="ck_parceria_domain_publication_revision"),
+        UniqueConstraint("guild_id", "legacy_id", name="uq_parceria_domain_partnership_guild_legacy"),
         Index("ix_parceria_domain_guild_status", "guild_id", "status"),
     )
 
@@ -74,6 +77,7 @@ class ParceriaContact(Base):
     __tablename__ = "parceria_domain_contacts"
     __table_args__ = (
         UniqueConstraint("parceria_id", "position", name="uq_parceria_domain_contact_position"),
+        CheckConstraint("position BETWEEN 1 AND 2", name="ck_parceria_domain_contact_position"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -93,6 +97,7 @@ class ParceriaImage(Base):
     storage_url: Mapped[str | None] = mapped_column(String(1000))
     content_type: Mapped[str] = mapped_column(String(40))
     size_bytes: Mapped[int] = mapped_column(Integer)
+    source_kind: Mapped[str] = mapped_column(String(20), default="upload", server_default="upload")
     checksum: Mapped[str | None] = mapped_column(String(128), index=True)
     original_filename: Mapped[str | None] = mapped_column(String(255))
     uploaded_by: Mapped[str] = mapped_column(String(32))
@@ -142,6 +147,8 @@ class ParceriaPublication(Base):
         ),
         UniqueConstraint("guild_id", "idempotency_key", name="uq_parceria_domain_publication_idempotency"),
         Index("ix_parceria_domain_publication_current", "guild_id", "parceria_id", "status"),
+        CheckConstraint("revision >= 1", name="ck_parceria_domain_publication_revision"),
+        UniqueConstraint("guild_id", "parceria_id", "revision", name="uq_parceria_domain_publication_revision"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)

@@ -28,6 +28,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.UniqueConstraint("guild_id", "name_normalized", name="uq_parceria_domain_family_guild_name"),
+        sa.UniqueConstraint("guild_id", "legacy_id", name="uq_parceria_domain_family_guild_legacy"),
     )
     op.create_index("ix_parceria_domain_families_guild_id", "parceria_domain_families", ["guild_id"])
     op.create_index("ix_parceria_domain_families_name_normalized", "parceria_domain_families", ["name_normalized"])
@@ -40,6 +41,7 @@ def upgrade() -> None:
         sa.Column("storage_key", sa.String(255), nullable=False),
         sa.Column("storage_url", sa.String(1000)),
         sa.Column("content_type", sa.String(40), nullable=False),
+        sa.Column("source_kind", sa.String(20), nullable=False, server_default="upload"),
         sa.Column("size_bytes", sa.Integer(), nullable=False),
         sa.Column("checksum", sa.String(128)),
         sa.Column("original_filename", sa.String(255)),
@@ -65,6 +67,8 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.CheckConstraint("status IN ('active', 'inactive', 'publication_pending', 'degraded')", name="ck_parceria_domain_status"),
+        sa.CheckConstraint("publication_revision >= 1", name="ck_parceria_domain_publication_revision"),
+        sa.UniqueConstraint("guild_id", "legacy_id", name="uq_parceria_domain_partnership_guild_legacy"),
     )
     op.create_index("ix_parceria_domain_partnerships_guild_id", "parceria_domain_partnerships", ["guild_id"])
     op.create_index("ix_parceria_domain_partnerships_family_id", "parceria_domain_partnerships", ["family_id"])
@@ -90,6 +94,7 @@ def upgrade() -> None:
         sa.Column("position", sa.Integer(), nullable=False),
         sa.Column("value", sa.String(150), nullable=False),
         sa.UniqueConstraint("parceria_id", "position", name="uq_parceria_domain_contact_position"),
+        sa.CheckConstraint("position BETWEEN 1 AND 2", name="ck_parceria_domain_contact_position"),
     )
     op.create_index("ix_parceria_domain_contacts_guild_id", "parceria_domain_contacts", ["guild_id"])
     op.create_index("ix_parceria_domain_contacts_parceria_id", "parceria_domain_contacts", ["parceria_id"])
@@ -146,6 +151,8 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.CheckConstraint("status IN ('pending', 'published', 'missing', 'archived', 'failed')", name="ck_parceria_domain_publication_status"),
         sa.UniqueConstraint("guild_id", "idempotency_key", name="uq_parceria_domain_publication_idempotency"),
+        sa.CheckConstraint("revision >= 1", name="ck_parceria_domain_publication_revision"),
+        sa.UniqueConstraint("guild_id", "parceria_id", "revision", name="uq_parceria_domain_publication_revision"),
     )
     op.create_index("ix_parceria_domain_publications_guild_id", "parceria_domain_publications", ["guild_id"])
     op.create_index("ix_parceria_domain_publications_parceria_id", "parceria_domain_publications", ["parceria_id"])

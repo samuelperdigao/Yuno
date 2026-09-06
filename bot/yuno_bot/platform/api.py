@@ -564,6 +564,15 @@ class PlatformAPIClient:
             correlation_id=actor.correlation_id,
         )
 
+    async def parceria_reconcile_publications(self, guild_id: int, *, actor: Any) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/parceria/recovery/publications",
+            json={"actor": actor.as_payload()},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
     async def farm_products(self, guild_id: int) -> list[dict]:
         return await self._request("GET", f"/guilds/{guild_id}/modules/farm/products")
 

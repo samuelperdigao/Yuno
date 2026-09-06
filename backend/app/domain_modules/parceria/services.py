@@ -27,6 +27,8 @@ from app.domain_modules.parceria.models import (
     RegistrationAttempt,
 )
 from app.platform.audit import write_audit
+from app.platform.automation import schedule_task
+from app.platform.models import WorkState
 from app.platform.outbox import enqueue_delivery
 
 
@@ -105,7 +107,7 @@ async def _schedule_publication(
     else:
         publication.channel_id = channel_id
         publication.status = PublicationStatus.pending
-    await enqueue_delivery(
+    delivery = await enqueue_delivery(
         session,
         guild_id=guild_id,
         module_key="parceria",
@@ -127,7 +129,15 @@ async def _schedule_publication(
         idempotency_key=key,
         correlation_id=correlation_id,
         max_attempts=PUBLICATION_MAX_ATTEMPTS,
+        commit=False,
     )
+    if delivery.state == WorkState.failed:
+        delivery.state = WorkState.pending
+        delivery.attempts = 0
+        delivery.available_at = _now()
+        delivery.last_error = None
+        delivery.lease_owner = None
+        delivery.lease_until = None
     await write_audit(
         session,
         guild_id=guild_id,
@@ -181,6 +191,20 @@ async def create_registration_attempt(
     )
     session.add(attempt)
     await session.flush()
+    await schedule_task(
+        session,
+        guild_id=guild_id,
+        module_key="parceria",
+        job_key="parceria.registration.expire",
+        resource_type="registration_attempt",
+        resource_id=attempt.id,
+        payload={"attempt_id": attempt.id},
+        due_at=attempt.expires_at,
+        idempotency_key=f"parceria:registration-expire:{guild_id}:{attempt.id}",
+        correlation_id=correlation_id,
+        max_attempts=3,
+        commit=False,
+    )
     await write_audit(
         session,
         guild_id=guild_id,
@@ -214,6 +238,8 @@ async def attach_image(
     if attempt.actor_id != actor_id or attempt.channel_id != channel_id:
         raise HTTPException(status_code=403, detail="Esta sessão não pertence a você ou a este canal.")
     if attempt.status != RegistrationAttemptStatus.awaiting_image:
+        return attempt
+    if attempt.image_asset_id:
         return attempt
     if attempt.expires_at <= _now():
         attempt.status = RegistrationAttemptStatus.expired
@@ -380,10 +406,18 @@ async def deactivate_partnership(session: AsyncSession, *, guild_id: str, parcer
     return parceria
 
 
-async def expire_attempts(session: AsyncSession, *, guild_id: str | None = None, correlation_id: str) -> int:
+async def expire_attempts(
+    session: AsyncSession,
+    *,
+    guild_id: str | None = None,
+    attempt_id: str | None = None,
+    correlation_id: str,
+) -> int:
     query = select(RegistrationAttempt).where(RegistrationAttempt.status == RegistrationAttemptStatus.awaiting_image, RegistrationAttempt.expires_at <= _now())
     if guild_id:
         query = query.where(RegistrationAttempt.guild_id == guild_id)
+    if attempt_id:
+        query = query.where(RegistrationAttempt.id == attempt_id)
     items = list((await session.execute(query.with_for_update())).scalars())
     for item in items:
         item.status = RegistrationAttemptStatus.expired
@@ -391,9 +425,46 @@ async def expire_attempts(session: AsyncSession, *, guild_id: str | None = None,
     return len(items)
 
 
+async def reconcile_publications(
+    session: AsyncSession, *, guild_id: str, ativas_channel_id: str, correlation_id: str
+) -> int:
+    items = list(
+        (
+            await session.execute(
+                select(Parceria)
+                .where(
+                    Parceria.guild_id == guild_id,
+                    Parceria.status.in_((ParceriaStatus.publication_pending, ParceriaStatus.degraded)),
+                )
+                .with_for_update()
+            )
+        ).scalars()
+    )
+    for item in items:
+        await _schedule_publication(
+            session,
+            guild_id=guild_id,
+            parceria=item,
+            channel_id=ativas_channel_id,
+            actor_id="system",
+            correlation_id=correlation_id,
+            reason="reconciled",
+        )
+    return len(items)
+
+
 async def mark_publication_result(session: AsyncSession, *, guild_id: str, parceria_id: str, revision: int, status: PublicationStatus, channel_id: str, message_id: str | None, error: str | None, correlation_id: str) -> None:
     parceria = await get_partnership(session, guild_id=guild_id, parceria_id=parceria_id, for_update=True)
-    publication = (await session.execute(select(ParceriaPublication).where(ParceriaPublication.guild_id == guild_id, ParceriaPublication.parceria_id == parceria_id, ParceriaPublication.revision == revision).order_by(ParceriaPublication.created_at.desc()))).scalars().first()
+    key = f"parceria:{guild_id}:{parceria_id}:publication:{revision}"
+    publication = (
+        await session.execute(
+            select(ParceriaPublication).where(
+                ParceriaPublication.guild_id == guild_id,
+                ParceriaPublication.parceria_id == parceria_id,
+                ParceriaPublication.idempotency_key == key,
+            )
+        )
+    ).scalar_one_or_none()
     if publication:
         publication.status = status
         publication.channel_id = channel_id
@@ -401,6 +472,8 @@ async def mark_publication_result(session: AsyncSession, *, guild_id: str, parce
         publication.last_error = error
     if revision != parceria.publication_revision:
         return
+    if status == PublicationStatus.published and parceria.status != ParceriaStatus.inactive and not message_id:
+        raise HTTPException(status_code=422, detail="Publicacao ativa precisa retornar o ID da mensagem.")
     parceria.public_channel_id = channel_id
     parceria.public_message_id = message_id
     parceria.status = ParceriaStatus.active if status == PublicationStatus.published and parceria.status == ParceriaStatus.publication_pending else parceria.status

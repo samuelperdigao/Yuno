@@ -8,12 +8,13 @@ from app.api.platform.dependencies import ActorHeader, CorrelationHeader, requir
 from app.core.security import require_bot_token
 from app.db import get_session
 from app.domain_modules.parceria.domain import PublicationStatus
-from app.domain_modules.parceria import services
+from app.domain_modules.parceria import image_processing, services
 from app.domain_modules.parceria.models import Parceria, ParceriaContact, ParceriaFamily, ParceriaImage, ParceriaProduct, RegistrationAttempt
 from app.domain_modules.parceria.schemas import AutomationCommand, ImageAttachCommand, PartnershipDeactivateCommand, PartnershipEditCommand, PublicationResultCommand, RegistrationAttemptCommand, RegistrationCompleteCommand
 from app.platform.configuration import effective_configuration
 from app.platform.permissions import authorize
 from app.platform.schemas import ActorContextIn
+from app.object_storage import ObjectStorageError, get_object_storage
 
 
 router = APIRouter(dependencies=[Depends(require_bot_token)])
@@ -47,6 +48,12 @@ async def _out(session: AsyncSession, item) -> dict:
     product = (await session.execute(select(ParceriaProduct).where(ParceriaProduct.guild_id == item.guild_id, ParceriaProduct.parceria_id == item.id))).scalar_one()
     contacts = list((await session.execute(select(ParceriaContact).where(ParceriaContact.guild_id == item.guild_id, ParceriaContact.parceria_id == item.id).order_by(ParceriaContact.position))).scalars())
     image = await session.get(ParceriaImage, item.image_asset_id)
+    storage_url = image.storage_url if image else None
+    if image and not storage_url and image.source_kind != "legacy":
+        try:
+            storage_url = await get_object_storage().presign_get(key=image.storage_key)
+        except ObjectStorageError:
+            storage_url = None
     return {
         "id": item.id,
         "guild_id": item.guild_id,
@@ -59,7 +66,7 @@ async def _out(session: AsyncSession, item) -> dict:
         "image": {
             "id": image.id if image else None,
             "storage_key": image.storage_key if image else None,
-            "storage_url": image.storage_url if image else None,
+            "storage_url": storage_url,
             "content_type": image.content_type if image else None,
             "size_bytes": image.size_bytes if image else None,
             "original_filename": image.original_filename if image else None,
@@ -104,7 +111,38 @@ async def begin_registration(guild_id: str, data: RegistrationAttemptCommand, x_
 async def attach_registration_image(guild_id: str, attempt_id: str, data: ImageAttachCommand, x_yuno_actor_id: ActorHeader, x_yuno_correlation_id: CorrelationHeader = None, session: AsyncSession = Depends(get_session)) -> dict:
     await require_active_license(session, guild_id)
     await _permit(session, guild_id=guild_id, capability="parceria.register", actor=data.actor, actor_header=x_yuno_actor_id, correlation_header=x_yuno_correlation_id)
-    item = await services.attach_image(session, guild_id=guild_id, attempt_id=attempt_id, actor_id=data.actor.user_id or x_yuno_actor_id, channel_id=data.actor.channel_id or "", correlation_id=x_yuno_correlation_id or data.actor.correlation_id, **data.model_dump(exclude={"actor"}))
+    image_data = data.model_dump(exclude={"actor", "source_url"})
+    storage = None
+    if data.source_url:
+        try:
+            storage = get_object_storage()
+            stored = await image_processing.ingest_discord_attachment(
+                storage,
+                source_url=data.source_url,
+                storage_key=f"parceria/{guild_id}/registration/{attempt_id}",
+                original_filename=data.original_filename,
+            )
+        except ObjectStorageError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except image_processing.InvalidPartnershipImage as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        image_data = {
+            "storage_key": stored.storage_key,
+            "storage_url": None,
+            "content_type": stored.content_type,
+            "size_bytes": stored.size_bytes,
+            "checksum": stored.checksum,
+            "original_filename": stored.original_filename,
+        }
+    try:
+        item = await services.attach_image(session, guild_id=guild_id, attempt_id=attempt_id, actor_id=data.actor.user_id or x_yuno_actor_id, channel_id=data.actor.channel_id or "", correlation_id=x_yuno_correlation_id or data.actor.correlation_id, **image_data)
+    except Exception:
+        if storage is not None:
+            try:
+                await storage.delete(key=f"parceria/{guild_id}/registration/{attempt_id}")
+            except Exception:
+                pass
+        raise
     await session.commit()
     return _attempt_out(item)
 
@@ -156,9 +194,19 @@ async def deactivate_partnership(guild_id: str, parceria_id: str, data: Partners
 async def expire_registration_attempts(guild_id: str, data: AutomationCommand, x_yuno_actor_id: ActorHeader, x_yuno_correlation_id: CorrelationHeader = None, session: AsyncSession = Depends(get_session)) -> dict:
     await require_active_license(session, guild_id)
     await _permit(session, guild_id=guild_id, capability="parceria.automation", actor=data.actor, actor_header=x_yuno_actor_id, correlation_header=x_yuno_correlation_id)
-    count = await services.expire_attempts(session, guild_id=guild_id, correlation_id=data.actor.correlation_id)
+    count = await services.expire_attempts(session, guild_id=guild_id, attempt_id=data.attempt_id, correlation_id=data.actor.correlation_id)
     await session.commit()
     return {"expired": count}
+
+
+@router.post("/guilds/{guild_id}/modules/parceria/recovery/publications")
+async def reconcile_publications(guild_id: str, data: AutomationCommand, x_yuno_actor_id: ActorHeader, x_yuno_correlation_id: CorrelationHeader = None, session: AsyncSession = Depends(get_session)) -> dict:
+    await require_active_license(session, guild_id)
+    await _permit(session, guild_id=guild_id, capability="parceria.automation", actor=data.actor, actor_header=x_yuno_actor_id, correlation_header=x_yuno_correlation_id)
+    config = await _active_config(session, guild_id)
+    count = await services.reconcile_publications(session, guild_id=guild_id, ativas_channel_id=str(config["ativas_channel_id"]), correlation_id=data.actor.correlation_id)
+    await session.commit()
+    return {"reconciled": count}
 
 
 @router.get("/guilds/{guild_id}/modules/parceria/registration-attempts/awaiting-image")

@@ -12,6 +12,14 @@ const defaultConfig = {
   settings: {},
 };
 
+const defaultParceria = {
+  registrar_channel_id: "",
+  ativas_channel_id: "",
+  manager_role_ids: [],
+  category_id: "",
+  log_channel_id: "",
+};
+
 const moduleIcons = {
   set: UserCheck,
   meta: Activity,
@@ -38,6 +46,7 @@ export default function App() {
   const [licenseDraft, setLicenseDraft] = useState({ reference: "", customer_name: "", customer_email: "", customer_discord_user_id: "" });
   const [ownerId, setOwnerId] = useState("");
   const [config, setConfig] = useState(defaultConfig);
+  const [parceriaPlatform, setParceriaPlatform] = useState(null);
   const [products, setProducts] = useState([]);
   const [productDraft, setProductDraft] = useState({ name: "", unit: "unidade" });
   const [selectedPanelModule, setSelectedPanelModule] = useState("set");
@@ -91,7 +100,61 @@ export default function App() {
       setConfig({ ...defaultConfig, ...data });
       const productData = await api(`/guilds/${guildId}/products`, { adminToken });
       setProducts(productData);
+      const parceria = await api(`/dashboard/platform/guilds/${guildId}/modules/parceria`, { adminToken });
+      setParceriaPlatform(parceria);
     }, "Configuracao carregada.");
+  }
+
+  function updateParceriaDraft(patch) {
+    setParceriaPlatform((current) => ({
+      ...current,
+      draft: {
+        ...current.draft,
+        data: { ...defaultParceria, ...(current.draft?.data || {}), ...patch },
+      },
+    }));
+  }
+
+  async function saveParceriaDraft() {
+    if (!parceriaPlatform?.draft) return;
+    await run(async () => {
+      await api(`/dashboard/platform/guilds/${guildId}/modules/parceria/draft`, {
+        method: "PUT",
+        adminToken,
+        body: {
+          expected_revision: parceriaPlatform.draft.revision,
+          expected_published_version: parceriaPlatform.draft.base_published_version,
+          schema_version: parceriaPlatform.draft.schema_version,
+          data: { ...defaultParceria, ...parceriaPlatform.draft.data },
+        },
+      });
+      const latest = await api(`/dashboard/platform/guilds/${guildId}/modules/parceria`, { adminToken });
+      setParceriaPlatform(latest);
+    }, "Rascunho de Parcerias salvo.");
+  }
+
+  async function publishParceria() {
+    if (!parceriaPlatform?.draft) return;
+    await run(async () => {
+      await api(`/dashboard/platform/guilds/${guildId}/modules/parceria/publish`, {
+        method: "POST",
+        adminToken,
+        body: {
+          expected_revision: parceriaPlatform.draft.revision,
+          expected_published_version: parceriaPlatform.draft.base_published_version,
+        },
+      });
+      const current = parceriaPlatform.instance;
+      if (current?.lifecycle !== "active") {
+        await api(`/dashboard/platform/guilds/${guildId}/modules/parceria/lifecycle`, {
+          method: "PUT",
+          adminToken,
+          body: { lifecycle: "active", expected_lifecycle: current.lifecycle, reason: "dashboard_publish" },
+        });
+      }
+      const latest = await api(`/dashboard/platform/guilds/${guildId}/modules/parceria`, { adminToken });
+      setParceriaPlatform(latest);
+    }, "Parcerias publicadas e ativadas.");
   }
 
   async function saveConfig() {
@@ -298,6 +361,44 @@ export default function App() {
               );
             })}
           </div>
+        </section>
+
+        <section className="panel">
+          <h2>Parcerias · Control Plane</h2>
+          <p>Esta configuração usa o contrato domain-first. O Runtime só consome a versão publicada.</p>
+          {!parceriaPlatform ? (
+            <p>Carregue um servidor para editar Parcerias.</p>
+          ) : (
+            <>
+              <div className="form-grid">
+                <label>
+                  Canal de registro
+                  <input value={parceriaPlatform.draft?.data?.registrar_channel_id || ""} onChange={(event) => updateParceriaDraft({ registrar_channel_id: event.target.value })} placeholder="Channel ID" />
+                </label>
+                <label>
+                  Canal de parcerias ativas
+                  <input value={parceriaPlatform.draft?.data?.ativas_channel_id || ""} onChange={(event) => updateParceriaDraft({ ativas_channel_id: event.target.value })} placeholder="Channel ID" />
+                </label>
+                <label>
+                  Cargos gerentes
+                  <input value={(parceriaPlatform.draft?.data?.manager_role_ids || []).join(", ")} onChange={(event) => updateParceriaDraft({ manager_role_ids: asList(event.target.value) })} placeholder="Role IDs separados por virgula" />
+                </label>
+                <label>
+                  Categoria opcional
+                  <input value={parceriaPlatform.draft?.data?.category_id || ""} onChange={(event) => updateParceriaDraft({ category_id: event.target.value })} placeholder="Category ID" />
+                </label>
+                <label>
+                  Canal de logs opcional
+                  <input value={parceriaPlatform.draft?.data?.log_channel_id || ""} onChange={(event) => updateParceriaDraft({ log_channel_id: event.target.value })} placeholder="Channel ID" />
+                </label>
+              </div>
+              <div className="panel-actions">
+                <button onClick={saveParceriaDraft} disabled={busy || !adminToken || !guildId}>Salvar rascunho</button>
+                <button className="primary" onClick={publishParceria} disabled={busy || !adminToken || !guildId}>Publicar e ativar</button>
+              </div>
+              <p className="status">Estado: {parceriaPlatform.instance?.lifecycle || "desconhecido"} · Revisão {parceriaPlatform.draft?.revision ?? "-"} · Versão publicada {parceriaPlatform.draft?.base_published_version ?? "0"}</p>
+            </>
+          )}
         </section>
 
         <section className="panel">
