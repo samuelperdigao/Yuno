@@ -1,7 +1,7 @@
 # Kit de UI do Yuno — guia de estilo
 
 `bot/yuno_bot/platform/ui_kit.py` é a linguagem visual compartilhada do produto.
-Todo painel, embed e mensagem que o cliente vê deve sair dele.
+Todo painel e mensagem administrativa que o cliente vê deve sair dele.
 
 O problema que ele resolve: cada módulo escrevia o próprio texto do zero. O
 resultado era um bot que parecia quatro bots — container sempre amarelo
@@ -9,6 +9,36 @@ independente do estado, sem barra de progresso, sem rótulo com emoji, com
 "Configuracoes" sem cedilha num produto pt-BR vendido por licença. O Morro do
 Mineiro, um monólito SQLite de uma guild só, entregava painel melhor acabado
 que o Yuno. Este kit inverte isso.
+
+## Yuno Nexus UI Design System
+
+Todo novo módulo administrativo do Yuno deve utilizar obrigatoriamente o
+Design System **YUNO NEXUS — Cyberpunk Command Center**.
+
+- Identidade premium baseada em preto, grafite, violeta e branco.
+- Verde, amarelo e vermelho somente para estados semânticos reais.
+- Zero emojis decorativos nas interfaces administrativas.
+- Components V2 como base: Container, Section, Text Display, Separator,
+  Buttons, Select e Media Gallery quando aplicável.
+- Nomenclatura técnica moderada: `// CORE`, `// MODULES`, `// COMMANDS`,
+  `SYS://YUNO/NEXUS` e `SESSION ACTIVE`.
+- Banner oficial reutilizado pelo shell compartilhado; módulos não duplicam o
+  banner nem criam identidade própria.
+- Home contextual: renderiza somente pendências, incidentes e dados que
+  existam de fato; blocos vazios não são exibidos.
+- Layout mobile-first, densidade controlada e ações principais separadas da
+  navegação.
+- Uma única mensagem editável acompanha Home, módulos, configuração,
+  diagnóstico e retorno, sem histórico global compartilhado entre usuários.
+- Voltar usa a rota-pai determinística; Avançar só aparece quando houver
+  destino semanticamente válido.
+
+Novos módulos não podem usar embeds tradicionais como interface administrativa
+principal, voltar ao estilo antigo, criar shell ou navegação próprios, duplicar
+helpers já existentes no `ui_kit` ou usar excesso de emojis. Devem reutilizar o
+shell, os tokens, os helpers, os Components V2 e a navegação Nexus. Qualquer
+novo padrão visual reutilizável deve ser incorporado aqui antes de ser usado em
+outro módulo.
 
 ---
 
@@ -38,7 +68,8 @@ Três regras que sustentam o arquivo:
 
 | Token | Hex | Quando |
 |---|---|---|
-| `BRAND` | `0xFFC72C` | Amarelo Yuno. Estado neutro, tela de configuração. |
+| `BRAND` | `0xFFC72C` | Token legado de superfícies operacionais. |
+| `NEXUS_VIOLET` | `0x8B5CF6` | Accent principal da Central administrativa. |
 | `SUCCESS` | `0x57F287` | Aprovado, publicado, no ar. |
 | `WARNING` | `0xF39C12` | Em andamento, pausado. |
 | `DANGER` | `0xED4245` | Rejeitado, bloqueado, falhou, ação destrutiva. |
@@ -54,11 +85,12 @@ Yuno seja um verde só.
 
 ## 3. Estados semânticos
 
-Cada módulo traduz o próprio vocabulário para um `State`, e o kit resolve emoji
-e cor. É isso que faz um ticket aprovado e um registro aprovado parecerem do
-mesmo produto.
+Cada módulo traduz o próprio vocabulário para um `State`, e o kit resolve cor e
+semântica. Nas telas administrativas Nexus, o estado é expresso por texto; os
+emojis da tabela abaixo permanecem apenas por compatibilidade com superfícies
+operacionais legadas.
 
-| `State` | Emoji | Cor | Leitura |
+| `State` | Emoji legado | Cor | Leitura |
 |---|---|---|---|
 | `PENDING` | ⚪ | `BRAND` | Ainda não começou / aguardando você |
 | `RUNNING` | 🟡 | `WARNING` | Em andamento |
@@ -261,8 +293,9 @@ Restante da Meta: 380 unidades · Recolhido: 200 unidades · Saldo: 420 unidades
 [ botões ]
 -# Este ticket segue o ciclo da Meta e encerra <t:…:R>.
 ```
-Container laranja porque está em andamento; verde quando aprovado; vermelho
-quando finalizado incompleto; preto quando encerrado à mão.
+As cores semânticas continuam disponíveis para superfícies operacionais; a
+Central Nexus usa preto/grafite/violeta como identidade e reserva verde,
+amarelo e vermelho para estados reais.
 
 ---
 
@@ -272,8 +305,11 @@ quando finalizado incompleto; preto quando encerrado à mão.
    `COLOR = uk.BRAND`.
 2. Declare a tabela `MODULE_STATES` traduzindo o vocabulário do domínio para
    `uk.State`.
-3. Troque `container(...)` por `uk.panel(...)` e passe `state=`.
-4. Troque texto solto por `heading`/`field`/`inline_fields`/`section_number`.
+3. Para a Central, use `container(...)`/`uk.panel(...)` somente dentro do
+   shell Nexus e prefira Sections/Text Displays a blocos densos.
+4. Troque texto solto por `heading`/`field`/`inline_fields`/`section_number`,
+   ou pelos helpers `nexus_title`, `nexus_metrics`, `nexus_state` e
+   `nexus_notice` nas telas administrativas.
 5. Rodapé com a regra do sistema em `subtext` — **derivado de config/ciclo**,
    nunca prazo, cargo ou nome de guild literal.
 6. Números e datas por `money_br`/`number_br`/`quantity`/`timestamp`.

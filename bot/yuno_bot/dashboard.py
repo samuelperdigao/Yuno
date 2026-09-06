@@ -134,6 +134,15 @@ CENTRAL_ROUTES: dict[tuple[str, str], CentralRoute] = {
     ("core", "home"): CentralRoute("core", "home", next_route=("core", "modules")),
     ("core", "modules"): CentralRoute("core", "modules", parent=("core", "home")),
     ("core", "system"): CentralRoute("core", "system", parent=("core", "home")),
+    ("meta", "overview"): CentralRoute(
+        "meta", "overview", parent=("core", "modules"), next_route=("meta", "configuration")
+    ),
+    ("meta", "configuration"): CentralRoute(
+        "meta", "configuration", parent=("meta", "overview"), next_route=("meta", "diagnostic")
+    ),
+    ("meta", "diagnostic"): CentralRoute(
+        "meta", "diagnostic", parent=("meta", "configuration")
+    ),
     ("parceria", "overview"): CentralRoute(
         "parceria", "overview", parent=("core", "modules"), next_route=("parceria", "configuration")
     ),
@@ -147,7 +156,12 @@ CENTRAL_ROUTES: dict[tuple[str, str], CentralRoute] = {
 
 
 def module_navigation(current_module: str | None = None) -> dict[str, Any]:
-    """Seletor legado de troca rápida usado pelas telas ainda não migradas."""
+    """Navegação compacta usada pelas telas de módulo ainda não migradas.
+
+    O catálogo completo vive na tela Nexus de Módulos, que pagina a 25
+    opções. Telas internas não tentam truncar silenciosamente esse catálogo:
+    quando ele excede o limite do Discord, oferecem retorno à lista paginada.
+    """
 
     options: list[dict[str, Any]] = [
         {
@@ -157,7 +171,16 @@ def module_navigation(current_module: str | None = None) -> dict[str, Any]:
             "default": False,
         }
     ]
-    options.extend(_module_option(spec, current_module=current_module) for spec in dashboard_specs().values())
+    specs = list(dashboard_specs().values())
+    if len(specs) + 1 > MAX_MODULE_OPTIONS:
+        return action_row(
+            button(
+                custom_id=route_custom_id("core", "modules"),
+                label="MÓDULOS",
+                style=BUTTON_SECONDARY,
+            )
+        )
+    options.extend(_module_option(spec, current_module=current_module) for spec in specs)
     return action_row(
         string_select(
             custom_id=central_custom_id("core", "select_module"),
@@ -223,13 +246,13 @@ def pagination_row(page: int, total_pages: int) -> dict[str, Any]:
     return action_row(
         button(
             custom_id=central_custom_id("core", f"page_{prev_page}"),
-            label="◀ Voltar",
+            label="‹ VOLTAR",
             style=BUTTON_SECONDARY,
             disabled=page <= 0,
         ),
         button(
             custom_id=central_custom_id("core", f"page_{next_page}"),
-            label="Avançar ▶",
+            label="AVANÇAR ›",
             style=BUTTON_SECONDARY,
             disabled=page >= total_pages - 1,
         ),
@@ -272,24 +295,24 @@ def navigation_row(
 ) -> dict[str, Any]:
     """Rodapé determinístico. Rotas inexistentes ficam desabilitadas."""
 
-    return action_row(
-        button(
-            custom_id=route_custom_id(
-                *(parent or ("core", "disabled_back"))
-            ),
-            label="‹ Voltar",
-            style=BUTTON_SECONDARY,
-            disabled=parent is None,
-        ),
-        button(
-            custom_id=route_custom_id(
-                *(next_route or ("core", "disabled_next"))
-            ),
-            label="Avançar ›",
-            style=BUTTON_SECONDARY,
-            disabled=next_route is None,
-        ),
-    )
+    buttons = []
+    if parent is not None:
+        buttons.append(
+            button(
+                custom_id=route_custom_id(*parent),
+                label="‹ VOLTAR",
+                style=BUTTON_SECONDARY,
+            )
+        )
+    if next_route is not None:
+        buttons.append(
+            button(
+                custom_id=route_custom_id(*next_route),
+                label="AVANÇAR ›",
+                style=BUTTON_SECONDARY,
+            )
+        )
+    return action_row(*buttons) if buttons else text_display(uk.subtext("NEXUS CORE // SESSION ACTIVE"))
 
 
 def route_navigation(module_key: str, route: str) -> dict[str, Any]:
@@ -394,14 +417,14 @@ def _module_row(
     seletor.
     """
 
-    lines = [uk.heading(spec.nome, emoji=spec.icon, level=3)]
+    lines = [uk.heading(spec.nome, level=3)]
     descricao = " ".join(str(getattr(spec, "descricao", "") or "").split())
     if status is not None and descricao:
         lines.append(
-            f"{uk.badge(status.state, status.label, bold=True)} {uk.DASH} {descricao}"
+            f"{uk.nexus_state('STATUS', status.label, state=status.state)}\n{descricao}"
         )
     elif status is not None:
-        lines.append(uk.badge(status.state, status.label, bold=True))
+        lines.append(uk.nexus_state("STATUS", status.label, state=status.state))
     elif descricao:
         lines.append(descricao)
     footnotes = [status.hint] if status is not None else []
@@ -443,11 +466,12 @@ def _status_summary(
         if status.state in (uk.State.BLOCKED, uk.State.FAILED)
     )
     error_value = "Nenhum erro crítico" if errors == 0 else errors
-    return uk.inline_fields(
-        ("Módulos disponíveis", total),
-        ("Ativos", active),
-        ("Configuração pendente", pending),
-        ("Erros", error_value),
+    return uk.nexus_metrics(
+        ("CORE", "ONLINE"),
+        ("MÓDULOS", total),
+        ("ATIVOS", active),
+        ("PENDÊNCIAS", pending),
+        ("ERROS", error_value),
     )
 
 
@@ -462,9 +486,9 @@ def build_payload(
 
     del config, page
     specs = dashboard_specs()
-    header = [uk.breadcrumb("YUNO", "Visão geral"), uk.heading("Central operacional")]
+    header = [uk.nexus_title("CENTRAL DE COMANDO", path="CORE", subtitle="Interface administrativa do servidor")]
     if license_active:
-        accent = uk.BRAND
+        accent = uk.NEXUS_VIOLET
     else:
         header.append(uk.notice("Licença inativa neste servidor; nada será publicado.", kind="warning"))
         accent = uk.DANGER
@@ -474,7 +498,7 @@ def build_payload(
             container(
                 *[text_display(item) for item in header if item],
                 separator(spacing=1),
-                text_display(uk.notice("Nenhum módulo disponível.")),
+                text_display(uk.nexus_notice("ESTADO", "Nenhum módulo disponível", "Nenhum subsistema foi liberado para este servidor.")),
                 separator(spacing=1),
                 route_navigation("core", "home"),
                 accent_color=accent,
@@ -486,15 +510,41 @@ def build_payload(
         if control_states
         else {}
     )
-    summary = _status_summary(statuses, total_available=len(specs)) if control_states is not None else uk.notice(
-        "Os estados dos módulos serão carregados ao abrir a Central."
-    )
-    blocks = [text_display(summary)]
-    actions = [action_row(
-        button(custom_id=route_custom_id("core", "modules"), label="Módulos", style=BUTTON_PRIMARY),
-        button(custom_id=route_custom_id("core", "system"), label="Sistema", style=BUTTON_SECONDARY),
-    )]
-    footer = "Yuno · alterações só entram no ar após confirmação."
+    summary = _status_summary(statuses, total_available=len(specs)) if control_states is not None else uk.nexus_metrics(("CORE", "ONLINE"), ("MÓDULOS", len(specs)))
+    blocks = [text_display("// STATUS GLOBAL\n\n" + summary)]
+    for key, status in statuses.items():
+        if status.state in (uk.State.PENDING, uk.State.RUNNING):
+            spec = specs[key]
+            blocks.append(
+                section(
+                    text_display(uk.nexus_notice("REQUER ATENÇÃO", spec.nome, status.hint)),
+                    accessory=button(
+                        custom_id=route_custom_id("core", "modules"),
+                        label="REVISAR",
+                        style=BUTTON_PRIMARY if license_active else BUTTON_SECONDARY,
+                        disabled=not license_active,
+                    ),
+                )
+            )
+        elif status.state in (uk.State.BLOCKED, uk.State.FAILED):
+            spec = specs[key]
+            blocks.append(
+                section(
+                    text_display(uk.nexus_notice("INCIDENTE", spec.nome, status.hint)),
+                    accessory=button(
+                        custom_id=route_custom_id(key, "diagnostic"),
+                        label="DIAGNÓSTICO",
+                        style=BUTTON_SECONDARY,
+                    ),
+                )
+            )
+    actions = [
+        action_row(
+            button(custom_id=route_custom_id("core", "modules"), label="MÓDULOS", style=BUTTON_PRIMARY),
+            button(custom_id=route_custom_id("core", "system"), label="SISTEMA", style=BUTTON_SECONDARY),
+        )
+    ]
+    footer = "SYS://YUNO/NEXUS • OPERATIONAL"
 
     return central_shell(payload(
         uk.panel(
@@ -535,7 +585,7 @@ def build_modules_payload(
         if spec.descricao:
             summary.append(str(spec.descricao))
         if status:
-            summary.append(uk.status_text(status.state, status.label))
+            summary.append(uk.nexus_state("STATUS", status.label, state=status.state))
             summary.append(uk.subtext(status.hint))
         blocks.append(section(text_display(uk.clip("\n".join(summary))), accessory=button(custom_id=central_custom_id(selected_module, CENTRAL_OPEN_ACTION), label="Abrir", style=BUTTON_PRIMARY if license_active else BUTTON_SECONDARY, disabled=not license_active)))
     else:
@@ -545,16 +595,16 @@ def build_modules_payload(
         previous = max(0, page - 1)
         following = min(total_pages - 1, page + 1)
         actions.insert(0, action_row(
-            button(custom_id=central_custom_id("core", f"group_{previous}"), label="‹ Anteriores", style=BUTTON_SECONDARY, disabled=page == 0),
-            button(custom_id=central_custom_id("core", f"group_{following}"), label="Mais módulos ›", style=BUTTON_SECONDARY, disabled=page == total_pages - 1),
+            button(custom_id=central_custom_id("core", f"group_{previous}"), label="‹ ANTERIORES", style=BUTTON_SECONDARY, disabled=page == 0),
+            button(custom_id=central_custom_id("core", f"group_{following}"), label="MAIS MÓDULOS ›", style=BUTTON_SECONDARY, disabled=page == total_pages - 1),
         ))
     return central_shell(payload(
         uk.panel(
-            header=[uk.breadcrumb("YUNO", "Módulos"), uk.heading("Módulos"), "Selecione um módulo para administrar."],
+            header=[uk.nexus_title("MÓDULOS", path="CORE / MODULES", subtitle="Subsistemas conectados ao Nexus")],
             blocks=blocks,
             actions=actions,
-            footer=f"Grupo {page + 1} de {total_pages}" if total_pages > 1 else "Yuno · seleção direta para a administração.",
-            accent_color=uk.BRAND if license_active else uk.DANGER,
+            footer=f"SYS://YUNO/NEXUS • GRUPO {page + 1}/{total_pages}" if total_pages > 1 else "SYS://YUNO/NEXUS • SESSION ACTIVE",
+            accent_color=uk.NEXUS_VIOLET if license_active else uk.DANGER,
         )
     ))
 
@@ -564,18 +614,51 @@ def build_system_payload(config: dict) -> dict[str, Any]:
 
     dashboard_ref = (config.get("settings") or {}).get("dashboard") or {}
     channel = dashboard_ref.get("panel_channel_id")
-    value = f"Canal da Central: <#{channel}>" if channel else "Canal da Central: ainda não definido"
+    message = "READY" if channel and dashboard_ref.get("panel_message_id") else "NOT CONFIGURED"
+    registry = len(dashboard_specs())
     return central_shell(payload(
         uk.panel(
-            header=[uk.breadcrumb("YUNO", "Sistema"), uk.heading("Sistema")],
+            header=[uk.nexus_title("SISTEMA", path="CORE / SYSTEM", subtitle="Estado do núcleo e serviços")],
             blocks=[
-                text_display("Configurações gerais da Central."),
-                text_display(value),
-                text_display(uk.subtext("Logs e auditoria só aparecem quando houver uma fonte disponível.")),
+                text_display(uk.nexus_metrics(
+                    ("MODULE_REGISTRY", f"{registry:02d}/{registry:02d}"),
+                    ("CENTRAL_MESSAGE", message),
+                    ("CENTRAL_CHANNEL", "CONFIGURED" if channel else "NOT CONFIGURED"),
+                )),
+                text_display(uk.nexus_notice(
+                    "ESTADO",
+                    "SYS://YUNO/NEXUS",
+                    "Configuração persistida da Central e registro de módulos.",
+                )),
+                text_display(f"Canal da Central: <#{channel}>" if channel else "Canal da Central: ainda não definido"),
             ],
             actions=[route_navigation("core", "system")],
-            footer="Yuno · sem alterações de backend neste piloto.",
-            accent_color=uk.INFO,
+            footer="SYS://YUNO/NEXUS • SESSION ACTIVE",
+            accent_color=uk.NEXUS_VIOLET,
+        )
+    ))
+
+
+def build_module_diagnostic_payload(
+    module_key: str, checks: list[dict[str, Any]] | None
+) -> dict[str, Any]:
+    rows = list(checks or [])
+    if rows:
+        content = "\n\n".join(
+            f"**{str(item.get('status') or 'UNKNOWN').upper()}** · "
+            f"{str(item.get('summary') or 'Sem resumo').strip()}"
+            + (f"\n{str(item.get('detail')).strip()}" if item.get("detail") else "")
+            for item in rows
+        )
+    else:
+        content = "Nenhum diagnóstico retornado pela Platform API."
+    return central_shell(payload(
+        uk.panel(
+            header=[uk.nexus_title("DIAGNÓSTICO", path=f"MODULES / {module_key}", subtitle="Verificação do subsistema")],
+            blocks=[text_display(content)],
+            actions=[route_navigation(module_key, "diagnostic")],
+            footer="SYS://YUNO/NEXUS • DIAGNOSTIC COMPLETE",
+            accent_color=uk.NEXUS_VIOLET,
         )
     ))
 
@@ -929,6 +1012,37 @@ async def _dispatch_visual_route(
             "overview": None,
             "configuration": "open_system",
             "diagnostic": "diagnose",
+        }.get(route, "__invalid__")
+        if target_action == "__invalid__":
+            await _render_invalid_route(interaction)
+            return
+        if target_action is None:
+            await _dispatch_page(interaction, module_key)
+            return
+        await _dispatch_action(interaction, module_key, target_action)
+        return
+    if route == "diagnostic" and module_key != "core":
+        try:
+            checks = await interaction.client.platform_api.diagnostics(
+                interaction.guild_id, module_key
+            )
+        except Exception:
+            checks = [{
+                "status": "ERROR",
+                "summary": "Diagnóstico indisponível.",
+                "detail": "A Platform API não respondeu à verificação.",
+            }]
+        await _edit_v2(
+            interaction.client,
+            interaction.channel_id,
+            interaction.message.id,
+            build_module_diagnostic_payload(module_key, checks),
+        )
+        return
+    if module_key == "meta":
+        target_action = {
+            "overview": None,
+            "configuration": "settings",
         }.get(route, "__invalid__")
         if target_action == "__invalid__":
             await _render_invalid_route(interaction)

@@ -59,7 +59,9 @@ def test_persistent_meta_page_has_create_settings_and_paginated_select() -> None
         for option in component.get("options", [])
         if component.get("custom_id") == "yuno:central:v1:meta:select_goal"
     ]
-    assert labels == ["Criar Meta", "Configurações"]
+    assert labels[:2] == ["Criar Meta", "Configurações"]
+    assert "‹ VOLTAR" in labels
+    assert "AVANÇAR ›" in labels
     assert {item["value"] for item in options} == {"goal:1", "page:next"}
     assert len(options) <= 25
 

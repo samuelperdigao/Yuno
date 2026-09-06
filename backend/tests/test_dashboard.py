@@ -48,10 +48,10 @@ def test_home_is_a_summary_and_does_not_render_the_module_catalog() -> None:
     )
 
     assert data["allowed_mentions"] == {"parse": [], "replied_user": False}
-    assert "YUNO / Visão geral" in content
-    assert "Módulos disponíveis" in content
-    assert "Ativos" in content
-    assert "Configuração pendente" in content
+    assert "YUNO NEXUS // CORE" in content
+    assert "MÓDULOS" in content
+    assert "ATIVOS" in content
+    assert "PENDÊNCIAS" in content
     assert "parceria:open" not in str(data)
     assert dashboard.route_custom_id("core", "modules") in str(data)
 
@@ -394,7 +394,7 @@ async def test_startup_refresh_updates_only_the_registered_central(monkeypatch) 
     assert refreshed is True
     assert edited[0][1:3] == (10, 20)
     assert dashboard.route_custom_id("core", "modules") in str(edited[0][3])
-    assert "estados dos módulos" in str(edited[0][3])
+    assert "YUNO NEXUS // CORE" in str(edited[0][3])
 
 
 def test_central_dynamic_patterns_do_not_compete_for_string_selects() -> None:
@@ -548,7 +548,7 @@ async def test_navigation_home_rewrites_the_central_message(monkeypatch) -> None
     assert interaction.response.is_done()
 
     assert edited[0][:2] == (10, 20)
-    assert "Central operacional" in str(edited[0][2])
+    assert "CENTRAL DE COMANDO" in str(edited[0][2])
 
 
 @pytest.mark.asyncio

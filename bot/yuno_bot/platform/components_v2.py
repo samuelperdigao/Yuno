@@ -20,7 +20,32 @@ CONTAINER = 17
 LABEL = 18
 TEXT_INPUT = 4
 MAX_STRING_SELECT_OPTIONS = 25
+MAX_ACTION_ROW_BUTTONS = 5
+MAX_SECTION_CHILDREN = 3
+MAX_MESSAGE_COMPONENTS = 40
 FLAG_COMPONENTS_V2 = 1 << 15
+
+
+def component_count(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, (list, tuple)):
+        return sum(component_count(item) for item in value)
+    if not isinstance(value, dict) or "type" not in value:
+        return 0
+    return (
+        1
+        + component_count(value.get("components"))
+        + component_count(value.get("accessory"))
+    )
+
+
+def validate_components(components: list[dict[str, Any]] | tuple[dict[str, Any], ...]) -> None:
+    total = component_count(components)
+    if total > MAX_MESSAGE_COMPONENTS:
+        raise ValueError(
+            f"Mensagem Components V2 excede o limite de {MAX_MESSAGE_COMPONENTS} componentes."
+        )
 
 
 def text_display(content: str) -> dict[str, Any]:
@@ -37,6 +62,12 @@ def thumbnail(url: str, *, description: str | None = None) -> dict[str, Any]:
 def section(
     *components: dict[str, Any], accessory: dict[str, Any]
 ) -> dict[str, Any]:
+    if not 1 <= len(components) <= MAX_SECTION_CHILDREN:
+        raise ValueError(
+            f"Section aceita de 1 a {MAX_SECTION_CHILDREN} componentes filhos."
+        )
+    if accessory.get("type") not in {BUTTON, THUMBNAIL}:
+        raise ValueError("Section aceita apenas Button ou Thumbnail como accessory.")
     return {
         "type": SECTION,
         "components": list(components),
@@ -135,15 +166,26 @@ def user_select(
 
 
 def action_row(*components: dict[str, Any]) -> dict[str, Any]:
+    if not components:
+        raise ValueError("Action Row não pode ficar vazio.")
+    if len(components) > MAX_ACTION_ROW_BUTTONS:
+        raise ValueError(
+            f"Action Row aceita no máximo {MAX_ACTION_ROW_BUTTONS} botões."
+        )
+    if any(item.get("type") != BUTTON for item in components) and len(components) != 1:
+        raise ValueError("Action Row aceita vários botões ou um único select.")
     return {"type": ACTION_ROW, "components": list(components)}
 
 
 def media_gallery(urls: list[str] | tuple[str, ...]) -> dict[str, Any]:
-    """Build a Discord media gallery without exceeding its ten-item limit."""
+    """Build a Discord media gallery without silently dropping media."""
+
+    if not 1 <= len(urls) <= 10:
+        raise ValueError("Media Gallery aceita de 1 a 10 itens.")
 
     return {
         "type": MEDIA_GALLERY,
-        "items": [{"media": {"url": url}} for url in urls[:10]],
+        "items": [{"media": {"url": url}} for url in urls],
     }
 
 
@@ -222,6 +264,7 @@ def container(
 
 
 def payload(*components: dict[str, Any]) -> dict[str, Any]:
+    validate_components(components)
     return {
         "flags": FLAG_COMPONENTS_V2,
         "components": list(components),
@@ -232,6 +275,7 @@ def payload(*components: dict[str, Any]) -> dict[str, Any]:
 def meta_notice_payload(*components: dict[str, Any]) -> dict[str, Any]:
     """Unica superficie que pode interpretar @everyone no Yuno."""
 
+    validate_components(components)
     return {
         "flags": FLAG_COMPONENTS_V2,
         "components": list(components),

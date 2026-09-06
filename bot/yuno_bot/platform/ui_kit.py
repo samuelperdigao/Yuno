@@ -37,6 +37,14 @@ from yuno_bot.platform.components_v2 import thumbnail as _thumbnail
 # Tokens
 # --------------------------------------------------------------------------- #
 
+# Discord só permite a barra de destaque do Container; o restante da
+# identidade vem de tipografia, separadores e composição V2.
+NEXUS_BLACK = 0x0B0B10
+NEXUS_GRAPHITE = 0x2B2D31
+NEXUS_VIOLET = 0x8B5CF6
+NEXUS_WHITE = 0xF5F7FA
+# Mantido para superfícies operacionais legadas; a Central Nexus usa
+# `NEXUS_VIOLET` explicitamente para não alterar contratos visuais existentes.
 BRAND = 0xFFC72C
 SUCCESS = 0x57F287
 WARNING = 0xF39C12
@@ -180,6 +188,44 @@ def notice(text: Any, *, kind: str = "info") -> str:
     lines = [" ".join(line.split()) for line in str(text or "").splitlines() if line.strip()]
     body = "\n".join(lines)
     return clip(f"{prefix}{body}")
+
+
+def nexus_path(*parts: Any) -> str:
+    values = [" ".join(str(part or "").split()).strip().upper() for part in parts]
+    values = [value for value in values if value]
+    return "YUNO NEXUS // " + " / ".join(values) if values else "YUNO NEXUS"
+
+
+def nexus_title(title: Any, *, path: str = "CORE", subtitle: Any = None) -> str:
+    body = f"# {nexus_path(path)}\n## {str(title or '').strip()}"
+    if subtitle:
+        body += f"\n{str(subtitle).strip()}"
+    return clip(body)
+
+
+def nexus_metric(label: Any, value: Any) -> str:
+    return clip(f"**{str(label or '').strip().upper()}**\n{str(value if value not in (None, '') else DASH)}")
+
+
+def nexus_metrics(*pairs: tuple[Any, Any] | Sequence[Any]) -> str:
+    rendered = [nexus_metric(pair[0], pair[1]) for pair in pairs if pair]
+    return clip("\n\n".join(rendered))
+
+
+def nexus_state(label: Any, value: Any, *, state: State | str | None = None) -> str:
+    suffix = ""
+    resolved = _state(state)
+    if resolved is not None:
+        suffix = f" · {resolved.value.upper()}"
+    return clip(f"**{str(label or '').strip().upper()}**\n{str(value or DASH).strip()}{suffix}")
+
+
+def nexus_notice(title: Any, subject: Any, detail: Any) -> str:
+    return clip(
+        f"// {str(title or '').strip().upper()}\n\n"
+        f"**{str(subject or '').strip()}**\n"
+        f"{str(detail or '').strip()}"
+    )
 
 
 # --------------------------------------------------------------------------- #

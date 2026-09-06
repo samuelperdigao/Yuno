@@ -31,7 +31,10 @@ from yuno_bot.platform import ui_kit as uk
 from yuno_bot.platform.contracts import ActorContext, RetryableJobError
 
 
+# Avisos públicos preservam o token semântico legado. A Central administrativa
+# usa o accent Nexus explicitamente, sem alterar a identidade dessas mensagens.
 COLOR = uk.BRAND
+ADMIN_COLOR = uk.NEXUS_VIOLET
 log = logging.getLogger("yuno.meta")
 _goal_pages: dict[tuple[int, int], int] = {}
 _selected_goals: dict[tuple[int, int], int] = {}
@@ -90,7 +93,9 @@ async def _replace_public(interaction: discord.Interaction, data: dict[str, Any]
         await interaction.response.defer()
     if interaction.channel_id is None or interaction.message is None:
         raise RuntimeError("Referência da Central indisponível.")
-    await edit_message(interaction.client, interaction.channel_id, interaction.message.id, data)
+    await dashboard.edit_central_message(
+        interaction.client, interaction.channel_id, interaction.message.id, data
+    )
 
 
 def _public_status(goal: dict[str, Any]) -> str:
@@ -136,11 +141,11 @@ def _editor_progress(step: str) -> str:
 
 
 def _page_previous() -> dict[str, Any]:
-    return {"label": "Página anterior", "value": "page:prev", "emoji": {"name": "⬅️"}}
+    return {"label": "Página anterior", "value": "page:prev"}
 
 
 def _page_next() -> dict[str, Any]:
-    return {"label": "Próxima página", "value": "page:next", "emoji": {"name": "➡️"}}
+    return {"label": "Próxima página", "value": "page:next"}
 
 
 def _main_payload(goals: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
@@ -148,12 +153,11 @@ def _main_payload(goals: dict[str, Any], settings: dict[str, Any]) -> dict[str, 
     total = int(goals["total"])
     page_size = int(goals["page_size"])
     options = [
-        {
-            "label": str(item["name"])[:100],
-            "value": f"goal:{item['id']}",
-            "description": f"{_public_status(item)} · {item['recurrence']}",
-            "emoji": {"name": "🎯"},
-        }
+            {
+                "label": str(item["name"])[:100],
+                "value": f"goal:{item['id']}",
+                "description": f"{_public_status(item)} · {item['recurrence']}",
+            }
         for item in goals["items"]
     ]
     if page > 0:
@@ -166,28 +170,22 @@ def _main_payload(goals: dict[str, Any], settings: dict[str, Any]) -> dict[str, 
     destination = (
         f"<#{notice_channel}>"
         if notice_channel
-        else "⚪ Nenhum canal de avisos definido"
+        else "Nenhum canal de avisos definido"
     )
     return payload(
         uk.panel(
-            header=[
-                dashboard.module_navigation("meta"),
-                uk.space(),
-                uk.heading("Sistema de Metas", emoji="🎯"),
-            ],
-            blocks=[uk.field("Canal dos avisos", destination, emoji="📣")],
+            header=[uk.nexus_title("SISTEMA DE METAS", path="MODULES / META", subtitle="Metas recorrentes e publicação")],
+            blocks=[uk.field("CANAL DOS AVISOS", destination)],
             actions=[
                 action_row(
                     button(
                         custom_id=dashboard.central_custom_id("meta", "create_goal"),
                         label="Criar Meta",
-                        emoji="➕",
                         style=1,
                     ),
                     button(
                         custom_id=dashboard.central_custom_id("meta", "settings"),
                         label="Configurações",
-                        emoji="⚙️",
                         style=2,
                     ),
                 ),
@@ -198,12 +196,11 @@ def _main_payload(goals: dict[str, Any], settings: dict[str, Any]) -> dict[str, 
                         placeholder=f"Metas ativas e agendadas · página {page + 1}",
                     )
                 ),
+                dashboard.module_navigation("meta"),
+                dashboard.route_navigation("meta", "overview"),
             ],
-            footer=(
-                "Uma Meta agendada só entra no ar depois que o aviso público é "
-                "publicado no canal escolhido."
-            ),
-            accent_color=COLOR,
+            footer="NEXUS CORE // SESSION ACTIVE",
+            accent_color=ADMIN_COLOR,
         )
     )
 
@@ -319,9 +316,9 @@ def _objective_line(item: dict[str, Any]) -> str:
     """
 
     if item.get("kind") == "money":
-        return f"💰 {item.get('name') or 'Dinheiro'} — {uk.money_br(item.get('money_amount'))}"
+        return f"{item.get('name') or 'Dinheiro'} — {uk.money_br(item.get('money_amount'))}"
     return (
-        f"📦 {item.get('name')} — "
+        f"{item.get('name')} — "
         f"{uk.quantity(item.get('item_quantity'), item.get('unit') or 'unidade')}"
     )
 
@@ -357,9 +354,9 @@ def _editor_payload(
     progress = _editor_progress(step)
     content = [
         text_display(
-            uk.heading(title, emoji="🎯")
+            uk.heading(title)
             + (f"\n{progress}" if progress else "")
-            + (f"\n\n{uk.empty_state('Atenção', banner)}" if banner else "")
+            + (f"\n\n{uk.nexus_notice('ATENÇÃO', 'EDITOR', banner)}" if banner else "")
         ),
         separator(),
     ]
@@ -367,14 +364,13 @@ def _editor_payload(
         content.extend(
             [
                 text_display(
-                    f"{uk.section_number(1, 'Nome', emoji='🏷️')}\n\n"
+                    f"{uk.section_number(1, 'Nome')}\n\n"
                     f"**{data.get('name') or 'Ainda não informado'}**"
                 ),
                 action_row(
                     button(
                         custom_id=dashboard.central_custom_id("meta", "edit_name"),
                         label="Informar nome",
-                        emoji="✏️",
                         style=1,
                     )
                 ),
@@ -384,7 +380,7 @@ def _editor_payload(
         content.extend(
             [
                 text_display(
-                    f"{uk.section_number(2, 'Periodicidade', emoji='🔁')}\n\n"
+                    f"{uk.section_number(2, 'Periodicidade')}\n\n"
                     "Escolha como os ciclos serão renovados."
                 ),
                 action_row(
@@ -392,10 +388,10 @@ def _editor_payload(
                         custom_id=dashboard.central_custom_id("meta", "set_recurrence"),
                         placeholder="Escolha a periodicidade",
                         options=[
-                            {"label": "Diária", "value": "daily", "emoji": {"name": "☀️"}},
-                            {"label": "Semanal", "value": "weekly", "emoji": {"name": "📅"}},
-                            {"label": "Mensal", "value": "monthly", "emoji": {"name": "🗓️"}},
-                            {"label": "Personalizada", "value": "custom", "emoji": {"name": "⏱️"}},
+                            {"label": "Diária", "value": "daily"},
+                            {"label": "Semanal", "value": "weekly"},
+                            {"label": "Mensal", "value": "monthly"},
+                            {"label": "Personalizada", "value": "custom"},
                         ],
                     )
                 ),
@@ -405,14 +401,13 @@ def _editor_payload(
         content.extend(
             [
                 text_display(
-                    f"{uk.section_number(2, 'Periodicidade', emoji='🔁')}\n\n"
+                    f"{uk.section_number(2, 'Periodicidade')}\n\n"
                     f"**{_schedule_summary(data)}**"
                 ),
                 action_row(
                     button(
                         custom_id=dashboard.central_custom_id("meta", "edit_schedule"),
                         label="Definir agenda",
-                        emoji="📅",
                         style=1,
                     )
                 ),
@@ -422,7 +417,7 @@ def _editor_payload(
         content.extend(
             [
                 text_display(
-                    f"{uk.section_number(3, 'Participantes', emoji='👥')}\n\n"
+                    f"{uk.section_number(3, 'Participantes')}\n\n"
                     "O snapshot será congelado quando o ciclo iniciar."
                 ),
                 action_row(
@@ -430,8 +425,8 @@ def _editor_payload(
                         custom_id=dashboard.central_custom_id("meta", "set_participation"),
                         placeholder="Todos os membros ou cargos",
                         options=[
-                            {"label": "Todos os membros", "value": "all_members", "emoji": {"name": "👥"}},
-                            {"label": "Cargos selecionados", "value": "roles", "emoji": {"name": "🎭"}},
+                            {"label": "Todos os membros", "value": "all_members"},
+                            {"label": "Cargos selecionados", "value": "roles"},
                         ],
                     )
                 ),
@@ -442,7 +437,7 @@ def _editor_payload(
         content.extend(
             [
                 text_display(
-                    f"{uk.section_number(3, 'Participantes por cargo', emoji='🎭')}\n\n"
+                    f"{uk.section_number(3, 'Participantes por cargo')}\n\n"
                     f"**{len(roles)} cargo(s)** selecionado(s). "
                     "Adicione em lotes se precisar de mais de 25."
                 ),
@@ -468,7 +463,7 @@ def _editor_payload(
         content.extend(
             [
                 text_display(
-                    f"{uk.section_number(4, 'Tipo', emoji='🧭')}\n\n"
+                    f"{uk.section_number(4, 'Tipo')}\n\n"
                     "Escolha itens, dinheiro ou uma Meta mista."
                 ),
                 action_row(
@@ -476,9 +471,9 @@ def _editor_payload(
                         custom_id=dashboard.central_custom_id("meta", "set_type"),
                         placeholder="Escolha o tipo de Meta",
                         options=[
-                            {"label": "Itens", "value": "items", "emoji": {"name": "📦"}},
-                            {"label": "Dinheiro", "value": "money", "emoji": {"name": "💵"}},
-                            {"label": "Mista", "value": "mixed", "emoji": {"name": "🎯"}},
+                            {"label": "Itens", "value": "items"},
+                            {"label": "Dinheiro", "value": "money"},
+                            {"label": "Mista", "value": "mixed"},
                         ],
                     )
                 ),
@@ -489,7 +484,7 @@ def _editor_payload(
         objectives = list(data.get("objectives") or [])
         content.append(
             text_display(
-                f"{uk.section_number(5, 'Objetivos', emoji='📦')}\n\n"
+                f"{uk.section_number(5, 'Objetivos')}\n\n"
                 "Adicione cada objetivo em campos separados. "
                 "Os valores abaixo já estão no formato que será publicado.\n\n"
                 + _objective_lines(data)
@@ -506,7 +501,6 @@ def _editor_payload(
                     if item.get("last_suggested_quantity")
                     else f"Unidade: {item['unit']}"
                 )[:100],
-                "emoji": {"name": "📦"},
             }
             for item in catalog.get("items") or []
         ]
@@ -533,7 +527,6 @@ def _editor_payload(
                 "label": str(item.get("name") or "Objetivo")[:100],
                 "value": f"objective:{start + index}",
                 "description": _objective_line(item)[:100],
-                "emoji": {"name": "💰" if item.get("kind") == "money" else "📦"},
             }
             for index, item in enumerate(visible)
         ]
@@ -558,7 +551,6 @@ def _editor_payload(
                 button(
                     custom_id=dashboard.central_custom_id("meta", "add_item_objective"),
                     label="Novo item",
-                    emoji="📦",
                     style=1,
                 )
             )
@@ -567,7 +559,6 @@ def _editor_payload(
                 button(
                     custom_id=dashboard.central_custom_id("meta", "add_money_objective"),
                     label="Dinheiro",
-                    emoji="💰",
                     style=1,
                 )
             )
@@ -577,7 +568,6 @@ def _editor_payload(
                 button(
                     custom_id=dashboard.central_custom_id("meta", "objectives_continue"),
                     label="Continuar",
-                    emoji="✅",
                     style=3,
                     disabled=not _objectives_match_mode(data),
                 )
@@ -587,14 +577,13 @@ def _editor_payload(
         content.extend(
             [
                 text_display(
-                    f"{uk.section_number(6, 'Texto do aviso', emoji='📣')}\n\n"
+                    f"{uk.section_number(6, 'Texto do aviso')}\n\n"
                     f"{data.get('notice_text') or '_Ainda não informado._'}"
                 ),
                 action_row(
                     button(
                         custom_id=dashboard.central_custom_id("meta", "edit_notice"),
                         label="Informar aviso",
-                        emoji="✏️",
                         style=1,
                     )
                 ),
@@ -609,22 +598,21 @@ def _editor_payload(
         content.extend(
             [
                 text_display(
-                    f"{uk.section_number(7, 'Revisão', emoji='👁️')}\n\n"
+                    f"{uk.section_number(7, 'Revisão')}\n\n"
                     + uk.inline_fields(
                         ("Nome", data.get("name")),
                         ("Periodicidade", _schedule_summary(data)),
                         ("Participantes", participant_text),
                     )
                     + "\n\n"
-                    + uk.field("Objetivos", _objective_lines(data), emoji="📦")
+                    + uk.field("Objetivos", _objective_lines(data))
                     + "\n\n"
-                    + uk.field("Aviso", data.get("notice_text"), emoji="📣")
+                    + uk.field("Aviso", data.get("notice_text"))
                 ),
                 action_row(
                     button(
                         custom_id=dashboard.central_custom_id("meta", "submit_goal"),
                         label="Criar Meta" if not draft.get("goal_id") else "Salvar próxima Meta",
-                        emoji="✅",
                         style=3,
                     )
                 ),
@@ -633,7 +621,7 @@ def _editor_payload(
     else:
         content.append(
             text_display(
-                f"{uk.heading('Meta salva', emoji='✅', level=3)}\n\n"
+                f"{uk.heading('Meta salva', level=3)}\n\n"
                 "O lançamento foi agendado. O ciclo só fica ativo depois que o "
                 "aviso público for confirmado."
             )
@@ -647,9 +635,10 @@ def _editor_payload(
                     f"revisão {draft['revision']}."
                 )
             ),
+            dashboard.route_navigation("meta", "configuration"),
         )
     )
-    return payload(container(*content, accent_color=COLOR))
+    return payload(container(*content, accent_color=ADMIN_COLOR))
 
 
 async def _editor_products(
@@ -682,16 +671,18 @@ async def _show_editor(
     products = await _editor_products(
         getattr(interaction.client, "platform_api", None), interaction, draft
     )
-    await edit_interaction_message(
-        interaction,
-        _editor_payload(
-            draft,
-            banner=banner,
-            products=products,
-            objective_page=max(0, _objective_pages.get(key, 0)),
-        ),
-        ephemeral=True,
+    data = _editor_payload(
+        draft,
+        banner=banner,
+        products=products,
+        objective_page=max(0, _objective_pages.get(key, 0)),
     )
+    if interaction.message is not None and interaction.channel_id is not None:
+        await dashboard.edit_central_message(
+            interaction.client, interaction.channel_id, interaction.message.id, data
+        )
+    else:
+        await edit_interaction_message(interaction, data, ephemeral=True)
 
 
 class EditorModal(discord.ui.Modal):
@@ -700,6 +691,8 @@ class EditorModal(discord.ui.Modal):
         self.api = api
         self.editor_application_id = int(editor_interaction.application_id)
         self.editor_token = editor_interaction.token
+        self.central_channel_id = editor_interaction.channel_id
+        self.central_message_id = getattr(editor_interaction.message, "id", None)
 
     async def _refresh_after_submit(
         self,
@@ -716,6 +709,14 @@ class EditorModal(discord.ui.Modal):
             products=products,
             objective_page=max(0, _objective_pages.get(key, 0)),
         )
+        if self.central_channel_id is not None and self.central_message_id is not None:
+            await dashboard.edit_central_message(
+                interaction.client,
+                self.central_channel_id,
+                self.central_message_id,
+                data,
+            )
+            return
         try:
             await edit_webhook_message(
                 interaction.client,
@@ -745,7 +746,7 @@ class EditorModal(discord.ui.Modal):
     async def save_patch(
         self, interaction: discord.Interaction, *, patch: dict[str, Any], step: str
     ) -> None:
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer(thinking=True)
         try:
             actor = actor_from(interaction)
             current = await self.api.meta_draft(interaction.guild_id, actor=actor)
@@ -1060,35 +1061,33 @@ async def create_goal(interaction: discord.Interaction, api: Any) -> None:
 async def settings(interaction: discord.Interaction, api: Any) -> None:
     try:
         current = await api.meta_settings(interaction.guild_id)
-        await edit_interaction_message(
+        await _replace_public(
             interaction,
             payload(
-                container(
-                    text_display(
-                        uk.heading("Configurações de Metas", emoji="⚙️")
-                        + "\n\nSelecione o canal usado para o aviso de cada novo ciclo."
-                        + (
-                            "\n\n"
-                            + uk.field(
-                                "Canal atual",
-                                f"<#{current['notice_channel_id']}>",
-                                emoji="📣",
+                uk.panel(
+                    header=uk.nexus_title(
+                        "CONFIGURAÇÃO", path="MODULES / META", subtitle="Canal dos avisos de cada ciclo"
+                    ),
+                    blocks=[text_display(uk.field(
+                        "CANAL ATUAL",
+                        f"<#{current['notice_channel_id']}>"
+                        if current.get("notice_channel_id")
+                        else "Nenhum canal definido",
+                    ))],
+                    actions=[
+                        action_row(
+                            channel_select(
+                                custom_id=dashboard.central_custom_id("meta", "save_settings"),
+                                placeholder="Canal dos avisos de Meta",
+                                channel_types=[0, 5],
                             )
-                            if current.get("notice_channel_id")
-                            else ""
-                        )
-                    ),
-                    action_row(
-                        channel_select(
-                            custom_id=dashboard.central_custom_id("meta", "save_settings"),
-                            placeholder="Canal dos avisos de Meta",
-                            channel_types=[0, 5],
-                        )
-                    ),
-                    accent_color=COLOR,
+                        ),
+                        dashboard.route_navigation("meta", "configuration"),
+                    ],
+                    footer="Alterações salvas no rascunho deste servidor.",
+                    state=uk.State.PENDING,
                 )
             ),
-            ephemeral=True,
         )
     except Exception as exc:
         await _reply(interaction, _error_text(exc))
@@ -1114,11 +1113,11 @@ async def save_settings(interaction: discord.Interaction, api: Any) -> None:
             {"notice_channel_id": str(channel.id), "expected_revision": current["revision"] or None},
             actor=actor_from(interaction),
         )
-        await edit_interaction_message(
+        await _replace_public(
             interaction,
             payload(
                 uk.panel(
-                    header=uk.heading("Configurações salvas", emoji="✅")
+                    header=uk.nexus_title("CONFIGURAÇÃO ATUALIZADA", path="MODULES / META")
                     + f"\n\nOs avisos serão publicados em {channel.mention}.",
                     state=uk.State.APPROVED,
                 )
@@ -1145,29 +1144,33 @@ async def select_goal(interaction: discord.Interaction, api: Any) -> None:
         goal = await api.meta_goal(interaction.guild_id, goal_id)
         config = goal.get("future_configuration") or goal.get("current_configuration") or {}
         state = _public_state(goal)
-        components = [
-            text_display(
-                uk.heading(goal["name"], emoji="🎯")
+        detail = text_display(
+                uk.nexus_title(goal["name"], path="MODULES / META", subtitle="Detalhes da Meta")
                 + "\n\n"
-                + uk.field("Status", uk.badge(state, _public_status(goal)), emoji="📌")
+                + uk.nexus_state("STATUS", _public_status(goal), state=state)
                 + "\n\n"
-                + uk.field("Periodicidade", _schedule_summary(config), emoji="🔁")
+                + uk.field("PERIODICIDADE", _schedule_summary(config))
                 + "\n\n"
-                + uk.field("Objetivos", _objective_lines(config), emoji="📦")
+                + uk.field("OBJETIVOS", _objective_lines(config))
             )
-        ]
+        actions = []
         if goal["state"] == "active" and goal["recurrence"] != "custom":
-            components.append(
+            actions.append(
                 action_row(button(custom_id=dashboard.central_custom_id("meta", "edit_goal"), label="Editar próxima Meta", style=2))
             )
         elif goal["state"] == "scheduled" and goal["recurrence"] == "custom":
-            components.append(
+            actions.append(
                 action_row(button(custom_id=dashboard.central_custom_id("meta", "edit_goal"), label="Editar Meta agendada", style=2))
             )
-        await edit_interaction_message(
+        await _replace_public(
             interaction,
-            payload(container(*components, accent_color=uk.accent_for(state))),
-            ephemeral=True,
+            payload(
+                uk.panel(
+                    header=detail,
+                    actions=[*actions, dashboard.route_navigation("meta", "overview")],
+                    state=state,
+                )
+            ),
         )
     except Exception as exc:
         await _reply(interaction, _error_text(exc))
@@ -1352,20 +1355,18 @@ def _objective_action_payload(draft: dict[str, Any], index: int) -> dict[str, An
     return payload(
         container(
             text_display(
-                uk.heading("Objetivo selecionado", emoji="🎯") + f"\n\n{_objective_line(item)}\n\n"
+                uk.heading("OBJETIVO SELECIONADO") + f"\n\n{_objective_line(item)}\n\n"
                 "Escolha o que deseja fazer."
             ),
             action_row(
                 button(
                     custom_id=dashboard.central_custom_id("meta", "edit_selected_objective"),
                     label="Editar",
-                    emoji="✏️",
                     style=1,
                 ),
                 button(
                     custom_id=dashboard.central_custom_id("meta", "remove_selected_objective"),
                     label="Remover",
-                    emoji="🗑️",
                     style=4,
                 ),
                 button(
@@ -1374,7 +1375,7 @@ def _objective_action_payload(draft: dict[str, Any], index: int) -> dict[str, An
                     style=2,
                 ),
             ),
-            accent_color=COLOR,
+            accent_color=ADMIN_COLOR,
         )
     )
 
@@ -1399,7 +1400,7 @@ async def select_objective(interaction: discord.Interaction, api: Any) -> None:
     except ValueError as exc:
         await _reply(interaction, str(exc))
         return
-    await edit_interaction_message(interaction, data, ephemeral=True)
+    await _replace_public(interaction, data)
 
 
 async def edit_selected_objective(interaction: discord.Interaction, api: Any) -> None:
@@ -1547,9 +1548,9 @@ def _notice_payload(goal: dict[str, Any], cycle: dict[str, Any], *, ended: bool)
     objectives = _objective_lines({"objectives": cycle.get("objectives") or []})
     name = str(cycle.get("name") or goal["name"])
     title = (
-        uk.heading(f"Meta Encerrada — {name}", emoji="🏁")
+        uk.heading(f"Meta Encerrada — {name}")
         if ended
-        else uk.heading(name, emoji="🎯")
+        else uk.heading(name)
     )
     prefix = "" if ended else "@everyone\n\n"
     footer = (
@@ -1562,9 +1563,9 @@ def _notice_payload(goal: dict[str, Any], cycle: dict[str, Any], *, ended: bool)
         blocks=[
             str(cycle.get("notice_text") or ""),
             uk.rule(),
-            uk.field("Período", _cycle_period(cycle), emoji="📅"),
+            uk.field("Período", _cycle_period(cycle)),
             uk.rule(),
-            uk.field("Objetivos", objectives, emoji="📦"),
+            uk.field("Objetivos", objectives),
         ],
         footer=footer,
         state=uk.State.DONE if ended else None,

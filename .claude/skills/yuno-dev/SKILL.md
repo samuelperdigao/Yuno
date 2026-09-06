@@ -56,6 +56,15 @@ Preservar mudanças alheias, executar testes proporcionais, criar backup, valida
 - Nenhum ID Discord pode ser constante. Todo estado multi-tenant deve ser isolado por `guild_id`.
 - Limites do Discord pertencem à camada de interface; não limitar coleções do domínio para caber em um modal ou select.
 
+## Yuno Nexus UI Design System
+
+Todo novo módulo administrativo deve reutilizar o padrão YUNO NEXUS descrito
+em `docs/ui-kit.md`: Components V2, shell compartilhado, preto/grafite/
+violeta/branco, zero emojis decorativos, linguagem técnica moderada,
+interface contextual, mobile-first, mensagem única editável e navegação
+determinística. É proibido criar identidade, shell, helpers visuais ou
+navegação próprios quando já houver equivalente no `ui_kit`.
+
 ## Política sobre legado
 
 O Yuno antigo e o Morro do Mineiro podem ser lidos para descobrir:

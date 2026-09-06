@@ -67,6 +67,7 @@ rollback controlado. A flag não deve ser alterada sem um sync intencional da
 árvore. Tokens administrativos e internos nunca devem ser enviados ao cliente.
 
 Veja o fluxo completo de publicação e personalização em [docs/paineis.md](docs/paineis.md).
+O padrão visual administrativo obrigatório está em [docs/ui-kit.md](docs/ui-kit.md), na seção **Yuno Nexus UI Design System**.
 
 ## Operação antes da venda
 

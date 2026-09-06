@@ -1,5 +1,6 @@
 import asyncio
 import os
+import pytest
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -280,7 +281,8 @@ def test_proof_gallery_pages_ten_media_and_stays_under_component_limit() -> None
         item["custom_id"].startswith("yuno:farm_tickets:v2:ticket:proofs_")
         for item in _buttons(first.data)
     )
-    assert len(media_gallery(proofs + ["https://cdn.example/extra.png"])["items"]) == 10
+    with pytest.raises(ValueError, match="1 a 10"):
+        media_gallery(proofs + ["https://cdn.example/extra.png"])
 
 
 def test_adapter_is_discoverable_without_touching_the_generic_ticket_module() -> None:
