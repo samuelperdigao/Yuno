@@ -763,6 +763,11 @@ async def refresh_existing(
     if not channel_id or not message_id:
         return False
     channel = guild.get_channel(channel_id)
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(channel_id)
+        except discord.HTTPException:
+            return False
     if channel is None or not hasattr(channel, "fetch_message"):
         return False
     try:

@@ -397,6 +397,37 @@ async def test_startup_refresh_updates_only_the_registered_central(monkeypatch) 
     assert "YUNO NEXUS // CORE" in str(edited[0][3])
 
 
+@pytest.mark.asyncio
+async def test_startup_refresh_fetches_registered_channel_when_cache_is_cold(monkeypatch) -> None:
+    class Channel:
+        async def fetch_message(self, message_id):
+            assert message_id == 20
+            return SimpleNamespace(author=SimpleNamespace(id=42))
+
+    class Guild:
+        me = SimpleNamespace(id=42)
+
+        def get_channel(self, channel_id):
+            assert channel_id == 10
+            return None
+
+    async def edit(bot, channel_id, message_id, data):
+        assert (channel_id, message_id) == (10, 20)
+
+    async def fetch_channel(channel_id):
+        assert channel_id == 10
+        return Channel()
+
+    monkeypatch.setattr(dashboard, "_edit_v2", edit)
+    bot = SimpleNamespace(fetch_channel=fetch_channel)
+
+    assert await dashboard.refresh_existing(
+        bot,
+        Guild(),
+        {"settings": {"dashboard": {"panel_channel_id": "10", "panel_message_id": "20"}}},
+    ) is True
+
+
 def test_central_dynamic_patterns_do_not_compete_for_string_selects() -> None:
     root = "yuno:central:v1:core:select_module"
     section = "yuno:central:v1:registration:section"
