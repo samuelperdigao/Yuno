@@ -681,8 +681,8 @@ class YunoAdminCog(commands.Cog):
         if resultado.adopted:
             linhas.append(f"Adotei os que ja existiam: {', '.join(resultado.adopted)}")
         linhas.append("Pode rodar este comando quantas vezes quiser: nada e duplicado.")
-        linhas.append("Próximo passo: rode `/yuno painel` para configurar e publicar os painéis dos módulos.")
-        linhas.append("Use `/yuno diagnostico` a qualquer momento para conferir o estado.")
+        linhas.append("Próximo passo: abra `/yuno configurar` para configurar e publicar os módulos.")
+        linhas.append("Use a Central em `/yuno configurar` para conferir o estado e as pendências.")
 
         await interaction.followup.send("\n".join(linhas), ephemeral=True)
 

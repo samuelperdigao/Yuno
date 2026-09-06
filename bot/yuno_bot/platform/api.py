@@ -497,6 +497,73 @@ class PlatformAPIClient:
             correlation_id=actor.correlation_id,
         )
 
+    async def parceria_begin_registration(self, guild_id: int, payload: dict, *, actor: Any) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/parceria/registration-attempts",
+            json={**payload, "actor": actor.as_payload()},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def parceria_attach_image(self, guild_id: int, attempt_id: str, payload: dict, *, actor: Any) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/parceria/registration-attempts/{attempt_id}/image",
+            json={**payload, "actor": actor.as_payload()},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def parceria_complete_registration(self, guild_id: int, attempt_id: str, *, actor: Any) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/parceria/registration-attempts/{attempt_id}/complete",
+            json={"actor": actor.as_payload()},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def parceria_awaiting_image(self, guild_id: int, *, actor_id: int, channel_id: int) -> dict:
+        return await self._request(
+            "GET",
+            f"/guilds/{guild_id}/modules/parceria/registration-attempts/awaiting-image",
+            params={"actor_id": str(actor_id), "channel_id": str(channel_id)},
+        )
+
+    async def parceria_list(self, guild_id: int) -> list[dict]:
+        return await self._request("GET", f"/guilds/{guild_id}/modules/parceria/partnerships")
+
+    async def parceria_get(self, guild_id: int, parceria_id: str) -> dict:
+        return await self._request("GET", f"/guilds/{guild_id}/modules/parceria/partnerships/{parceria_id}")
+
+    async def parceria_edit(self, guild_id: int, parceria_id: str, payload: dict, *, actor: Any) -> dict:
+        return await self._request(
+            "PATCH",
+            f"/guilds/{guild_id}/modules/parceria/partnerships/{parceria_id}",
+            json={**payload, "actor": actor.as_payload()},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def parceria_deactivate(self, guild_id: int, parceria_id: str, expected_revision: int, *, actor: Any) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/parceria/partnerships/{parceria_id}/deactivate",
+            json={"expected_revision": expected_revision, "actor": actor.as_payload()},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def parceria_publication_result(self, guild_id: int, parceria_id: str, payload: dict, *, actor: Any) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/parceria/publications/{parceria_id}/result",
+            json={**payload, "actor": actor.as_payload()},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
     async def farm_products(self, guild_id: int) -> list[dict]:
         return await self._request("GET", f"/guilds/{guild_id}/modules/farm/products")
 
