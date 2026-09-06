@@ -4,18 +4,17 @@ import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from uuid import uuid4
 
 import discord
 import httpx
 
 from yuno_bot import dashboard
 from yuno_bot.platform import ui_kit as uk
-from yuno_bot.platform.components_v2 import action_row, button, container, edit_message, payload, separator, text_display
+from yuno_bot.platform.components_v2 import action_row, button, edit_message, payload, text_display
 from yuno_bot.platform.contracts import ActorContext, RetryableJobError
 
 
-COLOR = uk.BRAND
+NEXUS_FOOTER = "NEXUS CORE // SESSION ACTIVE"
 
 # Ciclo de vida do módulo traduzido para os estados do kit: mesma cor e mesmo
 # emoji que Registro, Metas e Tickets usam para dizer a mesma coisa.
@@ -49,7 +48,7 @@ def _run_badge(status: Any) -> str:
     state, label = RUN_STATES.get(
         str(status or "").strip().casefold(), (uk.State.PENDING, str(status or "—"))
     )
-    return uk.badge(state, label)
+    return uk.status_text(state, label, bold=False)
 log = logging.getLogger("yuno.tags")
 _pages: dict[tuple[int, int], int] = {}
 
@@ -102,6 +101,7 @@ def _error_text(exc: Exception) -> str:
 
 
 async def _reply(interaction: discord.Interaction, message: str) -> None:
+    message = uk.nexus_notice("INCIDENTE", "Não foi possível concluir a operação.", message)
     if interaction.response.is_done():
         await interaction.followup.send(message, ephemeral=True)
     else:
@@ -153,57 +153,62 @@ def _overview_payload(
     state, state_label = _lifecycle(instance["lifecycle"])
     published = int(draft["base_published_version"] or 0)
     last_run = diagnostics.get("last_run") or {}
-    run_text = (
-        f"{_run_badge(last_run.get('status'))} · "
-        f"{last_run.get('planned_items', 0)}/{last_run.get('total_items', 0)} planejados"
-        if last_run
-        else "Nenhuma sincronização executada"
-    )
-    return payload(
-        uk.panel(
-            header=[
-                dashboard.module_navigation("tags"),
-                uk.space(),
-                uk.heading("Sistema de Tags", emoji="🏷️")
-                + "\n\nEscolhe uma Tag pela hierarquia atual dos cargos e mantém o "
-                "apelido do membro reconciliado.",
-            ],
-            blocks=[
-                "\n\n".join(
-                    (
-                        uk.field(
-                            "Status",
-                            uk.badge(state, state_label, bold=True)
-                            + " · "
-                            + uk.inline_fields(
-                                ("Versão publicada", published or "nenhuma"),
-                                ("Revisão do rascunho", draft["revision"]),
-                            ),
-                            emoji="📌",
-                        ),
-                        uk.field(
-                            "Vínculos",
-                            uk.inline_fields(
-                                ("No rascunho", len(draft["bindings"])),
-                                ("Cargo mais alto", highest_role),
-                                ("Ausentes", missing_roles),
-                            ),
-                            emoji="🔗",
-                        ),
-                        uk.field("Última sincronização", run_text, emoji="🔄"),
-                    )
+    blocks: list[dict[str, Any]] = [
+        text_display(uk.nexus_state("ESTADO", state_label, state=state)),
+        text_display(
+            uk.nexus_metrics(
+                ("VÍNCULOS", f"{len(draft['bindings']):02d}"),
+                ("PUBLICAÇÃO", f"V{published}" if published else "NÃO PUBLICADA"),
+                ("REVISÃO DO RASCUNHO", f"R{draft['revision']}"),
+                ("CARGO PRIORITÁRIO", highest_role),
+            )
+        ),
+    ]
+    if last_run:
+        blocks.append(
+            text_display(
+                uk.nexus_notice(
+                    "ÚLTIMA OPERAÇÃO",
+                    _run_badge(last_run.get("status")),
+                    f"{last_run.get('planned_items', 0)}/{last_run.get('total_items', 0)} membros planejados.",
                 )
-            ],
+            )
+        )
+    if missing_roles:
+        blocks.append(
+            text_display(
+                uk.nexus_notice(
+                    "INCIDENTE",
+                    f"{missing_roles} cargo(s) não está(ão) disponível(is).",
+                    "Revise os vínculos antes de publicar uma nova configuração.",
+                )
+            )
+        )
+    return dashboard.central_shell(payload(
+        uk.panel(
+            header=[uk.nexus_title(
+                "SISTEMA DE TAGS",
+                path="MODULES / TAGS",
+                subtitle="Tags por cargo com prioridade baseada na hierarquia ao vivo.",
+            )],
+            blocks=blocks,
             actions=[
                 action_row(
-                    button(custom_id=dashboard.central_custom_id("tags", "open_system"), label="Configurar vínculos", emoji="⚙️", style=2),
-                    button(custom_id=dashboard.central_custom_id("tags", "preview"), label="Pré-visualizar", emoji="👁️", style=2),
-                )
+                    button(custom_id=dashboard.central_custom_id("tags", "open_system"), label="CONFIGURAR", style=2),
+                    button(custom_id=dashboard.central_custom_id("tags", "preview"), label="PRÉ-VISUALIZAR", style=2),
+                ),
+                action_row(
+                    button(custom_id=dashboard.central_custom_id("tags", "diagnostics"), label="DIAGNÓSTICO", style=2),
+                    button(custom_id=dashboard.central_custom_id("tags", "advanced"), label="OPERAÇÕES", style=2),
+                ),
+                action_row(
+                    button(custom_id=dashboard.central_custom_id("tags", "back"), label="‹ VOLTAR", style=2),
+                ),
             ],
-            footer="A Tag entra no apelido só depois de você confirmar a aplicação.",
-            state=state,
+            footer=NEXUS_FOOTER,
+            accent_color=uk.NEXUS_VIOLET,
         )
-    )
+    ))
 
 
 def _detail_payload(
@@ -216,78 +221,63 @@ def _detail_payload(
     max_page: int,
 ) -> dict:
     state, state_label = _lifecycle(lifecycle)
-    processed = sum(
-        int(last_run.get(key, 0) or 0)
-        for key in ("succeeded_items", "skipped_items", "blocked_items", "failed_items")
-    )
-    run_text = (
-        f"{_run_badge(last_run.get('status'))} · "
-        f"{processed}/{int(last_run.get('total_items', 0) or 0)} processados"
-        if last_run
-        else "nenhuma aplicação executada"
-    )
-    components = [
-        dashboard.module_navigation("tags"),
-        separator(),
-        text_display(
-            uk.heading("Sistema de Tags", emoji="🏷️")
-            + "\n\nAs alterações ficam salvas aqui e só mudam os apelidos quando você confirma."
-        ),
-        separator(),
-        text_display(
-            uk.section_number(1, "Vínculos para confirmar", emoji="🔗")
-            + f"\n{uk.subtext(f'Página {current_page + 1} de {max_page + 1}')}\n\n"
-            + "\n".join(lines)
-        ),
-        separator(),
-        text_display(
-            uk.field(
-                "Estado do sistema",
-                uk.badge(state, state_label, bold=True)
-                + " · "
-                + uk.inline_fields(
-                    ("Publicação", draft["base_published_version"] or "nenhuma"),
-                ),
-                emoji="📌",
-            )
-            + "\n\n"
-            + uk.field("Última aplicação", run_text, emoji="🔄")
-        ),
+    published = int(draft["base_published_version"] or 0)
+    bindings = "\n".join(lines)
+    if not draft["bindings"]:
+        bindings = uk.nexus_notice(
+            "SEM CONFIGURAÇÃO",
+            "Nenhum vínculo foi configurado.",
+            "Adicione um cargo e uma Tag para iniciar a operação.",
+        )
+    actions = [
         action_row(
-            button(custom_id=dashboard.central_custom_id("tags", "add_binding"), label="Adicionar vínculo", emoji="➕", style=1),
-            button(custom_id=dashboard.central_custom_id("tags", "manage_binding"), label="Editar vínculo", emoji="✏️", style=2, disabled=not bool(draft["bindings"])),
+            button(custom_id=dashboard.central_custom_id("tags", "add_binding"), label="ADICIONAR VÍNCULO", style=1),
+            button(custom_id=dashboard.central_custom_id("tags", "manage_binding"), label="GERENCIAR", style=2, disabled=not bool(draft["bindings"])),
         ),
     ]
     if max_page > 0:
-        components.append(
+        actions.append(
             action_row(
-                button(custom_id=dashboard.central_custom_id("tags", "page_prev"), label="Anterior", style=2, disabled=current_page == 0),
-                button(custom_id=dashboard.central_custom_id("tags", "page_next"), label="Próxima", style=2, disabled=current_page >= max_page),
+                button(custom_id=dashboard.central_custom_id("tags", "page_prev"), label="‹ VOLTAR", style=2, disabled=current_page == 0),
+                button(custom_id=dashboard.central_custom_id("tags", "page_next"), label="AVANÇAR ›", style=2, disabled=current_page >= max_page),
             )
         )
-    components.extend(
-        [
-            action_row(
-                button(custom_id=dashboard.central_custom_id("tags", "confirm_publish"), label="Confirmar e aplicar", emoji="✅", style=3),
-                button(custom_id=dashboard.central_custom_id("tags", "cleanup"), label="Limpar todas as Tags", emoji="🧹", style=4, disabled=not bool(draft["base_published_version"])),
-            ),
-            action_row(
-                button(custom_id=dashboard.central_custom_id("tags", "preview"), label="Pré-visualizar", emoji="👁️", style=2),
-                button(custom_id=dashboard.central_custom_id("tags", "advanced"), label="Opções avançadas", emoji="⚙️", style=2),
-            ),
-        ]
-    )
-    components.extend(
-        (
-            separator(spacing=1, divider=False),
-            text_display(
-                uk.subtext(
-                    "Nenhum apelido muda antes de você clicar em Confirmar e aplicar."
-                )
-            ),
+    actions.extend([
+        action_row(
+            button(custom_id=dashboard.central_custom_id("tags", "confirm_publish"), label="PUBLICAR", style=3),
+            button(custom_id=dashboard.central_custom_id("tags", "cleanup"), label="LIMPAR TAGS", style=4, disabled=not bool(published)),
+        ),
+        action_row(
+            button(custom_id=dashboard.central_custom_id("tags", "advanced"), label="OPERAÇÕES", style=2),
+            button(custom_id=dashboard.central_custom_id("tags", "back"), label="‹ VOLTAR", style=2),
+        ),
+    ])
+    return dashboard.central_shell(payload(
+        uk.panel(
+            header=[uk.nexus_title(
+                "CONFIGURAÇÃO",
+                path="MODULES / TAGS / CONFIG",
+                subtitle="Os vínculos ficam em rascunho até a publicação.",
+            )],
+            blocks=[
+                text_display(uk.nexus_state("ESTADO", state_label, state=state)),
+                text_display(uk.nexus_metrics(
+                    ("VÍNCULOS", f"{len(draft['bindings']):02d}"),
+                    ("PUBLICAÇÃO", f"V{published}" if published else "NÃO PUBLICADA"),
+                    ("REVISÃO", f"R{draft.get('revision', 0)}"),
+                )),
+                text_display(
+                    "// VÍNCULOS\n\n"
+                    + uk.subtext(f"Página {current_page + 1} de {max_page + 1}")
+                    + "\n\n"
+                    + bindings
+                ),
+            ],
+            actions=actions,
+            footer="A publicação aplica os vínculos e inicia a reconciliação de apelidos.\n" + NEXUS_FOOTER,
+            accent_color=uk.NEXUS_VIOLET,
         )
-    )
-    return payload(container(*components, accent_color=uk.accent_for(state)))
+    ))
 
 
 async def render_admin(interaction: discord.Interaction, api: Any) -> None:
@@ -331,12 +321,8 @@ async def _render_detail(
     rows = sorted_items[current * 15 : current * 15 + 15]
     lines = []
     for item, role in rows:
-        role_text = role.mention if role else f"⚠️ Cargo ausente ({item['discord_role_id']})"
-        binding_state = (
-            uk.badge(uk.State.APPROVED, "ativo")
-            if item["enabled"]
-            else uk.badge(uk.State.DISABLED, "inativo")
-        )
+        role_text = role.mention if role else f"**CARGO AUSENTE** (`{item['discord_role_id']}`)"
+        binding_state = "ATIVO" if item["enabled"] else "INATIVO"
         lines.append(f"{role_text} → `{item['tag']}` · {binding_state}")
     if not lines:
         lines.append("_Nenhum vínculo no rascunho._")
@@ -360,39 +346,43 @@ async def _render_advanced(interaction: discord.Interaction, api: Any) -> None:
     lifecycle = instance["lifecycle"]
     state, state_label = _lifecycle(lifecycle)
     last_run = diagnostics_data.get("last_run") or {}
-    toggle_label = "Desativar sistema" if lifecycle == "active" else "Ativar sistema"
+    toggle_label = "DESATIVAR" if lifecycle == "active" else "ATIVAR"
+    run_status = _run_badge(last_run.get("status")) if last_run else "NENHUMA EXECUÇÃO"
     await _replace(
         interaction,
-        payload(
-            container(
-                dashboard.module_navigation("tags"),
-                separator(),
-                text_display(
-                    uk.heading("Opções avançadas", emoji="⚙️")
-                    + "\n\n"
-                    + uk.field("Sistema", uk.badge(state, state_label, bold=True), emoji="📌")
-                    + "\n\n"
-                    + uk.field(
-                        "Última execução",
-                        last_run.get("status", "nenhuma"),
-                        emoji="🔄",
-                    )
-                    + "\n\n"
-                    + uk.subtext("Use estas ações apenas para operação e diagnóstico.")
-                ),
-                action_row(
-                    button(custom_id=dashboard.central_custom_id("tags", "toggle_lifecycle"), label=toggle_label, style=2, disabled=not draft["base_published_version"]),
-                    button(custom_id=dashboard.central_custom_id("tags", "sync"), label="Sincronizar novamente", emoji="🔄", style=1, disabled=lifecycle != "active"),
-                    button(custom_id=dashboard.central_custom_id("tags", "cancel_run"), label="Cancelar execução", style=4, disabled=last_run.get("status") not in {"pending", "planning", "running"}),
-                ),
-                action_row(
-                    button(custom_id=dashboard.central_custom_id("tags", "diagnostics"), label="Diagnóstico geral", emoji="🩺", style=2),
-                    button(custom_id=dashboard.central_custom_id("tags", "diagnose_member"), label="Diagnosticar membro", style=2),
-                    button(custom_id=dashboard.central_custom_id("tags", "open_system"), label="Voltar aos vínculos", emoji="↩️", style=2),
-                ),
-                accent_color=uk.accent_for(state),
+        dashboard.central_shell(payload(
+            uk.panel(
+                header=[uk.nexus_title(
+                    "OPERAÇÕES",
+                    path="MODULES / TAGS / COMMANDS",
+                    subtitle="Sincronização, ciclo de vida e diagnóstico do módulo.",
+                )],
+                blocks=[
+                    text_display(uk.nexus_state("ESTADO", state_label, state=state)),
+                    text_display(uk.nexus_metrics(
+                        ("PUBLICAÇÃO", f"V{draft['base_published_version']}" if draft["base_published_version"] else "NÃO PUBLICADA"),
+                        ("ÚLTIMA EXECUÇÃO", run_status),
+                    )),
+                ],
+                actions=[
+                    action_row(
+                        button(custom_id=dashboard.central_custom_id("tags", "toggle_lifecycle"), label=toggle_label, style=2, disabled=not draft["base_published_version"]),
+                        button(custom_id=dashboard.central_custom_id("tags", "sync"), label="SINCRONIZAR", style=1, disabled=lifecycle != "active"),
+                        button(custom_id=dashboard.central_custom_id("tags", "cancel_run"), label="CANCELAR EXECUÇÃO", style=4, disabled=last_run.get("status") not in {"pending", "planning", "running"}),
+                    ),
+                    action_row(
+                        button(custom_id=dashboard.central_custom_id("tags", "diagnostics"), label="DIAGNÓSTICO", style=2),
+                        button(custom_id=dashboard.central_custom_id("tags", "diagnose_member"), label="DIAGNOSTICAR MEMBRO", style=2),
+                    ),
+                    action_row(
+                        button(custom_id=dashboard.central_custom_id("tags", "open_system"), label="‹ CONFIGURAÇÃO", style=2),
+                        button(custom_id=dashboard.central_custom_id("tags", "back"), label="‹ VOLTAR", style=2),
+                    ),
+                ],
+                footer=NEXUS_FOOTER,
+                accent_color=uk.NEXUS_VIOLET,
             )
-        ),
+        )),
     )
 
 
@@ -803,27 +793,26 @@ async def cancel_run(interaction: discord.Interaction, api: Any) -> None:
 async def cleanup(interaction: discord.Interaction, api: Any) -> None:
     await _replace(
         interaction,
-        payload(
-            container(
-                dashboard.module_navigation("tags"),
-                separator(),
-                text_display(
-                    uk.heading("Limpar todas as Tags", emoji="🧹")
-                    + "\n\n"
-                    + uk.empty_state(
-                        "Esta ação altera o apelido de todos os membros registrados",
-                        "Os vínculos continuam salvos, mas o sistema fica inativo ao "
-                        "terminar para não recolocar as Tags.",
-                    )
-                    + "\n\nPara usar as Tags novamente, basta clicar em **Confirmar e aplicar**."
-                ),
-                action_row(
-                    button(custom_id=dashboard.central_custom_id("tags", "confirm_cleanup"), label="Sim, limpar todas", emoji="🧹", style=4),
-                    button(custom_id=dashboard.central_custom_id("tags", "open_system"), label="Cancelar", style=2),
-                ),
+        dashboard.central_shell(payload(
+            uk.panel(
+                header=[uk.nexus_title(
+                    "CONFIRMAR LIMPEZA",
+                    path="MODULES / TAGS / CLEANUP",
+                    subtitle="Esta operação é aplicada a todos os membros registrados.",
+                )],
+                blocks=[text_display(uk.nexus_notice(
+                    "ATENÇÃO",
+                    "Os apelidos serão restaurados para a base registrada.",
+                    "Os vínculos continuam salvos. Ao concluir, o sistema ficará inativo para não reaplicar Tags.",
+                ))],
+                actions=[action_row(
+                    button(custom_id=dashboard.central_custom_id("tags", "confirm_cleanup"), label="CONFIRMAR LIMPEZA", style=4),
+                    button(custom_id=dashboard.central_custom_id("tags", "open_system"), label="CANCELAR", style=2),
+                )],
+                footer=NEXUS_FOOTER,
                 accent_color=uk.DANGER,
             )
-        ),
+        )),
     )
 
 
@@ -857,20 +846,54 @@ async def confirm_cleanup(interaction: discord.Interaction, api: Any) -> None:
         await _reply(interaction, _error_text(exc))
 
 
+def _diagnostics_payload(data: dict) -> dict:
+    state, state_label = _lifecycle(data.get("lifecycle"))
+    counts = data.get("intent_counts") or {}
+    last_run = data.get("last_run") or {}
+    pending = sum(int(counts.get(key, 0) or 0) for key in ("pending", "processing", "retry"))
+    blocks: list[dict[str, Any]] = [
+        text_display(uk.nexus_state("ESTADO", state_label, state=state)),
+        text_display(uk.nexus_metrics(
+            ("VÍNCULOS PUBLICADOS", f"{int(data.get('binding_count', 0) or 0):02d}"),
+            ("INTENTS PENDENTES", f"{pending:02d}"),
+            ("ÚLTIMA EXECUÇÃO", _run_badge(last_run.get("status")) if last_run else "NENHUMA EXECUÇÃO"),
+        )),
+    ]
+    failed = int(counts.get("failed", 0) or 0) + int(counts.get("blocked", 0) or 0)
+    if failed:
+        blocks.append(text_display(uk.nexus_notice(
+            "PENDÊNCIAS",
+            f"{failed} intent(s) bloqueado(s) ou com falha.",
+            "Use o diagnóstico de membro para verificar identidade, cargos e permissões ao vivo.",
+        )))
+    return dashboard.central_shell(payload(
+        uk.panel(
+            header=[uk.nexus_title(
+                "DIAGNÓSTICO",
+                path="MODULES / TAGS / DIAGNOSTICS",
+                subtitle="Dados atuais do runtime de Tags.",
+            )],
+            blocks=blocks,
+            actions=[
+                action_row(
+                    button(custom_id=dashboard.central_custom_id("tags", "diagnostics"), label="ATUALIZAR", style=2),
+                    button(custom_id=dashboard.central_custom_id("tags", "diagnose_member"), label="DIAGNOSTICAR MEMBRO", style=2),
+                ),
+                action_row(
+                    button(custom_id=dashboard.central_custom_id("tags", "open_system"), label="‹ CONFIGURAÇÃO", style=2),
+                    button(custom_id=dashboard.central_custom_id("tags", "back"), label="‹ VOLTAR", style=2),
+                ),
+            ],
+            footer="SYS://MODULE_CHECK_COMPLETE\n" + NEXUS_FOOTER,
+            accent_color=uk.NEXUS_VIOLET,
+        )
+    ))
+
+
 async def diagnostics(interaction: discord.Interaction, api: Any) -> None:
-    await interaction.response.defer()
     try:
         data = await api.tags_diagnostics(interaction.guild_id)
-        counts = data.get("intent_counts") or {}
-        last_run = data.get("last_run") or {}
-        await interaction.followup.send(
-            "**Diagnóstico do Sistema de Tags**\n"
-            f"Lifecycle: `{data.get('lifecycle')}`\n"
-            f"Vínculos publicados: **{data.get('binding_count', 0)}**\n"
-            f"Intents: `{counts}`\n"
-            f"Último run: `{last_run.get('status', 'nenhum')}`",
-            ephemeral=True,
-        )
+        await _replace(interaction, _diagnostics_payload(data))
     except Exception as exc:
         await _reply(interaction, _error_text(exc))
 

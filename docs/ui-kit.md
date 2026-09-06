@@ -350,3 +350,15 @@ O diagnóstico é a rota compartilhada da Central e só exibe checks retornados
 pela Platform API. Painéis públicos, revisão operacional, DMs e logs não usam
 o shell administrativo; neles a identidade é limpa e contextual, preservando
 os dados e o fluxo operacional.
+
+### Tags: contrato visual administrativo
+
+Tags usa o shell compartilhado em todas as superfícies administrativas: visão
+geral, configuração de vínculos, operações e diagnóstico. As telas usam
+`nexus_title`, `nexus_state`, `nexus_metrics`, `nexus_notice`, `panel()` e
+`central_shell()`; o banner, a navegação e os limites de Components V2 são os
+mesmos da Central. O diagnóstico só mostra lifecycle, vínculos, intents e
+execuções retornados pela API. Role/User Select, Modal e os `custom_id`s
+existentes continuam sendo o contrato de interação; a mudança é exclusivamente
+de composição visual. O módulo não possui painel público próprio, portanto o
+shell Nexus não é aplicado a mensagens operacionais.

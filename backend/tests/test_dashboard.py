@@ -6,7 +6,7 @@ import pytest
 from yuno_bot import dashboard
 from yuno_bot.domain_modules.tags import ui as tags_ui
 from yuno_bot.modules import discover_modules
-from yuno_bot.platform.components_v2 import send_message, string_select
+from yuno_bot.platform.components_v2 import component_count, send_message, string_select
 from yuno_bot.platform import ui_kit as uk
 
 SECTION = 9
@@ -316,7 +316,7 @@ def test_module_navigation_opens_with_the_way_back_to_the_central() -> None:
     assert options[0]["default"] is False
 
 
-def test_tags_primary_screen_keeps_only_the_simple_daily_flow() -> None:
+def test_tags_configuration_uses_nexus_actions_with_stable_custom_ids() -> None:
     data = tags_ui._detail_payload(
         draft={
             "bindings": [{"discord_role_id": "10", "tag": "[MEM]", "enabled": True}],
@@ -345,13 +345,64 @@ def test_tags_primary_screen_keeps_only_the_simple_daily_flow() -> None:
         "manage_binding",
         "confirm_publish",
         "cleanup",
-        "preview",
         "advanced",
+        "back",
     }
-    assert buttons["confirm_publish"]["label"] == "Confirmar e aplicar"
-    assert buttons["cleanup"]["label"] == "Limpar todas as Tags"
+    assert data["components"][0]["type"] == 12
+    assert "YUNO NEXUS // MODULES / TAGS / CONFIG" in str(data)
+    assert buttons["confirm_publish"]["label"] == "PUBLICAR"
+    assert buttons["cleanup"]["label"] == "LIMPAR TAGS"
+    assert "preview" not in buttons
     assert "page_prev" not in buttons
     assert "toggle_lifecycle" not in buttons
+    assert component_count(data["components"]) <= 40
+
+
+def test_tags_overview_is_rendered_inside_the_official_nexus_shell() -> None:
+    data = tags_ui._overview_payload(
+        {"lifecycle": "active"},
+        {"bindings": [], "base_published_version": None, "revision": 3},
+        {"last_run": {}},
+        highest_role="nenhum",
+        missing_roles=0,
+    )
+
+    rendered = str(data)
+    assert data["components"][0]["type"] == 12
+    assert "YUNO NEXUS // MODULES / TAGS" in rendered
+    assert "SISTEMA DE TAGS" in rendered
+    assert "SEM CONFIGURAÇÃO" not in rendered
+    assert "🏷️" not in rendered
+    for action in ("open_system", "preview", "diagnostics", "advanced", "back"):
+        assert dashboard.central_custom_id("tags", action) in rendered
+    assert component_count(data["components"]) <= 40
+
+
+def test_tags_diagnostics_only_reports_determinable_runtime_data() -> None:
+    data = tags_ui._diagnostics_payload(
+        {
+            "lifecycle": "active",
+            "binding_count": 4,
+            "intent_counts": {"pending": 2, "processing": 1, "blocked": 3},
+            "last_run": {"status": "running"},
+        }
+    )
+
+    rendered = str(data)
+    assert "YUNO NEXUS // MODULES / TAGS / DIAGNOSTICS" in rendered
+    assert "VÍNCULOS PUBLICADOS" in rendered
+    assert "INTENTS PENDENTES" in rendered
+    assert "PENDÊNCIAS" in rendered
+    assert "PUBLIC_PANEL" not in rendered
+    for action in ("diagnostics", "diagnose_member", "open_system", "back"):
+        assert dashboard.central_custom_id("tags", action) in rendered
+    assert component_count(data["components"]) <= 40
+
+
+def test_tags_error_copy_is_short_and_does_not_expose_exception_data() -> None:
+    assert tags_ui._error_text(RuntimeError("database password=secret")) == (
+        "Não foi possível concluir a ação de Tags. Reabra o módulo e tente novamente."
+    )
 
 
 @pytest.mark.asyncio
