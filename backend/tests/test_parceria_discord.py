@@ -24,13 +24,16 @@ def _rows(data: dict) -> dict[str, dict]:
 def test_parceria_entra_na_central_pelo_comando_yuno_configurar() -> None:
     discover_ui_modules()
     specs = dashboard.dashboard_specs()
-    rows = _rows(dashboard.build_payload({}))
+    data = dashboard.build_modules_payload({})
 
     assert "parceria" in specs
-    assert rows["parceria"]["accessory"]["custom_id"] == "yuno:central:v1:parceria:open"
-    options = dashboard.module_navigation("parceria")["components"][0]["options"]
+    options = next(
+        item["components"][0]["options"]
+        for item in data["components"][0]["components"]
+        if item["type"] == 1 and item["components"][0]["type"] == 3
+    )
     parceria = next(item for item in options if item["value"] == "parceria")
-    assert parceria["default"] is True
+    assert parceria["default"] is False
 
 
 def test_parceria_declares_admin_page_operational_panel_jobs_and_deliveries() -> None:
@@ -78,9 +81,10 @@ def test_parceria_admin_payload_uses_components_v2_header_components() -> None:
     data = build_admin_payload({}, {"data": {}})
 
     header = data["components"][0]["components"][:3]
-    assert header[0]["type"] == 1
-    assert header[1]["type"] == 14
-    assert header[2]["type"] == 10
+    assert header[0]["type"] == 10
+    assert header[1]["type"] == 10
+    assert "Parcerias" in header[1]["content"]
+    assert dashboard.route_custom_id("parceria", "configuration") in str(data)
 
 
 def test_parceria_publication_embed_references_the_uploaded_attachment() -> None:

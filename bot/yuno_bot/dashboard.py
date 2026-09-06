@@ -51,6 +51,7 @@ CENTRAL_PAGE_BUTTON_PATTERN = re.compile(
 #: (`page_0`, `page_1`, ...). O alvo já vem calculado no render — o clique só
 #: precisa ler o número, nenhum estado de sessão é necessário.
 PAGE_ACTION_RE = re.compile(r"^page_(\d+)$")
+GROUP_ACTION_RE = re.compile(r"^group_(\d+)$")
 
 _SELECT_COMPONENT_TYPES = frozenset({3, 5, 6, 7, 8})
 
@@ -107,53 +108,99 @@ CENTRAL_HOME_VALUE = "__central__"
 #: só a trata como atalho quando o módulo não declara uma ação com esse nome.
 CENTRAL_OPEN_ACTION = "open"
 
-#: Uma mensagem Components V2 aceita 40 componentes. Cada linha da lista gasta
-#: dois (seção + separador), então este é o tamanho de página: acima disso a
-#: Central pagina de verdade (botões Voltar/Avançar) em vez de estourar o
-#: limite no servidor do cliente.
-MAX_MODULE_ROWS = 12
+MAX_MODULE_OPTIONS = 25
 
 BUTTON_PRIMARY = 1
 BUTTON_SECONDARY = 2
 
 
-def module_navigation(current_module: str | None = None) -> dict[str, Any]:
-    """Navegação compartilhada entre páginas administrativas da Central.
+@dataclass(frozen=True)
+class CentralRoute:
+    """Contrato visual de uma tela, sem guardar histórico por usuário."""
 
-    A primeira opção volta para a lista de módulos: as páginas de módulo
-    substituem a mensagem da Central, então sem essa entrada só se sai de um
-    módulo entrando em outro.
-    """
+    module_key: str
+    key: str
+    parent: tuple[str, str] | None = None
+    next_route: tuple[str, str] | None = None
+
+
+CENTRAL_ROUTES: dict[tuple[str, str], CentralRoute] = {
+    ("core", "home"): CentralRoute("core", "home", next_route=("core", "modules")),
+    ("core", "modules"): CentralRoute("core", "modules", parent=("core", "home")),
+    ("core", "system"): CentralRoute("core", "system", parent=("core", "home")),
+    ("parceria", "overview"): CentralRoute(
+        "parceria", "overview", parent=("core", "modules"), next_route=("parceria", "configuration")
+    ),
+    ("parceria", "configuration"): CentralRoute(
+        "parceria", "configuration", parent=("parceria", "overview")
+    ),
+    ("parceria", "diagnostic"): CentralRoute(
+        "parceria", "diagnostic", parent=("parceria", "configuration")
+    ),
+}
+
+
+def module_navigation(current_module: str | None = None) -> dict[str, Any]:
+    """Seletor legado de troca rápida usado pelas telas ainda não migradas."""
 
     options: list[dict[str, Any]] = [
         {
-            "label": "Central de Gestão",
+            "label": "Central",
             "value": CENTRAL_HOME_VALUE,
-            "description": "Voltar para a lista de módulos",
-            "emoji": {"name": "🏠"},
+            "description": "Voltar para a Home",
             "default": False,
         }
     ]
-    options.extend(
-        {
-            "label": spec.nome[:100],
-            "value": spec.key,
-            "description": (
-                "Módulo atual"
-                if spec.key == current_module
-                else "Abrir configuração do módulo"
-            ),
-            "emoji": {"name": spec.icon},
-            "default": spec.key == current_module,
-        }
-        for spec in dashboard_specs().values()
-    )
+    options.extend(_module_option(spec, current_module=current_module) for spec in dashboard_specs().values())
     return action_row(
         string_select(
             custom_id=central_custom_id("core", "select_module"),
             options=options,
             placeholder="Trocar de módulo",
         )
+    )
+
+
+def _module_option(
+    spec: ModuleSpec | DomainDashboardSpec, *, current_module: str | None = None
+) -> dict[str, Any]:
+    return {
+        "label": str(spec.nome)[:100],
+        "value": spec.key,
+        "description": "Módulo atual" if spec.key == current_module else "Abrir módulo",
+        "default": spec.key == current_module,
+    }
+
+
+def module_select(
+    *, page: int = 0, selected_module: str | None = None
+) -> tuple[dict[str, Any], int, int]:
+    """Select principal da tela de módulos, sempre dentro do limite do Discord."""
+
+    specs = list(dashboard_specs().values())
+    if not specs:
+        return text_display(uk.notice("Nenhum módulo disponível.")), 0, 1
+    if selected_module is None and page == 0:
+        selected_module = specs[0].key
+    total_pages = max(1, (len(specs) + MAX_MODULE_OPTIONS - 1) // MAX_MODULE_OPTIONS)
+    if selected_module in {spec.key for spec in specs}:
+        page = next(index for index, spec in enumerate(specs) if spec.key == selected_module) // MAX_MODULE_OPTIONS
+    page = max(0, min(page, total_pages - 1))
+    start = page * MAX_MODULE_OPTIONS
+    options = [
+        _module_option(spec, current_module=selected_module)
+        for spec in specs[start : start + MAX_MODULE_OPTIONS]
+    ]
+    return (
+        action_row(
+            string_select(
+                custom_id=central_custom_id("core", "select_module"),
+                options=options,
+                placeholder="Selecionar módulo",
+            )
+        ),
+        page,
+        total_pages,
     )
 
 
@@ -181,6 +228,44 @@ def pagination_row(page: int, total_pages: int) -> dict[str, Any]:
             disabled=page >= total_pages - 1,
         ),
     )
+
+
+def route_custom_id(module_key: str, route: str) -> str:
+    """ID estável de uma rota visual; não representa uma ação de negócio."""
+
+    return central_custom_id(module_key, f"route_{route}")
+
+
+def navigation_row(
+    *,
+    parent: tuple[str, str] | None = None,
+    next_route: tuple[str, str] | None = None,
+) -> dict[str, Any]:
+    """Rodapé determinístico. Rotas inexistentes ficam desabilitadas."""
+
+    return action_row(
+        button(
+            custom_id=route_custom_id(*(parent or ("core", "home"))),
+            label="‹ Voltar",
+            style=BUTTON_SECONDARY,
+            disabled=parent is None,
+        ),
+        button(
+            custom_id=route_custom_id(*(next_route or ("core", "home"))),
+            label="Avançar ›",
+            style=BUTTON_SECONDARY,
+            disabled=next_route is None,
+        ),
+    )
+
+
+def route_navigation(module_key: str, route: str) -> dict[str, Any]:
+    """Renderiza o rodapé a partir da declaração da tela."""
+
+    definition = CENTRAL_ROUTES.get((module_key, route))
+    if definition is None:
+        return navigation_row()
+    return navigation_row(parent=definition.parent, next_route=definition.next_route)
 
 
 @dataclass(frozen=True)
@@ -305,20 +390,31 @@ def _module_row(
     )
 
 
-def _status_summary(statuses: dict[str, ModuleStatus]) -> str:
-    """Placar de uma linha: quantos módulos estão no ar e quantos esperam por você."""
+def _status_summary(
+    statuses: dict[str, ModuleStatus], *, total_available: int | None = None
+) -> str:
+    """Resumo curto da Home, usando apenas estados já carregados."""
 
-    total = len(statuses)
+    total = len(statuses) if total_available is None else total_available
     if not total:
         return ""
-    no_ar = sum(1 for status in statuses.values() if status.state is uk.State.APPROVED)
-    pendentes = sum(
+    active = sum(1 for status in statuses.values() if status.state is uk.State.APPROVED)
+    pending = sum(
         1
         for status in statuses.values()
         if status.state in (uk.State.PENDING, uk.State.RUNNING)
     )
+    errors = sum(
+        1
+        for status in statuses.values()
+        if status.state in (uk.State.BLOCKED, uk.State.FAILED)
+    )
+    error_value = "Nenhum erro crítico" if errors == 0 else errors
     return uk.inline_fields(
-        ("Módulos", total), ("No ar", no_ar), ("Aguardando você", pendentes)
+        ("Módulos disponíveis", total),
+        ("Ativos", active),
+        ("Configuração pendente", pending),
+        ("Erros", error_value),
     )
 
 
@@ -329,37 +425,25 @@ def build_payload(
     control_states: dict[str, dict[str, Any]] | None = None,
     license_active: bool = True,
 ) -> dict[str, Any]:
-    """Primeira tela da Central: um módulo por linha, com estado e próximo passo.
+    """Home resumida da Central; a lista completa vive em ``build_modules_payload``."""
 
-    `page` pagina de verdade a lista — cada página mostra até
-    `MAX_MODULE_ROWS` módulos, com botões Voltar/Avançar no rodapé. Página
-    fora do intervalo é sanada (clamp), nunca vira índice inválido.
-    """
-
-    del config
+    del config, page
     specs = dashboard_specs()
-    header = uk.heading("Central de Gestão Yuno", emoji="🟡")
+    header = [uk.breadcrumb("YUNO", "Visão geral"), uk.heading("Central operacional")]
     if license_active:
-        header += "\n\nSelecione um módulo para configurar, revisar e publicar."
         accent = uk.BRAND
     else:
-        header += "\n\n" + uk.empty_state(
-            "Licença inativa neste servidor",
-            "Os módulos ficam visíveis, mas nada é publicado até a licença voltar.",
-        )
+        header.append(uk.notice("Licença inativa neste servidor; nada será publicado.", kind="warning"))
         accent = uk.DANGER
 
     if not specs:
         return payload(
             container(
-                text_display(header),
+                *[text_display(item) for item in header if item],
                 separator(spacing=1),
-                text_display(
-                    uk.empty_state(
-                        "Nenhum módulo disponível",
-                        "Nenhum módulo foi liberado para este servidor ainda.",
-                    )
-                ),
+                text_display(uk.notice("Nenhum módulo disponível.")),
+                separator(spacing=1),
+                route_navigation("core", "home"),
                 accent_color=accent,
             )
         )
@@ -369,36 +453,15 @@ def build_payload(
         if control_states
         else {}
     )
-    summary = _status_summary(statuses)
-    if summary:
-        header += f"\n\n{summary}"
-
-    total_pages = max(1, (len(specs) + MAX_MODULE_ROWS - 1) // MAX_MODULE_ROWS)
-    page = max(0, min(page, total_pages - 1))
-    start = page * MAX_MODULE_ROWS
-    listed = list(specs.values())[start : start + MAX_MODULE_ROWS]
-
-    blocks: list[Any] = []
-    for index, spec in enumerate(listed):
-        if index:
-            blocks.append(uk.rule())
-        blocks.append(
-            _module_row(spec, statuses.get(spec.key), license_active=license_active)
-        )
-
-    # Botão real de Voltar/Avançar quando há mais de uma página. O seletor
-    # continua junto quando os módulos não cabem numa página só: paginar
-    # percorre a lista, o seletor pula direto pra um módulo sem passar pelas
-    # páginas do meio — funções diferentes, não dois caminhos pra mesma coisa.
-    actions: list[dict[str, Any]] = []
-    if total_pages > 1:
-        actions.append(pagination_row(page, total_pages))
-    if len(specs) > MAX_MODULE_ROWS:
-        actions.append(module_navigation())
-
-    footer = "Yuno · nenhuma alteração entra no ar antes da sua confirmação."
-    if total_pages > 1:
-        footer += f" · Página {page + 1} de {total_pages}"
+    summary = _status_summary(statuses, total_available=len(specs)) if control_states is not None else uk.notice(
+        "Os estados dos módulos serão carregados ao abrir a Central."
+    )
+    blocks = [text_display(summary)]
+    actions = [action_row(
+        button(custom_id=route_custom_id("core", "modules"), label="Módulos", style=BUTTON_PRIMARY),
+        button(custom_id=route_custom_id("core", "system"), label="Sistema", style=BUTTON_SECONDARY),
+    )]
+    footer = "Yuno · alterações só entram no ar após confirmação."
 
     return payload(
         uk.panel(
@@ -407,6 +470,92 @@ def build_payload(
             actions=actions,
             footer=footer,
             accent_color=accent,
+        )
+    )
+
+
+def build_modules_payload(
+    config: dict,
+    *,
+    page: int = 0,
+    selected_module: str | None = None,
+    control_states: dict[str, dict[str, Any]] | None = None,
+    license_active: bool = True,
+) -> dict[str, Any]:
+    """Tela escalável de módulos, com no máximo 25 opções por select."""
+
+    del config
+    specs = dashboard_specs()
+    if selected_module is None and page == 0 and specs:
+        selected_module = next(iter(specs))
+    select_row, page, total_pages = module_select(page=page, selected_module=selected_module)
+    statuses = (
+        {key: module_status(control_states.get(key)) for key in specs}
+        if control_states
+        else {}
+    )
+    blocks: list[Any] = [select_row]
+    if selected_module in specs:
+        spec = specs[selected_module]
+        status = statuses.get(selected_module)
+        summary = [uk.heading(spec.nome, level=2)]
+        if spec.descricao:
+            summary.append(str(spec.descricao))
+        if status:
+            summary.append(uk.status_text(status.state, status.label))
+            summary.append(uk.subtext(status.hint))
+        blocks.append(section(text_display(uk.clip("\n".join(summary))), accessory=button(custom_id=central_custom_id(selected_module, CENTRAL_OPEN_ACTION), label="Abrir", style=BUTTON_PRIMARY if license_active else BUTTON_SECONDARY, disabled=not license_active)))
+    else:
+        blocks.append(text_display(uk.notice("Selecione um módulo para ver o resumo e abrir sua administração.")))
+    actions: list[dict[str, Any]] = [route_navigation("core", "modules")]
+    if total_pages > 1:
+        previous = max(0, page - 1)
+        following = min(total_pages - 1, page + 1)
+        actions.insert(0, action_row(
+            button(custom_id=central_custom_id("core", f"group_{previous}"), label="‹ Anteriores", style=BUTTON_SECONDARY, disabled=page == 0),
+            button(custom_id=central_custom_id("core", f"group_{following}"), label="Mais módulos ›", style=BUTTON_SECONDARY, disabled=page == total_pages - 1),
+        ))
+    return payload(
+        uk.panel(
+            header=[uk.breadcrumb("YUNO", "Módulos"), uk.heading("Módulos"), "Selecione um módulo para administrar."],
+            blocks=blocks,
+            actions=actions,
+            footer=f"Grupo {page + 1} de {total_pages}" if total_pages > 1 else "Yuno · seleção direta para a administração.",
+            accent_color=uk.BRAND if license_active else uk.DANGER,
+        )
+    )
+
+
+def build_system_payload(config: dict) -> dict[str, Any]:
+    """Área Sistema baseada somente na configuração já existente da Central."""
+
+    dashboard_ref = (config.get("settings") or {}).get("dashboard") or {}
+    channel = dashboard_ref.get("panel_channel_id")
+    value = f"Canal da Central: <#{channel}>" if channel else "Canal da Central: ainda não definido"
+    return payload(
+        uk.panel(
+            header=[uk.breadcrumb("YUNO", "Sistema"), uk.heading("Sistema")],
+            blocks=[
+                text_display("Configurações gerais da Central."),
+                text_display(value),
+                text_display(uk.subtext("Logs e auditoria só aparecem quando houver uma fonte disponível.")),
+            ],
+            actions=[route_navigation("core", "system")],
+            footer="Yuno · sem alterações de backend neste piloto.",
+            accent_color=uk.INFO,
+        )
+    )
+
+
+def build_invalid_route_payload(message: str = "Esta rota da Central não é mais válida.") -> dict[str, Any]:
+    """Estado seguro para links antigos ou forjados, com retorno funcional."""
+
+    return payload(
+        uk.panel(
+            header=[uk.breadcrumb("YUNO", "Estado"), uk.heading("Rota inválida")],
+            blocks=[text_display(uk.notice(message, kind="warning"))],
+            actions=[action_row(button(custom_id=route_custom_id("core", "home"), label="Voltar à Home", style=BUTTON_SECONDARY))],
+            accent_color=uk.WARNING,
         )
     )
 
@@ -626,9 +775,16 @@ async def dispatch_components_v2(interaction: discord.Interaction) -> bool:
         component_type = 0
 
     if module_key == "core":
+        group_match = GROUP_ACTION_RE.fullmatch(action_key)
+        if group_match is not None:
+            await _dispatch_modules_group(interaction, int(group_match.group(1)))
+            return True
         page_match = PAGE_ACTION_RE.fullmatch(action_key)
         if page_match is not None:
             await _dispatch_home_page(interaction, int(page_match.group(1)))
+            return True
+        if action_key.startswith("route_"):
+            await _dispatch_visual_route(interaction, module_key, action_key[6:])
             return True
         if action_key == "select_module":
             values = list(data.get("values") or [])
@@ -637,6 +793,10 @@ async def dispatch_components_v2(interaction: discord.Interaction) -> bool:
                 return True
             await _dispatch_page(interaction, str(values[0]))
             return True
+
+    if action_key.startswith("route_"):
+        await _dispatch_visual_route(interaction, module_key, action_key[6:])
+        return True
 
     if _opens_module_page(module_key, action_key):
         await _dispatch_page(interaction, module_key)
@@ -688,10 +848,51 @@ async def _dispatch_page(interaction: discord.Interaction, module_key: str) -> N
     await page.renderer(interaction, interaction.client.platform_api)
 
 
+async def _dispatch_visual_route(
+    interaction: discord.Interaction, module_key: str, route: str
+) -> None:
+    """Resolve somente rotas visuais declaradas pelo piloto."""
+
+    await _acknowledge(interaction)
+    config = await _central_config(interaction)
+    if config is None:
+        return
+    if module_key == "core":
+        if route == "home":
+            await _render_home(interaction, config)
+            return
+        if route == "modules":
+            await _render_modules(interaction, config)
+            return
+        if route == "system":
+            await _edit_v2(
+                interaction.client,
+                interaction.channel_id,
+                interaction.message.id,
+                build_system_payload(config),
+            )
+            return
+    if module_key == "parceria":
+        target_action = {
+            "overview": None,
+            "configuration": "open_system",
+            "diagnostic": "diagnose",
+        }.get(route, "__invalid__")
+        if target_action == "__invalid__":
+            await _render_invalid_route(interaction)
+            return
+        if target_action is None:
+            await _dispatch_page(interaction, module_key)
+            return
+        await _dispatch_action(interaction, module_key, target_action)
+        return
+    await _render_invalid_route(interaction)
+
+
 async def _render_home(
     interaction: discord.Interaction, config: dict, *, page: int = 0
 ) -> None:
-    """Reescreve a mensagem da Central com a lista de módulos.
+    """Reescreve a mensagem da Central com a Home resumida.
 
     As páginas de módulo editam a mesma mensagem, então a volta também edita —
     publicar uma Central nova a cada retorno deixaria o canal com várias.
@@ -714,18 +915,69 @@ async def _render_home(
         bot,
         channel_id,
         message_id,
-        build_payload(config, page=page, control_states=states),
+        build_payload(config, control_states=states),
+    )
+
+
+async def _render_modules(interaction: discord.Interaction, config: dict, *, page: int = 0) -> None:
+    channel_id = interaction.channel_id
+    message_id = getattr(interaction.message, "id", None)
+    if channel_id is None or message_id is None:
+        await _deny(interaction, "Referência da Central indisponível.")
+        return
+    bot = interaction.client
+    states = await fetch_control_states(
+        getattr(bot, "api", None),
+        int(interaction.guild_id),
+        getattr(interaction.user, "id", 0),
+        platform_api=getattr(bot, "platform_api", None),
+    )
+    await _edit_v2(
+        bot,
+        channel_id,
+        message_id,
+        build_modules_payload(config, page=page, control_states=states),
+    )
+
+
+async def _render_invalid_route(interaction: discord.Interaction) -> None:
+    channel_id = interaction.channel_id
+    message_id = getattr(interaction.message, "id", None)
+    if channel_id is None or message_id is None:
+        await _deny(interaction, "Rota inválida. Volte para a Home da Central.")
+        return
+    await _edit_v2(
+        interaction.client,
+        channel_id,
+        message_id,
+        build_invalid_route_payload(),
     )
 
 
 async def _dispatch_home_page(interaction: discord.Interaction, page: int) -> None:
-    """Troca de página da lista de módulos sem sair da Central."""
+    """Rejeita a paginação antiga, que não é mais uma rota válida."""
 
+    del page
     await _acknowledge(interaction)
     config = await _central_config(interaction)
     if config is None:
         return
-    await _render_home(interaction, config, page=page)
+    await _render_invalid_route(interaction)
+
+
+async def _dispatch_modules_group(interaction: discord.Interaction, page: int) -> None:
+    await _acknowledge(interaction)
+    config = await _central_config(interaction)
+    if config is None:
+        return
+    total_pages = max(
+        1,
+        (len(dashboard_specs()) + MAX_MODULE_OPTIONS - 1) // MAX_MODULE_OPTIONS,
+    )
+    if page >= total_pages:
+        await _render_invalid_route(interaction)
+        return
+    await _render_modules(interaction, config, page=page)
 
 
 async def _dispatch_action(

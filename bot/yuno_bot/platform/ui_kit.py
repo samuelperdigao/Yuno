@@ -152,6 +152,36 @@ def badge(state: State | str | None, label: str, *, bold: bool = False) -> str:
     return clip(rendered)
 
 
+def status_text(state: State | str | None, label: str, *, bold: bool = True) -> str:
+    """Estado administrativo discreto, sem depender de emoji temático."""
+
+    text = " ".join(str(label or "").split()) or DASH
+    rendered = f"● **{text}**" if bold else f"● {text}"
+    return clip(rendered)
+
+
+def breadcrumb(*parts: Any) -> str:
+    """Breadcrumb curto para o topo de telas administrativas."""
+
+    values = [" ".join(str(part or "").split()).strip() for part in parts]
+    values = [value for value in values if value]
+    return subtext(" / ".join(values)) if values else ""
+
+
+def notice(text: Any, *, kind: str = "info") -> str:
+    """Aviso curto e textual para estados de interface, sem criar estado de domínio."""
+
+    prefix = {
+        "info": "",
+        "warning": "Atenção: ",
+        "error": "Erro: ",
+        "success": "Concluído: ",
+    }.get(kind, "")
+    lines = [" ".join(line.split()) for line in str(text or "").splitlines() if line.strip()]
+    body = "\n".join(lines)
+    return clip(f"{prefix}{body}")
+
+
 # --------------------------------------------------------------------------- #
 # Números e formatação pt-BR
 # --------------------------------------------------------------------------- #

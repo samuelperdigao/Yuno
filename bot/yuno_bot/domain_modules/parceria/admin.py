@@ -7,7 +7,7 @@ import httpx
 
 from yuno_bot import dashboard
 from yuno_bot.platform import ui_kit as uk
-from yuno_bot.platform.components_v2 import action_row, button, channel_select, edit_message, payload, role_select, separator, text_display
+from yuno_bot.platform.components_v2 import action_row, button, channel_select, edit_message, payload, role_select
 from yuno_bot.platform.contracts import ActorContext
 from yuno_bot.platform.panels import PanelPublisher
 
@@ -92,16 +92,21 @@ def build_admin_payload(instance: dict, draft: dict) -> dict[str, Any]:
     return payload(
         uk.panel(
             header=[
-                dashboard.module_navigation(MODULE_KEY),
-                uk.space(),
-                uk.heading("Parcerias", emoji="🤝"),
+                uk.breadcrumb("YUNO", "Módulos", "Parcerias"),
+                uk.heading("Parcerias"),
+                "Cadastro e publicação de parcerias",
             ],
             blocks=[
-                uk.field("Estado", f"{uk.badge(state, status, bold=True)}\nA configuração publicada é a única consumida pelo Runtime."),
-                uk.rule(),
-                uk.field("Configuração", _config_text(config), emoji="🧭"),
+                uk.field("Status", f"{uk.status_text(state, status)}\nA configuração publicada é a única consumida pelo Runtime."),
+                uk.field("Configuração", _config_text(config)),
             ],
-            actions=[action_row(button(custom_id=dashboard.central_custom_id(MODULE_KEY, "open_system"), label="Configurar Parcerias", emoji="⚙️", style=2))],
+            actions=[
+                action_row(
+                    button(custom_id=dashboard.central_custom_id(MODULE_KEY, "open_system"), label="Configurar", style=1),
+                    button(custom_id=dashboard.central_custom_id(MODULE_KEY, "diagnose"), label="Diagnóstico", style=2),
+                ),
+                dashboard.route_navigation(MODULE_KEY, "overview"),
+            ],
             state=state,
         )
     )
@@ -116,23 +121,37 @@ async def render_admin(interaction: discord.Interaction, api: Any) -> None:
 async def open_system(interaction: discord.Interaction, api: Any) -> None:
     draft = await api.configuration_draft(interaction.guild_id, MODULE_KEY)
     config = _merge(draft)
-    components = [
-        dashboard.module_navigation(MODULE_KEY), separator(),
-        text_display("# 🤝 Parcerias\n\nEscolha a estrutura existente. As alterações ficam em rascunho até a publicação."),
-        separator(), text_display(_config_text(config)),
+    blocks = [
+        uk.field("Configuração atual", _config_text(config)),
+        uk.notice("As alterações ficam em rascunho até a publicação.", kind="info"),
+    ]
+    actions = [
         action_row(channel_select(custom_id=dashboard.central_custom_id(MODULE_KEY, "set_registrar_channel"), placeholder="Canal para receber cadastros", channel_types=[0])),
         action_row(channel_select(custom_id=dashboard.central_custom_id(MODULE_KEY, "set_ativas_channel"), placeholder="Canal das parcerias ativas", channel_types=[0])),
         action_row(role_select(custom_id=dashboard.central_custom_id(MODULE_KEY, "set_manager_roles"), placeholder="Cargos gerentes", min_values=1, max_values=25)),
         action_row(channel_select(custom_id=dashboard.central_custom_id(MODULE_KEY, "set_category"), placeholder="Categoria opcional", channel_types=[4])),
         action_row(channel_select(custom_id=dashboard.central_custom_id(MODULE_KEY, "set_log_channel"), placeholder="Canal de logs opcional", channel_types=[0])),
-        separator(),
         action_row(
-            button(custom_id=dashboard.central_custom_id(MODULE_KEY, "review_publish"), label="Revisar e publicar", emoji="👁️", style=1),
-            button(custom_id=dashboard.central_custom_id(MODULE_KEY, "diagnose"), label="Diagnosticar", emoji="🩺", style=2),
-            button(custom_id=dashboard.central_custom_id(MODULE_KEY, "recover_panel"), label="Recuperar painel", emoji="♻️", style=2),
+            button(custom_id=dashboard.central_custom_id(MODULE_KEY, "review_publish"), label="Revisar e publicar", style=1),
+            button(custom_id=dashboard.central_custom_id(MODULE_KEY, "diagnose"), label="Diagnóstico", style=2),
         ),
+        action_row(
+            button(custom_id=dashboard.central_custom_id(MODULE_KEY, "recover_panel"), label="Recuperar painel", style=2),
+        ),
+        dashboard.route_navigation(MODULE_KEY, "configuration"),
     ]
-    await _replace(interaction, {"components": components, "flags": 1 << 15})
+    await _replace(
+        interaction,
+        payload(
+            uk.panel(
+                header=[uk.breadcrumb("YUNO", "Módulos", "Parcerias", "Configuração"), uk.heading("Configuração")],
+                blocks=blocks,
+                actions=actions,
+                footer="Seletores alteram somente o rascunho deste servidor.",
+                state=uk.State.PENDING,
+            )
+        ),
+    )
 
 
 async def _save_selection(interaction: discord.Interaction, api: Any, key: str, values: list[str]) -> None:
@@ -168,13 +187,28 @@ async def review_publish(interaction: discord.Interaction, api: Any) -> None:
     draft = await api.configuration_draft(interaction.guild_id, MODULE_KEY)
     config = _merge(draft)
     missing = [key for key in ("registrar_channel_id", "ativas_channel_id", "manager_role_ids") if not config.get(key)]
-    text = "# Revisão de Parcerias\n\n" + _config_text(config)
+    blocks: list[Any] = [uk.field("Configuração", _config_text(config))]
     if missing:
-        text += "\n\n⚠️ Faltam campos obrigatórios: " + ", ".join(missing)
+        blocks.append(uk.notice("Faltam campos obrigatórios: " + ", ".join(missing), kind="warning"))
     else:
-        text += "\n\n✅ Pronto para publicar. A publicação ativará o painel e o Runtime domain-first."
-    components = [dashboard.module_navigation(MODULE_KEY), separator(), text_display(text), separator(), action_row(button(custom_id=dashboard.central_custom_id(MODULE_KEY, "confirm_publish"), label="Publicar configuração", emoji="🚀", style=1), button(custom_id=dashboard.central_custom_id(MODULE_KEY, "open_system"), label="Voltar", style=2))]
-    await _replace(interaction, {"components": components, "flags": 1 << 15})
+        blocks.append(uk.notice("Pronto para publicar. A publicação ativará o painel.", kind="success"))
+    await _replace(
+        interaction,
+        payload(
+            uk.panel(
+                header=[uk.breadcrumb("YUNO", "Módulos", "Parcerias", "Configuração", "Revisão"), uk.heading("Revisão")],
+                blocks=blocks,
+                actions=[
+                    action_row(
+                        button(custom_id=dashboard.central_custom_id(MODULE_KEY, "confirm_publish"), label="Publicar", style=1, disabled=bool(missing)),
+                        button(custom_id=dashboard.route_custom_id(MODULE_KEY, "configuration"), label="Voltar", style=2),
+                    ),
+                    dashboard.route_navigation(MODULE_KEY, "configuration"),
+                ],
+                state=uk.State.PENDING if missing else uk.State.APPROVED,
+            )
+        ),
+    )
 
 
 async def confirm_publish(interaction: discord.Interaction, api: Any) -> None:
@@ -188,8 +222,22 @@ async def confirm_publish(interaction: discord.Interaction, api: Any) -> None:
 
 async def diagnose(interaction: discord.Interaction, api: Any) -> None:
     checks = await api.diagnostics(interaction.guild_id, MODULE_KEY)
-    lines = [f"**{item.get('status', 'UNKNOWN')}** · {item.get('summary', '')}" for item in checks]
-    await _replace(interaction, {"components": [dashboard.module_navigation(MODULE_KEY), separator(), text_display("# 🩺 Diagnóstico\n\n" + "\n".join(lines) if lines else "Nenhuma pendência encontrada.")], "flags": 1 << 15})
+    lines = [f"{item.get('status', 'UNKNOWN')} · {item.get('summary', '')}" for item in checks]
+    blocks = [uk.notice("\n".join(lines) if lines else "Nenhuma pendência encontrada.", kind="info")]
+    await _replace(
+        interaction,
+        payload(
+            uk.panel(
+                header=[uk.breadcrumb("YUNO", "Módulos", "Parcerias", "Diagnóstico"), uk.heading("Diagnóstico")],
+                blocks=blocks,
+                actions=[
+                    action_row(button(custom_id=dashboard.route_custom_id(MODULE_KEY, "configuration"), label="Configuração", style=2)),
+                    dashboard.route_navigation(MODULE_KEY, "diagnostic"),
+                ],
+                state=uk.State.APPROVED if not checks else uk.State.PENDING,
+            )
+        ),
+    )
 
 
 async def recover_panel(interaction: discord.Interaction, api: Any) -> None:

@@ -4,6 +4,7 @@ import pytest
 from yuno_bot import dashboard
 from yuno_bot.domain_modules.tags import ui as tags_ui
 from yuno_bot.modules import discover_modules
+from yuno_bot.platform.components_v2 import string_select
 from yuno_bot.platform import ui_kit as uk
 
 SECTION = 9
@@ -34,62 +35,80 @@ def _row_text(row: dict) -> str:
     return row["components"][0]["content"]
 
 
-def test_central_lists_one_row_per_module_with_a_stable_open_button() -> None:
-    payload = dashboard.build_payload({})
-    rows = _rows(payload)
-    specs = dashboard.dashboard_specs()
+def test_home_is_a_summary_and_does_not_render_the_module_catalog() -> None:
+    data = dashboard.build_payload({}, control_states=ACTIVE_STATES)
+    content = "\n".join(
+        component.get("content", "")
+        for component in data["components"][0]["components"]
+    )
 
-    assert list(rows) == list(specs)
-    for key, spec in specs.items():
-        assert spec.nome in _row_text(rows[key])
-        assert spec.descricao in _row_text(rows[key])
-        assert rows[key]["accessory"]["custom_id"] == f"yuno:central:v1:{key}:open"
-
-    assert payload["allowed_mentions"] == {"parse": [], "replied_user": False}
-    assert "Selecione um módulo" in _text_content(payload)
-    assert "set" not in rows
-
-
-def test_central_row_translates_lifecycle_into_status_and_next_step() -> None:
-    payload = dashboard.build_payload({}, control_states=ACTIVE_STATES)
-    rows = _rows(payload)
-    labels = {key: row["accessory"]["label"] for key, row in rows.items()}
-    styles = {key: row["accessory"]["style"] for key, row in rows.items()}
-
-    assert "No ar" in _row_text(rows["registration"])
-    assert labels["registration"] == "Gerenciar"
-    assert styles["registration"] == 2
-
-    # `active` sem configuração publicada é rascunho, não módulo no ar.
-    assert "Aguardando publicação" in _row_text(rows["tags"])
-    assert labels["tags"] == "Revisar e publicar"
-    assert styles["tags"] == 1
-
-    assert "Desligado" in _row_text(rows["farm_tickets"])
-    assert labels["farm_tickets"] == "Reativar"
-    assert "Não configurado" in _row_text(rows["meta"])
-    assert labels["meta"] == "Configurar"
-
-    assert "**No ar** 1" in _text_content(payload)
+    assert data["allowed_mentions"] == {"parse": [], "replied_user": False}
+    assert "YUNO / Visão geral" in content
+    assert "Módulos disponíveis" in content
+    assert "Ativos" in content
+    assert "Configuração pendente" in content
+    assert "parceria:open" not in str(data)
+    assert dashboard.route_custom_id("core", "modules") in str(data)
 
 
-def test_central_row_announces_the_plan_a_module_requires() -> None:
-    rows = _rows(dashboard.build_payload({}, control_states=ACTIVE_STATES))
+def test_modules_screen_scales_with_groups_without_truncating_options(monkeypatch) -> None:
+    specs = {
+        f"module_{index}": dashboard.DomainDashboardSpec(
+            key=f"module_{index}",
+            nome=f"Módulo {index}",
+            icon="",
+            ordem=index,
+        )
+        for index in range(26)
+    }
+    monkeypatch.setattr(dashboard, "dashboard_specs", lambda: specs)
 
-    assert "Requer o plano Pro" in _row_text(rows["farm_tickets"])
-    assert "Requer o plano" not in _row_text(rows["registration"])
+    first = dashboard.build_modules_payload({}, page=0)
+    second = dashboard.build_modules_payload({}, page=1)
+    first_select = next(
+        item
+        for item in first["components"][0]["components"]
+        if item["type"] == 1 and item["components"][0]["type"] == 3
+    )["components"][0]
+    second_select = next(
+        item
+        for item in second["components"][0]["components"]
+        if item["type"] == 1 and item["components"][0]["type"] == 3
+    )["components"][0]
+
+    assert len(first_select["options"]) == 25
+    assert len(second_select["options"]) == 1
+    assert first_select["options"][0]["value"] == "module_0"
+    assert second_select["options"][0]["value"] == "module_25"
+    assert dashboard.central_custom_id("core", "group_1") in str(first)
+    assert dashboard.central_custom_id("core", "group_0") in str(second)
 
 
-def test_inactive_license_keeps_the_list_readable_and_blocks_every_button() -> None:
-    payload = dashboard.build_payload(
+def test_modules_screen_shows_selected_summary_and_only_its_open_action() -> None:
+    data = dashboard.build_modules_payload(
+        {}, selected_module="meta", control_states=ACTIVE_STATES
+    )
+    serialized = str(data)
+
+    assert "Meta" in serialized
+    assert dashboard.central_custom_id("meta", "open") in serialized
+    assert "registration:open" not in serialized
+
+
+def test_string_select_rejects_more_than_discord_allows() -> None:
+    options = [{"label": str(index), "value": str(index)} for index in range(26)]
+
+    with pytest.raises(ValueError, match="no máximo 25"):
+        string_select(custom_id="central", options=options, placeholder="Escolha")
+
+
+def test_inactive_license_keeps_home_readable() -> None:
+    data = dashboard.build_payload(
         {}, control_states=ACTIVE_STATES, license_active=False
     )
-    rows = _rows(payload)
 
-    assert payload["components"][0]["accent_color"] == uk.DANGER
-    assert "Licença inativa" in _text_content(payload)
-    assert list(rows) == list(dashboard.dashboard_specs())
-    assert all(row["accessory"]["disabled"] for row in rows.values())
+    assert data["components"][0]["accent_color"] == uk.DANGER
+    assert "Licença inativa" in str(data)
 
 
 def test_legacy_catalog_has_no_runtime_implementation() -> None:
@@ -311,9 +330,8 @@ async def test_startup_refresh_updates_only_the_registered_central(monkeypatch) 
 
     assert refreshed is True
     assert edited[0][1:3] == (10, 20)
-    assert set(_rows(edited[0][3])) == {
-        "registration", "tags", "farm_tickets", "meta", "parceria"
-    }
+    assert dashboard.route_custom_id("core", "modules") in str(edited[0][3])
+    assert "estados dos módulos" in str(edited[0][3])
 
 
 def test_central_dynamic_patterns_do_not_compete_for_string_selects() -> None:
@@ -467,7 +485,7 @@ async def test_navigation_home_rewrites_the_central_message(monkeypatch) -> None
     assert interaction.response.is_done()
 
     assert edited[0][:2] == (10, 20)
-    assert "No ar" in _row_text(_rows(edited[0][2])["meta"])
+    assert "Central operacional" in str(edited[0][2])
 
 
 @pytest.mark.asyncio
@@ -485,3 +503,67 @@ async def test_raw_v2_action_select_is_acknowledged_before_dispatch(monkeypatch)
     monkeypatch.setattr(dashboard, "_dispatch_action", dispatch_action)
 
     assert await dashboard.dispatch_components_v2(interaction) is True
+
+
+@pytest.mark.asyncio
+async def test_visual_routes_follow_the_pilot_flow_without_calling_business_actions(
+    monkeypatch,
+) -> None:
+    called = []
+
+    async def central_config(current):
+        return {"settings": {}}
+
+    async def render_home(current, config):
+        called.append(("home", config))
+
+    async def render_modules(current, config, **kwargs):
+        called.append(("modules", config, kwargs))
+
+    async def dispatch_page(current, module_key):
+        called.append(("page", module_key))
+
+    async def dispatch_action(current, module_key, action_key):
+        called.append(("action", module_key, action_key))
+
+    monkeypatch.setattr(dashboard, "_central_config", central_config)
+    monkeypatch.setattr(dashboard, "_render_home", render_home)
+    monkeypatch.setattr(dashboard, "_render_modules", render_modules)
+    monkeypatch.setattr(dashboard, "_dispatch_page", dispatch_page)
+    monkeypatch.setattr(dashboard, "_dispatch_action", dispatch_action)
+
+    for custom_id in (
+        dashboard.route_custom_id("core", "modules"),
+        dashboard.route_custom_id("parceria", "overview"),
+        dashboard.route_custom_id("parceria", "configuration"),
+        dashboard.route_custom_id("parceria", "diagnostic"),
+    ):
+        interaction = _FakeInteraction(custom_id, component_type=2)
+        assert await dashboard.dispatch_components_v2(interaction) is True
+
+    assert [item[0] for item in called] == ["modules", "page", "action", "action"]
+    assert called[1] == ("page", "parceria")
+    assert called[2:] == [
+        ("action", "parceria", "open_system"),
+        ("action", "parceria", "diagnose"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_invalid_visual_route_is_rejected_without_business_dispatch(monkeypatch) -> None:
+    invalid = []
+
+    async def central_config(current):
+        return {"settings": {}}
+
+    async def render_invalid(current):
+        invalid.append(current)
+
+    monkeypatch.setattr(dashboard, "_central_config", central_config)
+    monkeypatch.setattr(dashboard, "_render_invalid_route", render_invalid)
+    interaction = _FakeInteraction(
+        dashboard.route_custom_id("parceria", "not_a_route"), component_type=2
+    )
+
+    assert await dashboard.dispatch_components_v2(interaction) is True
+    assert invalid == [interaction]

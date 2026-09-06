@@ -18,6 +18,7 @@ SEPARATOR = 14
 CONTAINER = 17
 LABEL = 18
 TEXT_INPUT = 4
+MAX_STRING_SELECT_OPTIONS = 25
 FLAG_COMPONENTS_V2 = 1 << 15
 
 
@@ -74,10 +75,15 @@ def string_select(
     min_values: int = 1,
     max_values: int = 1,
 ) -> dict[str, Any]:
+    if len(options) > MAX_STRING_SELECT_OPTIONS:
+        raise ValueError(
+            f"String Select aceita no máximo {MAX_STRING_SELECT_OPTIONS} opções; "
+            "pagine a coleção antes de renderizar."
+        )
     return {
         "type": STRING_SELECT,
         "custom_id": custom_id,
-        "options": options[:25],
+        "options": list(options),
         "placeholder": placeholder,
         "min_values": min_values,
         "max_values": max_values,
