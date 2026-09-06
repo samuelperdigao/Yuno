@@ -8,6 +8,7 @@ sys.path.insert(0, str(ROOT / "bot"))
 
 from yuno_bot import dashboard  # noqa: E402
 from yuno_bot.domain_modules.parceria import MODULE_UI  # noqa: E402
+from yuno_bot.domain_modules.parceria.admin import build_admin_payload  # noqa: E402
 from yuno_bot.platform.registry import discover_ui_modules  # noqa: E402
 
 
@@ -68,3 +69,14 @@ def test_parceria_operational_panel_uses_components_v2_and_stable_ids() -> None:
     assert "yuno:parceria:v1:global:register" in serialized
     assert "yuno:parceria:v1:global:edit" in serialized
     assert "yuno:parceria:v1:global:deactivate" in serialized
+
+
+def test_parceria_admin_payload_uses_components_v2_header_components() -> None:
+    discover_ui_modules()
+
+    data = build_admin_payload({}, {"data": {}})
+
+    header = data["components"][0]["components"][:3]
+    assert header[0]["type"] == 1
+    assert header[1]["type"] == 14
+    assert header[2]["type"] == 10

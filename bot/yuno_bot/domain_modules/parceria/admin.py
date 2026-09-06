@@ -91,7 +91,11 @@ def build_admin_payload(instance: dict, draft: dict) -> dict[str, Any]:
     status = "Ativo" if active else ("Publicado, mas inativo" if published else "Aguardando publicação")
     return payload(
         uk.panel(
-            header=dashboard.module_navigation(MODULE_KEY) + "\n\n" + uk.heading("Parcerias", emoji="🤝"),
+            header=[
+                dashboard.module_navigation(MODULE_KEY),
+                uk.space(),
+                uk.heading("Parcerias", emoji="🤝"),
+            ],
             blocks=[
                 uk.field("Estado", f"{uk.badge(state, status, bold=True)}\nA configuração publicada é a única consumida pelo Runtime."),
                 uk.rule(),
