@@ -245,13 +245,17 @@ def navigation_row(
 
     return action_row(
         button(
-            custom_id=route_custom_id(*(parent or ("core", "home"))),
+            custom_id=route_custom_id(
+                *(parent or ("core", "disabled_back"))
+            ),
             label="‹ Voltar",
             style=BUTTON_SECONDARY,
             disabled=parent is None,
         ),
         button(
-            custom_id=route_custom_id(*(next_route or ("core", "home"))),
+            custom_id=route_custom_id(
+                *(next_route or ("core", "disabled_next"))
+            ),
             label="Avançar ›",
             style=BUTTON_SECONDARY,
             disabled=next_route is None,

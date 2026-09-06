@@ -84,6 +84,25 @@ def test_modules_screen_scales_with_groups_without_truncating_options(monkeypatc
     assert dashboard.central_custom_id("core", "group_0") in str(second)
 
 
+def test_navigation_row_keeps_disabled_buttons_with_unique_custom_ids() -> None:
+    data = dashboard.build_modules_payload({})
+    custom_ids = []
+
+    def collect_components(component):
+        if isinstance(component, dict):
+            if "custom_id" in component:
+                custom_ids.append(component["custom_id"])
+            for child in component.get("components", []):
+                collect_components(child)
+        elif isinstance(component, list):
+            for child in component:
+                collect_components(child)
+
+    collect_components(data)
+
+    assert len(custom_ids) == len(set(custom_ids))
+
+
 def test_modules_screen_shows_selected_summary_and_only_its_open_action() -> None:
     data = dashboard.build_modules_payload(
         {}, selected_module="meta", control_states=ACTIVE_STATES
