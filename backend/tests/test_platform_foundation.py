@@ -165,11 +165,11 @@ def synthetic_definition() -> ModuleDefinition:
 def test_new_registry_discovers_only_domain_first_modules() -> None:
     definitions = discover_domain_modules().all()
     assert [item.manifest.key for item in definitions] == [
-        "farm_tickets", "meta", "registration", "tags"
+        "farm_tickets", "log_membros", "meta", "registration", "tags"
     ]
     adapters = discover_ui_modules().all()
     assert [item.module_key for item in adapters] == [
-        "farm_tickets", "meta", "registration", "tags"
+        "farm_tickets", "log_membros", "meta", "registration", "tags"
     ]
     by_key = {item.module_key: item for item in adapters}
     assert {item.key for item in by_key["registration"].panels} == {"public", "review"}
