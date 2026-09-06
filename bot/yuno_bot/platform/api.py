@@ -381,6 +381,45 @@ class PlatformAPIClient:
             correlation_id=actor.correlation_id,
         )
 
+    async def ausencia_config(self, guild_id: int) -> dict:
+        return await self._request("GET", f"/guilds/{guild_id}/modules/ausencia/config")
+
+    async def ausencia_register(
+        self,
+        guild_id: int,
+        registro: dict,
+        *,
+        member_display_name: str,
+        actor: Any,
+    ) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/ausencia/records",
+            json={
+                "actor": actor.as_payload(),
+                "registro": registro,
+                "member_display_name": member_display_name,
+            },
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
+    async def ausencia_records(self, guild_id: int, *, limit: int = 200) -> list[dict]:
+        return await self._request(
+            "GET",
+            f"/guilds/{guild_id}/modules/ausencia/records",
+            params={"limit": limit},
+        )
+
+    async def ausencia_sweep_overdue(self, guild_id: int, *, actor: Any) -> dict:
+        return await self._request(
+            "POST",
+            f"/guilds/{guild_id}/modules/ausencia/overdue/sweep",
+            json={"actor": actor.as_payload()},
+            actor_id=actor.user_id,
+            correlation_id=actor.correlation_id,
+        )
+
     async def tags_draft_bindings(self, guild_id: int) -> dict:
         return await self._request("GET", f"/guilds/{guild_id}/modules/tags/bindings/draft")
 
