@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT / "bot"))
 
 from yuno_bot.domain_modules.meta import MODULE_UI
 from yuno_bot.domain_modules.meta import ui
+from yuno_bot import dashboard
 from yuno_bot.platform import ui_kit as uk
 from yuno_bot.platform.components_v2 import (
     meta_notice_payload,
@@ -25,6 +26,10 @@ def _flatten_labels(component: dict) -> list[str]:
     for child in component.get("components") or []:
         result.extend(_flatten_labels(child))
     return result
+
+
+def _container(data: dict) -> dict:
+    return next(item for item in data["components"] if item.get("type") == 17)
 
 
 def test_meta_adapter_exposes_only_stable_admin_actions_and_jobs() -> None:
@@ -50,7 +55,7 @@ def test_persistent_meta_page_has_create_settings_and_paginated_select() -> None
         },
         {"notice_channel_id": "10"},
     )
-    container = data["components"][0]
+    container = _container(data)
     labels = _flatten_labels(container)
     options = [
         option
@@ -59,11 +64,27 @@ def test_persistent_meta_page_has_create_settings_and_paginated_select() -> None
         for option in component.get("options", [])
         if component.get("custom_id") == "yuno:central:v1:meta:select_goal"
     ]
-    assert labels[:2] == ["Criar Meta", "Configurações"]
+    assert labels[:3] == ["CRIAR META", "CONFIGURAÇÃO", "DIAGNÓSTICO"]
     assert "‹ VOLTAR" in labels
     assert "AVANÇAR ›" in labels
     assert {item["value"] for item in options} == {"goal:1", "page:next"}
     assert len(options) <= 25
+
+
+def test_meta_administrative_home_uses_the_shared_nexus_shell_and_empty_state() -> None:
+    data = ui._main_payload(
+        {"items": [], "page": 0, "page_size": 23, "total": 0},
+        {"notice_channel_id": None},
+    )
+    container = _container(data)
+    rendered = "\n".join(
+        item["content"] for item in container["components"] if item.get("type") == 10
+    )
+
+    assert data["components"][0]["type"] == 12
+    assert "YUNO NEXUS // MODULES / METAS" in rendered
+    assert "// SEM CONFIGURAÇÃO" in rendered
+    assert dashboard.route_custom_id("meta", "diagnostic") in str(data)
 
 
 def test_editor_keeps_internal_states_out_of_public_visuals() -> None:
@@ -129,7 +150,7 @@ def test_guided_objective_editor_has_structured_actions_and_localized_preview() 
         },
     )
     rendered = str(data)
-    labels = _flatten_labels(data["components"][0])
+    labels = _flatten_labels(_container(data))
     assert "Arma — 100.000 unidades" in rendered
     assert "Usar item cadastrado" in rendered
     assert {"Novo item", "Dinheiro", "Continuar"}.issubset(set(labels))

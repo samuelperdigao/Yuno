@@ -151,6 +151,13 @@ def test_typography_matches_the_shape_the_modules_already_use() -> None:
     )
 
 
+def test_nexus_configuration_keeps_the_shared_administrative_label() -> None:
+    assert uk.nexus_configuration(("CANAL", "<#10>"), ("ITENS", "04")) == (
+        "// CONFIGURAÇÃO\n\n**CANAL**\n<#10>\n\n**ITENS**\n04"
+    )
+    assert uk.nexus_configuration() == ""
+
+
 def test_steps_numbers_the_onboarding_and_skips_empty_entries() -> None:
     rendered = uk.steps(("Preencha o ID", "Use o ID do jogo."), ("Aguarde", ""), "", None)
     assert rendered == "1️⃣ **Preencha o ID**\nUse o ID do jogo.\n\n2️⃣ **Aguarde**"

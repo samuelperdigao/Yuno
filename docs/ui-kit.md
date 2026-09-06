@@ -308,7 +308,7 @@ amarelo e vermelho para estados reais.
 3. Para a Central, use `container(...)`/`uk.panel(...)` somente dentro do
    shell Nexus e prefira Sections/Text Displays a blocos densos.
 4. Troque texto solto por `heading`/`field`/`inline_fields`/`section_number`,
-   ou pelos helpers `nexus_title`, `nexus_metrics`, `nexus_state` e
+   ou pelos helpers `nexus_title`, `nexus_metrics`, `nexus_configuration`, `nexus_state` e
    `nexus_notice` nas telas administrativas.
 5. Rodapé com a regra do sistema em `subtext` — **derivado de config/ciclo**,
    nunca prazo, cargo ou nome de guild literal.
@@ -331,6 +331,7 @@ conhece contrato.
 | `dashboard.py` (Central) | migrado |
 | `domain_modules/farm_tickets` | migrado (`ui.py`, `admin.py`) |
 | `domain_modules/meta` | migrado (`ui.py`) |
+| `domain_modules/parceria` | migrado (`admin.py`; painéis operacionais mantêm contexto público) |
 | `domain_modules/registration` | migrado (`ui.py`, `renderers.py`) |
 | `domain_modules/tags` | migrado (`ui.py`) |
 | `diagnostics.py` | importa os tokens |
@@ -362,3 +363,24 @@ execuções retornados pela API. Role/User Select, Modal e os `custom_id`s
 existentes continuam sendo o contrato de interação; a mudança é exclusivamente
 de composição visual. O módulo não possui painel público próprio, portanto o
 shell Nexus não é aplicado a mensagens operacionais.
+
+### Tickets de Farm, Metas e Parcerias: contrato visual administrativo
+
+Os três módulos usam `central_shell()` em toda tela administrativa para receber
+o banner oficial, `NEXUS_VIOLET`, `nexus_title`, `nexus_state` e
+`nexus_configuration`. As telas seguem `overview` → `configuration` →
+`diagnostic`/`publish` pela mesma mensagem da Central; os `custom_id`s,
+selects, modais, permissões, rascunhos, publicação e auditoria continuam sendo
+contratos do respectivo domínio.
+
+`nexus_configuration(*pares)` é o bloco reutilizável para configuração: ele
+renderiza somente os pares que o chamador fornecer e não cria um estado vazio.
+Use `nexus_notice("SEM CONFIGURAÇÃO", ...)` ou `nexus_notice("INCIDENTE", ...)`
+quando houver uma condição real a comunicar.
+
+Tickets de Farm preserva categoria, painel público, auditoria e equipe; Metas
+preserva o editor, a agenda, objetivos, modais e avisos públicos; Parcerias
+preserva canais de registro/publicação, cargos, recuperação de painel e o
+fluxo de publicação. Painéis destinados a membros, avisos de ciclo, imagens de
+parceria e logs não recebem termos administrativos como `NEXUS CORE` ou
+`DIAGNOSTICS`.

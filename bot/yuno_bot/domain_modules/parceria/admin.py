@@ -3,13 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 import discord
-import httpx
 
 from yuno_bot import dashboard
 from yuno_bot.platform import ui_kit as uk
-from yuno_bot.platform.components_v2 import action_row, button, channel_select, payload, role_select
+from yuno_bot.platform.components_v2 import action_row, button, channel_select, payload, role_select, text_display
 from yuno_bot.platform.contracts import ActorContext
-from yuno_bot.platform.panels import PanelPublisher
 
 
 MODULE_KEY = "parceria"
@@ -68,12 +66,12 @@ def _ref(value: Any, kind: str = "channel") -> str:
 
 def _config_text(config: dict[str, Any]) -> str:
     roles = ", ".join(_ref(role, "role") for role in config.get("manager_role_ids") or []) or "Ainda não definido"
-    return (
-        f"**Registro:** {_ref(config.get('registrar_channel_id'))}\n"
-        f"**Parcerias ativas:** {_ref(config.get('ativas_channel_id'))}\n"
-        f"**Cargos gerentes:** {roles}\n"
-        f"**Categoria:** {_ref(config.get('category_id'))}\n"
-        f"**Logs:** {_ref(config.get('log_channel_id'))}"
+    return uk.nexus_metrics(
+        ("REGISTRO", _ref(config.get("registrar_channel_id"))),
+        ("PARCERIAS ATIVAS", _ref(config.get("ativas_channel_id"))),
+        ("EQUIPE", roles),
+        ("CATEGORIA", _ref(config.get("category_id"))),
+        ("AUDITORIA", _ref(config.get("log_channel_id"))),
     )
 
 
@@ -97,22 +95,29 @@ def build_admin_payload(instance: dict, draft: dict) -> dict[str, Any]:
     return dashboard.central_shell(payload(
         uk.panel(
             header=[
-                uk.breadcrumb("YUNO", "Módulos", "Parcerias"),
-                uk.heading("Parcerias"),
-                "Cadastro e publicação de parcerias",
+                uk.nexus_title(
+                    "PARCERIAS",
+                    path="MODULES / PARCERIAS",
+                    subtitle="Cadastro, publicação e auditoria de parcerias.",
+                ),
             ],
             blocks=[
-                uk.field("Status", f"{uk.status_text(state, status)}\nA configuração publicada é a única consumida pelo Runtime."),
-                uk.field("Configuração", _config_text(config)),
+                text_display(uk.nexus_state("ESTADO", status, state=state) + "\nA configuração publicada é a única consumida pelo Runtime."),
+                text_display(uk.nexus_configuration(
+                    ("REGISTRO", _ref(config.get("registrar_channel_id"))),
+                    ("PARCERIAS ATIVAS", _ref(config.get("ativas_channel_id"))),
+                    ("EQUIPE", ", ".join(_ref(role, "role") for role in config.get("manager_role_ids") or []) or "Ainda não definido"),
+                )),
             ],
             actions=[
                 action_row(
-                    button(custom_id=dashboard.central_custom_id(MODULE_KEY, "open_system"), label="Configurar", style=1),
-                    button(custom_id=dashboard.central_custom_id(MODULE_KEY, "diagnose"), label="Diagnóstico", style=2),
+                    button(custom_id=dashboard.central_custom_id(MODULE_KEY, "open_system"), label="CONFIGURAR", style=1),
+                    button(custom_id=dashboard.central_custom_id(MODULE_KEY, "diagnose"), label="DIAGNÓSTICO", style=2),
                 ),
                 dashboard.route_navigation(MODULE_KEY, "overview"),
             ],
-            state=state,
+            footer="NEXUS CORE // SESSION ACTIVE",
+            accent_color=uk.NEXUS_VIOLET,
         )
     ))
 
@@ -127,35 +132,43 @@ async def open_system(interaction: discord.Interaction, api: Any) -> None:
     draft = await api.configuration_draft(interaction.guild_id, MODULE_KEY)
     config = _merge(draft)
     blocks = [
-        uk.field("Configuração atual", _config_text(config)),
-        uk.notice("As alterações ficam em rascunho até a publicação.", kind="info"),
-    ]
-    actions = [
+        text_display("// PUBLICAÇÃO\n\n" + uk.nexus_metrics(
+            ("REGISTRO", _ref(config.get("registrar_channel_id"))),
+            ("PARCERIAS ATIVAS", _ref(config.get("ativas_channel_id"))),
+        )),
         action_row(channel_select(custom_id=dashboard.central_custom_id(MODULE_KEY, "set_registrar_channel"), placeholder="Canal para receber cadastros", channel_types=[0])),
         action_row(channel_select(custom_id=dashboard.central_custom_id(MODULE_KEY, "set_ativas_channel"), placeholder="Canal das parcerias ativas", channel_types=[0])),
+        uk.rule(),
+        text_display("// EQUIPE E AUDITORIA\n\n" + uk.nexus_metrics(
+            ("EQUIPE", ", ".join(_ref(role, "role") for role in config.get("manager_role_ids") or []) or "Ainda não definido"),
+            ("CATEGORIA", _ref(config.get("category_id"))),
+            ("AUDITORIA", _ref(config.get("log_channel_id"))),
+        )),
         action_row(role_select(custom_id=dashboard.central_custom_id(MODULE_KEY, "set_manager_roles"), placeholder="Cargos gerentes", min_values=1, max_values=25)),
         action_row(channel_select(custom_id=dashboard.central_custom_id(MODULE_KEY, "set_category"), placeholder="Categoria opcional", channel_types=[4])),
         action_row(channel_select(custom_id=dashboard.central_custom_id(MODULE_KEY, "set_log_channel"), placeholder="Canal de logs opcional", channel_types=[0])),
+    ]
+    actions = [
         action_row(
-            button(custom_id=dashboard.central_custom_id(MODULE_KEY, "review_publish"), label="Revisar e publicar", style=1),
-            button(custom_id=dashboard.central_custom_id(MODULE_KEY, "diagnose"), label="Diagnóstico", style=2),
+            button(custom_id=dashboard.central_custom_id(MODULE_KEY, "review_publish"), label="REVISAR E PUBLICAR", style=1),
+            button(custom_id=dashboard.central_custom_id(MODULE_KEY, "diagnose"), label="DIAGNÓSTICO", style=2),
         ),
         action_row(
-            button(custom_id=dashboard.central_custom_id(MODULE_KEY, "recover_panel"), label="Recuperar painel", style=2),
+            button(custom_id=dashboard.central_custom_id(MODULE_KEY, "recover_panel"), label="RECUPERAR PAINEL", style=2),
         ),
         dashboard.route_navigation(MODULE_KEY, "configuration"),
     ]
     await _replace(
         interaction,
-        payload(
+        dashboard.central_shell(payload(
             uk.panel(
-                header=[uk.breadcrumb("YUNO", "Módulos", "Parcerias", "Configuração"), uk.heading("Configuração")],
+                header=[uk.nexus_title("CONFIGURAÇÃO", path="MODULES / PARCERIAS / CONFIG", subtitle="Seletores alteram somente o rascunho deste servidor.")],
                 blocks=blocks,
                 actions=actions,
-                footer="Seletores alteram somente o rascunho deste servidor.",
-                state=uk.State.PENDING,
+                footer="NEXUS CORE // SESSION ACTIVE",
+                accent_color=uk.NEXUS_VIOLET,
             )
-        ),
+        )),
     )
 
 
@@ -192,27 +205,32 @@ async def review_publish(interaction: discord.Interaction, api: Any) -> None:
     draft = await api.configuration_draft(interaction.guild_id, MODULE_KEY)
     config = _merge(draft)
     missing = [key for key in ("registrar_channel_id", "ativas_channel_id", "manager_role_ids") if not config.get(key)]
-    blocks: list[Any] = [uk.field("Configuração", _config_text(config))]
+    blocks: list[Any] = [text_display(uk.nexus_configuration(
+        ("REGISTRO", _ref(config.get("registrar_channel_id"))),
+        ("PARCERIAS ATIVAS", _ref(config.get("ativas_channel_id"))),
+        ("EQUIPE", ", ".join(_ref(role, "role") for role in config.get("manager_role_ids") or []) or "Ainda não definido"),
+    ))]
     if missing:
-        blocks.append(uk.notice("Faltam campos obrigatórios: " + ", ".join(missing), kind="warning"))
+        blocks.append(text_display(uk.nexus_notice("INCIDENTE", "Publicação bloqueada", "Faltam campos obrigatórios: " + ", ".join(missing))))
     else:
-        blocks.append(uk.notice("Pronto para publicar. A publicação ativará o painel.", kind="success"))
+        blocks.append(text_display(uk.nexus_notice("PUBLICAÇÃO", "Configuração pronta", "A publicação ativará o painel de registro.")))
     await _replace(
         interaction,
-        payload(
+        dashboard.central_shell(payload(
             uk.panel(
-                header=[uk.breadcrumb("YUNO", "Módulos", "Parcerias", "Configuração", "Revisão"), uk.heading("Revisão")],
+                header=[uk.nexus_title("REVISAR PUBLICAÇÃO", path="MODULES / PARCERIAS / PUBLISH", subtitle="Confirme os recursos que serão ativados.")],
                 blocks=blocks,
                 actions=[
                     action_row(
-                        button(custom_id=dashboard.central_custom_id(MODULE_KEY, "confirm_publish"), label="Publicar", style=1, disabled=bool(missing)),
-                        button(custom_id=dashboard.route_custom_id(MODULE_KEY, "configuration"), label="Voltar", style=2),
+                        button(custom_id=dashboard.central_custom_id(MODULE_KEY, "confirm_publish"), label="PUBLICAR", style=1, disabled=bool(missing)),
+                        button(custom_id=dashboard.route_custom_id(MODULE_KEY, "configuration"), label="VOLTAR", style=2),
                     ),
                     dashboard.route_navigation(MODULE_KEY, "configuration"),
                 ],
-                state=uk.State.PENDING if missing else uk.State.APPROVED,
+                footer="NEXUS CORE // SESSION ACTIVE",
+                accent_color=uk.NEXUS_VIOLET,
             )
-        ),
+        )),
     )
 
 
@@ -227,21 +245,22 @@ async def confirm_publish(interaction: discord.Interaction, api: Any) -> None:
 
 async def diagnose(interaction: discord.Interaction, api: Any) -> None:
     checks = await api.diagnostics(interaction.guild_id, MODULE_KEY)
-    lines = [f"{item.get('status', 'UNKNOWN')} · {item.get('summary', '')}" for item in checks]
-    blocks = [uk.notice("\n".join(lines) if lines else "Nenhuma pendência encontrada.", kind="info")]
+    lines = [f"**{str(item.get('status') or 'UNKNOWN').upper()}**\n{str(item.get('summary') or 'Sem resumo').strip()}" for item in checks]
+    blocks = [text_display("// CHECKS\n\n" + "\n\n".join(lines))] if lines else [text_display(uk.nexus_notice("DIAGNÓSTICO", "Nenhuma pendência retornada", "A Platform API não informou verificações adicionais."))]
     await _replace(
         interaction,
-        payload(
+        dashboard.central_shell(payload(
             uk.panel(
-                header=[uk.breadcrumb("YUNO", "Módulos", "Parcerias", "Diagnóstico"), uk.heading("Diagnóstico")],
+                header=[uk.nexus_title("DIAGNÓSTICO", path="MODULES / PARCERIAS / DIAGNOSTICS", subtitle="Verificação do subsistema.")],
                 blocks=blocks,
                 actions=[
-                    action_row(button(custom_id=dashboard.route_custom_id(MODULE_KEY, "configuration"), label="Configuração", style=2)),
+                    action_row(button(custom_id=dashboard.route_custom_id(MODULE_KEY, "configuration"), label="CONFIGURAÇÃO", style=2)),
                     dashboard.route_navigation(MODULE_KEY, "diagnostic"),
                 ],
-                state=uk.State.APPROVED if not checks else uk.State.PENDING,
+                footer="SYS://YUNO/NEXUS • DIAGNOSTIC COMPLETE",
+                accent_color=uk.NEXUS_VIOLET,
             )
-        ),
+        )),
     )
 
 

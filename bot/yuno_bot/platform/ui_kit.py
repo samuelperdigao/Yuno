@@ -212,6 +212,18 @@ def nexus_metrics(*pairs: tuple[Any, Any] | Sequence[Any]) -> str:
     return clip("\n\n".join(rendered))
 
 
+def nexus_configuration(*pairs: tuple[Any, Any] | Sequence[Any]) -> str:
+    """Bloco de configuração da Central, sem conhecer o módulo chamador.
+
+    Mantém o rótulo e a densidade de leitura iguais entre módulos, enquanto os
+    valores continuam sendo responsabilidade do domínio. Não renderiza um
+    painel vazio: uma tela sem campos deve usar ``nexus_notice`` contextual.
+    """
+
+    metrics = nexus_metrics(*pairs)
+    return clip(f"// CONFIGURAÇÃO\n\n{metrics}") if metrics else ""
+
+
 def nexus_state(label: Any, value: Any, *, state: State | str | None = None) -> str:
     suffix = ""
     resolved = _state(state)

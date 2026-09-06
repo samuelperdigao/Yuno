@@ -20,18 +20,16 @@ from yuno_bot.platform.components_v2 import (
     action_row,
     button,
     channel_select,
-    container,
     edit_message,
     payload,
     role_select,
-    separator,
     text_display,
 )
 from yuno_bot.platform import ui_kit as uk
 from yuno_bot.platform.contracts import ActorContext
 
 MODULE_KEY = "farm_tickets"
-COLOR = uk.BRAND
+COLOR = uk.NEXUS_VIOLET
 TEXT_CHANNEL_TYPE = 0
 CATEGORY_CHANNEL_TYPE = 4
 MAX_ADMIN_ROLES = 25
@@ -195,12 +193,12 @@ def _config_lines(config: dict[str, Any], *, keys: tuple[str, ...] = CONFIG_LINE
     """Resumo da configuração, opcionalmente só dos campos de uma seção."""
 
     rendered = {
-        "category_id": f"**📁 Categoria principal** — {_reference(config['category_id'], kind='channel')}",
-        "panel_channel_id": f"**📣 Canal do painel** — {_reference(config['panel_channel_id'], kind='channel')}",
-        "log_channel_id": f"**🗂️ Canal de logs** — {_reference(config['log_channel_id'], kind='channel')}",
-        "administrator_role_ids": f"**👮 Cargos administradores** — {_role_summary(config)}",
+        "category_id": ("CATEGORIA", _reference(config["category_id"], kind="channel")),
+        "panel_channel_id": ("PAINEL PÚBLICO", _reference(config["panel_channel_id"], kind="channel")),
+        "log_channel_id": ("AUDITORIA", _reference(config["log_channel_id"], kind="channel")),
+        "administrator_role_ids": ("EQUIPE", _role_summary(config)),
     }
-    return "\n".join(rendered[key] for key in keys)
+    return uk.nexus_metrics(*(rendered[key] for key in keys))
 
 
 def build_admin_payload(instance: dict, config: dict[str, Any]) -> dict[str, Any]:
@@ -208,44 +206,55 @@ def build_admin_payload(instance: dict, config: dict[str, Any]) -> dict[str, Any
     is_active = bool(published) and instance.get("lifecycle") == "active"
     if is_active:
         state = uk.State.APPROVED
-        status = uk.badge(state, "Ativo", bold=True)
+        status = "Operacional"
         status_detail = "O painel de tickets está publicado e atendendo os membros."
     elif published:
         state = uk.State.RUNNING
-        status = uk.badge(state, "Publicado, porém inativo", bold=True)
+        status = "Publicado, porém inativo"
         status_detail = "A configuração existe, mas o módulo não está atendendo."
     else:
         state = uk.State.PENDING
-        status = uk.badge(state, "Ainda não publicado", bold=True)
+        status = "Aguardando publicação"
         status_detail = (
             "Enquanto não houver publicação, nenhuma categoria, canal ou painel é criado."
         )
-    return payload(
+    return dashboard.central_shell(payload(
         uk.panel(
             header=[
-                dashboard.module_navigation(MODULE_KEY),
-                uk.space(),
-                uk.heading("Tickets de Farm", emoji="🎫")
-                + "\n\nLançamentos comprovados e recolhimentos FIFO vinculados aos ciclos de Metas.",
+                uk.nexus_title(
+                    "TICKETS DE FARM",
+                    path="MODULES / FARM TICKETS",
+                    subtitle="Lançamentos comprovados e recolhimentos vinculados aos ciclos de Metas.",
+                ),
             ],
             blocks=[
-                uk.field("Status", f"{status}\n{status_detail}", emoji="📌"),
-                uk.rule(),
-                uk.field("Onde o módulo opera", _config_lines(config), emoji="🧭"),
+                text_display(uk.nexus_state("ESTADO", status, state=state) + "\n" + status_detail),
+                text_display(uk.nexus_configuration(
+                    ("CATEGORIA", _reference(config["category_id"], kind="channel")),
+                    ("PAINEL PÚBLICO", _reference(config["panel_channel_id"], kind="channel")),
+                    ("AUDITORIA", _reference(config["log_channel_id"], kind="channel")),
+                    ("EQUIPE", _role_summary(config)),
+                )),
             ],
             actions=[
                 action_row(
                     button(
                         custom_id=dashboard.central_custom_id(MODULE_KEY, "open_system"),
-                        label="Configurar Tickets de Farm",
-                        emoji="⚙️",
+                        label="CONFIGURAR",
+                        style=1,
+                    ),
+                    button(
+                        custom_id=dashboard.route_custom_id(MODULE_KEY, "diagnostic"),
+                        label="DIAGNÓSTICO",
                         style=2,
-                    )
-                )
+                    ),
+                ),
+                dashboard.route_navigation(MODULE_KEY, "overview"),
             ],
-            state=state,
+            footer="NEXUS CORE // SESSION ACTIVE",
+            accent_color=COLOR,
         )
-    )
+    ))
 
 
 async def render_admin(interaction: discord.Interaction, api: Any) -> None:
@@ -258,87 +267,80 @@ async def render_admin(interaction: discord.Interaction, api: Any) -> None:
 
 
 def build_system_payload(config: dict[str, Any], *, unsaved: bool) -> dict[str, Any]:
-    pending_notice = (
-        "\n\n"
-        + uk.empty_state(
-            "Rascunho ainda não gravado",
-            "As escolhas só viram rascunho depois que ao menos um cargo "
-            "administrador for definido.",
-        )
-        if unsaved
-        else ""
-    )
-    return payload(
-        container(
-            dashboard.module_navigation(MODULE_KEY),
-            separator(spacing=1),
-            text_display(
-                uk.heading("Tickets de Farm", emoji="🎫")
-                + "\n\nEscolha onde os tickets vivem e quem pode operá-los. "
-                "Nada é criado no Discord antes da publicação."
-                f"{pending_notice}"
-            ),
-            separator(spacing=1),
-            text_display(
-                f"{uk.section_number(1, 'Onde os tickets vivem', emoji='📍')}\n\n"
-                + _config_lines(
-                    config,
-                    keys=("category_id", "panel_channel_id", "log_channel_id"),
-                )
-            ),
-            action_row(
+    blocks: list[dict[str, Any]] = [
+        text_display(
+            "// GERAL\n\n"
+            + _config_lines(config, keys=("category_id", "panel_channel_id", "log_channel_id"))
+        ),
+        action_row(
                 channel_select(
                     custom_id=dashboard.central_custom_id(MODULE_KEY, "set_category"),
                     placeholder="Categoria que recebe os canais de ticket…",
                     channel_types=[CATEGORY_CHANNEL_TYPE],
                 )
-            ),
-            action_row(
+        ),
+        action_row(
                 channel_select(
                     custom_id=dashboard.central_custom_id(MODULE_KEY, "set_panel_channel"),
                     placeholder="Publicar o painel de abertura em…",
                     channel_types=[TEXT_CHANNEL_TYPE],
                 )
-            ),
-            action_row(
+        ),
+        action_row(
                 channel_select(
                     custom_id=dashboard.central_custom_id(MODULE_KEY, "set_log_channel"),
                     placeholder="Registrar o histórico e os logs em…",
                     channel_types=[TEXT_CHANNEL_TYPE],
                 )
-            ),
-            separator(spacing=1),
-            text_display(
-                f"{uk.section_number(2, 'Quem administra', emoji='👥')}\n\n"
-                + _config_lines(config, keys=("administrator_role_ids",))
-                + "\n\nEstes cargos recolhem, assumem, aprovam e finalizam os tickets. "
-                "Abrir o próprio ticket continua liberado para todos os membros."
-            ),
-            action_row(
+        ),
+        uk.rule(),
+        text_display(
+            "// EQUIPE\n\n"
+            + _config_lines(config, keys=("administrator_role_ids",))
+            + "\n\nEstes cargos recolhem, assumem, aprovam e finalizam os tickets. "
+            "Abrir o próprio ticket continua liberado para todos os membros."
+        ),
+        action_row(
                 role_select(
                     custom_id=dashboard.central_custom_id(MODULE_KEY, "set_admin_roles"),
                     placeholder="Cargos que recolhem, aprovam e finalizam",
                     max_values=MAX_ADMIN_ROLES,
                 )
-            ),
-            separator(spacing=1),
-            action_row(
+        ),
+    ]
+    if unsaved:
+        blocks.append(text_display(uk.nexus_notice(
+            "RASCUNHO LOCAL",
+            "Aguardando equipe administradora",
+            "As escolhas serão gravadas quando ao menos um cargo administrador for definido.",
+        )))
+    return dashboard.central_shell(payload(
+        uk.panel(
+            header=[uk.nexus_title(
+                "CONFIGURAÇÃO",
+                path="MODULES / FARM TICKETS / CONFIG",
+                subtitle="Escolha os recursos do servidor. Nada é criado antes da publicação.",
+            )],
+            blocks=blocks,
+            actions=[
+                action_row(
                 button(
                     custom_id=dashboard.central_custom_id(MODULE_KEY, "review_publish"),
-                    label="Revisar e publicar",
-                    emoji="👁️",
+                    label="REVISAR E PUBLICAR",
                     style=1,
                 ),
                 button(
-                    custom_id=dashboard.central_custom_id(MODULE_KEY, "overview"),
-                    label="Voltar",
-                    emoji="↩️",
+                    custom_id=dashboard.route_custom_id(MODULE_KEY, "overview"),
+                    label="VOLTAR",
                     style=2,
                 ),
-            ),
+                ),
+                dashboard.route_navigation(MODULE_KEY, "configuration"),
+            ],
+            footer="NEXUS CORE // SESSION ACTIVE",
             accent_color=COLOR,
         )
-    )
+    ))
 
 
 async def _render_system(
@@ -524,41 +526,42 @@ async def review_publish(interaction: discord.Interaction, api: Any) -> None:
         role_label = "cargo administrador" if roles == 1 else "cargos administradores"
         await _replace_central(
             interaction,
-            payload(
-                container(
-                    dashboard.module_navigation(MODULE_KEY),
-                    separator(spacing=1),
-                    text_display(
-                        uk.heading("Revisar publicação dos Tickets de Farm", emoji="👁️")
-                        + f"\n\n{_config_lines(config)}\n\n"
-                        f"**{roles}** {role_label} recebem recolhimento, atribuição, "
-                        "aprovação, finalização e exclusão.\n"
-                        "Abrir o próprio ticket continua liberado para todos os membros."
-                    ),
-                    action_row(
+            dashboard.central_shell(payload(
+                uk.panel(
+                    header=[uk.nexus_title(
+                        "REVISAR PUBLICAÇÃO",
+                        path="MODULES / FARM TICKETS / PUBLISH",
+                        subtitle="Confirme os recursos e permissões que serão ativados.",
+                    )],
+                    blocks=[
+                        text_display(uk.nexus_configuration(
+                            ("CATEGORIA", _reference(config["category_id"], kind="channel")),
+                            ("PAINEL PÚBLICO", _reference(config["panel_channel_id"], kind="channel")),
+                            ("AUDITORIA", _reference(config["log_channel_id"], kind="channel")),
+                            ("EQUIPE", _role_summary(config)),
+                        )),
+                        text_display(uk.nexus_notice(
+                            "PUBLICAÇÃO",
+                            f"{roles} {role_label}",
+                            "Recebem recolhimento, atribuição, aprovação, finalização e exclusão.",
+                        )),
+                    ],
+                    actions=[action_row(
                         button(
                             custom_id=dashboard.central_custom_id(MODULE_KEY, "confirm_publish"),
-                            label="Confirmar publicação",
-                            emoji="✅",
+                            label="CONFIRMAR PUBLICAÇÃO",
                             style=3,
                         ),
                         button(
                             custom_id=dashboard.central_custom_id(MODULE_KEY, "open_system"),
-                            label="Voltar",
-                            emoji="↩️",
+                            label="VOLTAR",
                             style=2,
                         ),
-                    ),
-                    separator(spacing=1, divider=False),
-                    text_display(
-                        uk.subtext(
-                            "A confirmação cria uma versão imutável e provisiona "
-                            "categoria, canais e painel."
-                        )
-                    ),
+                    ), dashboard.route_navigation(MODULE_KEY, "configuration")],
+                    footer="A confirmação cria uma versão imutável e provisiona categoria, canais e painel.\nNEXUS CORE // SESSION ACTIVE",
                     accent_color=COLOR,
                 )
-            ),
+            )),
         )
     except Exception as exc:
         await _send_interaction_error(interaction, error_text(exc))

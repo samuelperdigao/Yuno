@@ -172,20 +172,41 @@ def _main_payload(goals: dict[str, Any], settings: dict[str, Any]) -> dict[str, 
         if notice_channel
         else "Nenhum canal de avisos definido"
     )
-    return payload(
+    total_label = f"{total:02d}" if total else "00"
+    state = uk.State.RUNNING if total else uk.State.PENDING
+    state_label = "Metas ativas ou agendadas" if total else "Nenhuma Meta configurada"
+    blocks: list[dict[str, Any]] = [
+        text_display(uk.nexus_state("ESTADO", state_label, state=state)),
+        text_display(uk.nexus_configuration(
+            ("CANAL DE AVISOS", destination),
+            ("METAS DISPONÍVEIS", total_label),
+        )),
+    ]
+    if not total:
+        blocks.append(text_display(uk.nexus_notice(
+            "SEM CONFIGURAÇÃO",
+            "Nenhuma Meta foi criada.",
+            "Crie uma Meta para iniciar a operação.",
+        )))
+    return dashboard.central_shell(payload(
         uk.panel(
-            header=[uk.nexus_title("SISTEMA DE METAS", path="MODULES / META", subtitle="Metas recorrentes e publicação")],
-            blocks=[uk.field("CANAL DOS AVISOS", destination)],
+            header=[uk.nexus_title("SISTEMA DE METAS", path="MODULES / METAS", subtitle="Metas recorrentes e publicação.")],
+            blocks=blocks,
             actions=[
                 action_row(
                     button(
                         custom_id=dashboard.central_custom_id("meta", "create_goal"),
-                        label="Criar Meta",
+                        label="CRIAR META",
                         style=1,
                     ),
                     button(
                         custom_id=dashboard.central_custom_id("meta", "settings"),
-                        label="Configurações",
+                        label="CONFIGURAÇÃO",
+                        style=2,
+                    ),
+                    button(
+                        custom_id=dashboard.route_custom_id("meta", "diagnostic"),
+                        label="DIAGNÓSTICO",
                         style=2,
                     ),
                 ),
@@ -202,7 +223,7 @@ def _main_payload(goals: dict[str, Any], settings: dict[str, Any]) -> dict[str, 
             footer="NEXUS CORE // SESSION ACTIVE",
             accent_color=ADMIN_COLOR,
         )
-    )
+    ))
 
 
 async def render_admin(interaction: discord.Interaction, api: Any) -> None:
@@ -354,8 +375,12 @@ def _editor_payload(
     progress = _editor_progress(step)
     content = [
         text_display(
-            uk.heading(title)
-            + (f"\n{progress}" if progress else "")
+            uk.nexus_title(
+                title.upper(),
+                path="MODULES / METAS / CONFIG",
+                subtitle="Acompanhe cada etapa antes de salvar a Meta.",
+            )
+            + (f"\n\n{progress}" if progress else "")
             + (f"\n\n{uk.nexus_notice('ATENÇÃO', 'EDITOR', banner)}" if banner else "")
         ),
         separator(),
@@ -638,7 +663,7 @@ def _editor_payload(
             dashboard.route_navigation("meta", "configuration"),
         )
     )
-    return payload(container(*content, accent_color=ADMIN_COLOR))
+    return dashboard.central_shell(payload(container(*content, accent_color=ADMIN_COLOR)))
 
 
 async def _editor_products(
@@ -1063,16 +1088,13 @@ async def settings(interaction: discord.Interaction, api: Any) -> None:
         current = await api.meta_settings(interaction.guild_id)
         await _replace_public(
             interaction,
-            payload(
+            dashboard.central_shell(payload(
                 uk.panel(
-                    header=uk.nexus_title(
-                        "CONFIGURAÇÃO", path="MODULES / META", subtitle="Canal dos avisos de cada ciclo"
-                    ),
-                    blocks=[text_display(uk.field(
-                        "CANAL ATUAL",
-                        f"<#{current['notice_channel_id']}>"
-                        if current.get("notice_channel_id")
-                        else "Nenhum canal definido",
+                    header=[uk.nexus_title(
+                        "CONFIGURAÇÃO", path="MODULES / METAS / CONFIG", subtitle="Canal dos avisos de cada ciclo."
+                    )],
+                    blocks=[text_display(uk.nexus_configuration(
+                        ("CANAL DE AVISOS", f"<#{current['notice_channel_id']}>" if current.get("notice_channel_id") else "Não definido"),
                     ))],
                     actions=[
                         action_row(
@@ -1084,10 +1106,10 @@ async def settings(interaction: discord.Interaction, api: Any) -> None:
                         ),
                         dashboard.route_navigation("meta", "configuration"),
                     ],
-                    footer="Alterações salvas no rascunho deste servidor.",
-                    state=uk.State.PENDING,
+                    footer="NEXUS CORE // SESSION ACTIVE",
+                    accent_color=ADMIN_COLOR,
                 )
-            ),
+            )),
         )
     except Exception as exc:
         await _reply(interaction, _error_text(exc))
@@ -1108,20 +1130,22 @@ async def save_settings(interaction: discord.Interaction, api: Any) -> None:
         return
     try:
         current = await api.meta_settings(interaction.guild_id)
-        saved = await api.meta_save_settings(
+        await api.meta_save_settings(
             interaction.guild_id,
             {"notice_channel_id": str(channel.id), "expected_revision": current["revision"] or None},
             actor=actor_from(interaction),
         )
         await _replace_public(
             interaction,
-            payload(
+            dashboard.central_shell(payload(
                 uk.panel(
-                    header=uk.nexus_title("CONFIGURAÇÃO ATUALIZADA", path="MODULES / META")
-                    + f"\n\nOs avisos serão publicados em {channel.mention}.",
-                    state=uk.State.APPROVED,
+                    header=[uk.nexus_title("CONFIGURAÇÃO ATUALIZADA", path="MODULES / METAS / CONFIG")],
+                    blocks=[text_display(uk.nexus_notice("CONFIGURAÇÃO", "Canal atualizado", f"Os avisos serão publicados em {channel.mention}."))],
+                    actions=[dashboard.route_navigation("meta", "configuration")],
+                    footer="SYS://YUNO/NEXUS • OPERATION COMPLETE",
+                    accent_color=ADMIN_COLOR,
                 )
-            ),
+            )),
         )
     except Exception as exc:
         await _reply(interaction, _error_text(exc))
@@ -1164,13 +1188,14 @@ async def select_goal(interaction: discord.Interaction, api: Any) -> None:
             )
         await _replace_public(
             interaction,
-            payload(
+            dashboard.central_shell(payload(
                 uk.panel(
                     header=detail,
                     actions=[*actions, dashboard.route_navigation("meta", "overview")],
-                    state=state,
+                    footer="NEXUS CORE // SESSION ACTIVE",
+                    accent_color=ADMIN_COLOR,
                 )
-            ),
+            )),
         )
     except Exception as exc:
         await _reply(interaction, _error_text(exc))

@@ -144,6 +144,15 @@ CENTRAL_ROUTES: dict[tuple[str, str], CentralRoute] = {
     ("meta", "diagnostic"): CentralRoute(
         "meta", "diagnostic", parent=("meta", "configuration")
     ),
+    ("farm_tickets", "overview"): CentralRoute(
+        "farm_tickets", "overview", parent=("core", "modules"), next_route=("farm_tickets", "configuration")
+    ),
+    ("farm_tickets", "configuration"): CentralRoute(
+        "farm_tickets", "configuration", parent=("farm_tickets", "overview"), next_route=("farm_tickets", "diagnostic")
+    ),
+    ("farm_tickets", "diagnostic"): CentralRoute(
+        "farm_tickets", "diagnostic", parent=("farm_tickets", "configuration")
+    ),
     ("parceria", "overview"): CentralRoute(
         "parceria", "overview", parent=("core", "modules"), next_route=("parceria", "configuration")
     ),
@@ -1063,6 +1072,19 @@ async def _dispatch_visual_route(
             "overview": None,
             "configuration": "open_system",
             "diagnostic": "diagnose",
+        }.get(route, "__invalid__")
+        if target_action == "__invalid__":
+            await _render_invalid_route(interaction)
+            return
+        if target_action is None:
+            await _dispatch_page(interaction, module_key)
+            return
+        await _dispatch_action(interaction, module_key, target_action)
+        return
+    if module_key == "farm_tickets" and route != "diagnostic":
+        target_action = {
+            "overview": None,
+            "configuration": "open_system",
         }.get(route, "__invalid__")
         if target_action == "__invalid__":
             await _render_invalid_route(interaction)

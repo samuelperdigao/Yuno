@@ -33,7 +33,7 @@ from yuno_bot.platform.router import (  # noqa: E402
 
 
 def _children(data: dict) -> list[dict]:
-    return data["components"][0]["components"]
+    return next(item for item in data["components"] if item.get("type") == 17)["components"]
 
 
 def _rows(data: dict) -> list[dict]:
@@ -409,18 +409,34 @@ def test_unpublished_overview_offers_configuration_without_leaking_internal_stat
 
     asyncio.run(admin.render_admin(_admin_interaction(), api))
 
-    children = captured["components"][0]["components"]
+    children = _children(captured)
     content = "\n".join(item["content"] for item in children if item["type"] == 10)
     action = next(
         item
         for item in children
         if item["type"] == 1 and item["components"][0]["type"] == 2
     )
-    assert "Ainda não publicado" in content
+    assert "Aguardando publicação" in content
     assert "Ainda não definido" in content
     assert "lifecycle" not in content.lower()
     assert "rascunho" not in content.lower()
     assert action["components"][0]["custom_id"] == "yuno:central:v1:farm_tickets:open_system"
+
+
+def test_administrative_overview_uses_the_nexus_shell_without_decorative_emojis() -> None:
+    data = admin.build_admin_payload(
+        {"lifecycle": "inactive", "published_config_version_id": None},
+        dict(admin.EMPTY_CONFIG),
+    )
+
+    assert data["components"][0]["type"] == 12
+    rendered = "\n".join(
+        item["content"] for item in _children(data) if item.get("type") == 10
+    )
+    assert "YUNO NEXUS // MODULES / FARM TICKETS" in rendered
+    assert "// CONFIGURAÇÃO" in rendered
+    assert not any(emoji in rendered for emoji in ("🎫", "⚙️", "📌", "🧭"))
+    assert ui.component_count(data) <= 40
 
 
 def test_configuration_page_selects_cover_the_four_contract_fields(monkeypatch) -> None:
@@ -435,7 +451,7 @@ def test_configuration_page_selects_cover_the_four_contract_fields(monkeypatch) 
 
     selects = [
         row["components"][0]
-        for row in captured["components"][0]["components"]
+        for row in _children(captured)
         if row["type"] == 1 and row["components"][0]["type"] in {6, 8}
     ]
     assert [item["custom_id"].rsplit(":", 1)[-1] for item in selects] == [
@@ -471,10 +487,10 @@ def test_partial_selection_only_reaches_the_backend_once_a_role_exists(
     assert admin._pending[(100, 7)]["category_id"] == "900"
     content = "\n".join(
         item["content"]
-        for item in captured["components"][0]["components"]
+        for item in _children(captured)
         if item["type"] == 10
     )
-    assert "só viram rascunho" in content
+    assert "serão gravadas quando ao menos um cargo administrador" in content
 
     asyncio.run(admin.set_admin_roles(_admin_interaction(values=["800", "800"]), api))
 

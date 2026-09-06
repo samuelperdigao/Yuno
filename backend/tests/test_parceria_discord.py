@@ -86,11 +86,26 @@ def test_parceria_admin_payload_uses_components_v2_header_components() -> None:
         "items": [{"media": {"url": dashboard.CENTRAL_BANNER_URL}}],
     }
     container = next(item for item in data["components"] if item["type"] == 17)
-    header = container["components"][:3]
+    header = container["components"]
     assert header[0]["type"] == 10
-    assert header[1]["type"] == 10
-    assert "Parcerias" in header[1]["content"]
+    assert "YUNO NEXUS // MODULES / PARCERIAS" in header[0]["content"]
+    assert "PARCERIAS" in header[0]["content"]
     assert dashboard.route_custom_id("parceria", "configuration") in str(data)
+
+
+def test_parceria_admin_payload_uses_nexus_state_and_configuration_sections() -> None:
+    data = build_admin_payload(
+        {"lifecycle": "active", "published_config_version_id": 1},
+        {"data": {"registrar_channel_id": "10", "ativas_channel_id": "11", "manager_role_ids": ["12"]}},
+    )
+    container = next(item for item in data["components"] if item["type"] == 17)
+    rendered = "\n".join(
+        item["content"] for item in container["components"] if item.get("type") == 10
+    )
+
+    assert "// CONFIGURAÇÃO" in rendered
+    assert "🎫" not in rendered
+    assert dashboard.central_custom_id("parceria", "open_system") in str(data)
 
 
 def test_parceria_publication_embed_references_the_uploaded_attachment() -> None:
