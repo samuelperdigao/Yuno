@@ -17,7 +17,7 @@ from app.domain_modules.chest.models import (
     ChestMovement,
     ChestVersionLink,
 )
-from app.platform.models import AuditEntry, DeliveryOutbox
+from app.platform.models import AuditEntry, DeliveryOutbox, ModulePermissionGrant
 from app.platform.registry import discover_domain_modules
 from app.platform.schemas import ActorContextIn
 from fastapi import HTTPException
@@ -235,6 +235,106 @@ def test_chest_catalog_publish_movements_ledger_and_idempotency():
                     )
                     >= 9
                 )
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_each_chest_publishes_its_own_panel_log_and_resource_grants():
+    async def scenario():
+        discover_domain_modules()
+        engine, sessions = await database()
+        try:
+            async with sessions() as session:
+                actor, first, item, _ = await published_fixture(session)
+                draft = await services.catalog_draft(session, guild_id="100")
+                second = await services.upsert_draft_chest(
+                    session,
+                    guild_id="100",
+                    chest_id=None,
+                    name="Bau da Gerencia",
+                    description="Estoque reservado.",
+                    panel_channel_id="11",
+                    log_channel_id="21",
+                    view_role_ids=["101"],
+                    deposit_role_ids=["101"],
+                    withdraw_role_ids=["102"],
+                    admin_role_ids=["103"],
+                    active=True,
+                    position=1,
+                    expected_revision=draft["revision"],
+                    idempotency_key="second-chest",
+                    actor=actor,
+                )
+                linked = await services.upsert_draft_link(
+                    session,
+                    guild_id="100",
+                    chest_id=second["id"],
+                    item_id=item["id"],
+                    active=True,
+                    expected_revision=second["revision"],
+                    idempotency_key="second-link",
+                    actor=actor,
+                )
+                await services.publish_catalog(
+                    session,
+                    guild_id="100",
+                    expected_revision=linked["revision"],
+                    expected_published_version=1,
+                    grants=[],
+                    idempotency_key="second-publish",
+                    actor=actor,
+                )
+                panels = [
+                    row
+                    for row in (
+                        await session.execute(
+                            select(DeliveryOutbox).where(
+                                DeliveryOutbox.module_key == "chest",
+                                DeliveryOutbox.renderer_key == "chest.panel",
+                            )
+                        )
+                    ).scalars().all()
+                ]
+                assert {row.resource_id for row in panels} == {first["id"], second["id"]}
+                assert {row.destination_id for row in panels} == {"10", "11"}
+                grants = (
+                    await session.execute(
+                        select(ModulePermissionGrant).where(
+                            ModulePermissionGrant.module_key == "chest",
+                            ModulePermissionGrant.scope_type == "resource",
+                            ModulePermissionGrant.scope_id == second["id"],
+                        )
+                    )
+                ).scalars().all()
+                assert {grant.capability for grant in grants} >= {
+                    "chest.view",
+                    "chest.deposit",
+                    "chest.withdraw",
+                    "chest.history",
+                }
+                movement = await services.record_movement(
+                    session,
+                    guild_id="100",
+                    chest_id=second["id"],
+                    item_id=item["id"],
+                    movement_type=MovementType.DEPOSIT,
+                    amount=Decimal("2"),
+                    observation="Gerencia",
+                    idempotency_key="second-movement",
+                    origin="test",
+                    actor=actor,
+                )
+                log = (
+                    await session.execute(
+                        select(DeliveryOutbox).where(
+                            DeliveryOutbox.renderer_key == "chest.log",
+                            DeliveryOutbox.resource_id == movement.id,
+                        )
+                    )
+                ).scalar_one()
+                assert log.destination_id == "21"
         finally:
             await engine.dispose()
 

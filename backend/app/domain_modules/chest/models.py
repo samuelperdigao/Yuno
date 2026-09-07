@@ -89,6 +89,30 @@ class ChestDraftChest(Base):
     chest_id: Mapped[str] = mapped_column(String(36), nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     name_normalized: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str] = mapped_column(String(300), default="", server_default="")
+    panel_channel_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    log_channel_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    show_balances_to_members: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true")
+    )
+    allow_personal_history: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true")
+    )
+    withdrawal_reason_required: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true")
+    )
+    view_role_ids: Mapped[list[str]] = mapped_column(
+        JsonType, default=list, server_default=text("'[]'")
+    )
+    deposit_role_ids: Mapped[list[str]] = mapped_column(
+        JsonType, default=list, server_default=text("'[]'")
+    )
+    withdraw_role_ids: Mapped[list[str]] = mapped_column(
+        JsonType, default=list, server_default=text("'[]'")
+    )
+    admin_role_ids: Mapped[list[str]] = mapped_column(
+        JsonType, default=list, server_default=text("'[]'")
+    )
     active: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default=text("true")
     )
@@ -201,6 +225,30 @@ class ChestVersionChest(Base):
     chest_id: Mapped[str] = mapped_column(String(36), nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     name_normalized: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str] = mapped_column(String(300), default="", server_default="")
+    panel_channel_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    log_channel_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    show_balances_to_members: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true")
+    )
+    allow_personal_history: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true")
+    )
+    withdrawal_reason_required: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true")
+    )
+    view_role_ids: Mapped[list[str]] = mapped_column(
+        JsonType, default=list, server_default=text("'[]'")
+    )
+    deposit_role_ids: Mapped[list[str]] = mapped_column(
+        JsonType, default=list, server_default=text("'[]'")
+    )
+    withdraw_role_ids: Mapped[list[str]] = mapped_column(
+        JsonType, default=list, server_default=text("'[]'")
+    )
+    admin_role_ids: Mapped[list[str]] = mapped_column(
+        JsonType, default=list, server_default=text("'[]'")
+    )
     active: Mapped[bool] = mapped_column(Boolean, nullable=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
 

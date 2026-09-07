@@ -25,12 +25,20 @@ from yuno_bot.platform.router import RoutedModal, module_custom_id
 MODULE_KEY = "chest"
 CONTRACT_VERSION = 1
 PAGE_SIZE = 23
-_sessions: dict[tuple[int, int], dict[str, Any]] = {}
-_pending: dict[tuple[int, int, str], dict[str, Any]] = {}
+_sessions: dict[tuple[int, int, str], dict[str, Any]] = {}
+_pending: dict[tuple[int, int, str, str], dict[str, Any]] = {}
 
 
-def _key(context: RoutedContext) -> tuple[int, int]:
-    return (context.interaction.guild.id, context.actor.user_id or 0)
+def _panel_chest_id(context: RoutedContext) -> str:
+    return str(context.panel.get("resource_id") or "")
+
+
+def _key(context: RoutedContext) -> tuple[int, int, str]:
+    return (
+        context.interaction.guild.id,
+        context.actor.user_id or 0,
+        _panel_chest_id(context),
+    )
 
 
 def _selected(interaction: discord.Interaction) -> str | None:
@@ -89,25 +97,29 @@ def _v2(title: str, body: str, *actions: dict[str, Any]) -> ComponentsV2Payload:
     )
 
 
-async def render_global(context: dict[str, Any]) -> ComponentsV2Payload:
+async def render_chest(context: dict[str, Any]) -> ComponentsV2Payload:
     config = context.get("config") or {}
+    chest = context.get("chest") or {}
+    chest_name = chest.get("name") or "BAU"
+    description = chest.get("description") or "Gerencie as entradas e retiradas deste estoque."
+    item_count = chest.get("item_count")
+    item_summary = f"{item_count} itens cadastrados" if item_count is not None else "Estoque operacional"
     return ComponentsV2Payload(
         payload(
             uk.panel(
                 header=[
                     uk.nexus_title(
-                        config.get("panel_title") or "SISTEMA DE BAU",
-                        path="RUNTIME / CHEST",
-                        subtitle=config.get("panel_description")
-                        or "Estoque operacional da organizacao.",
+                        chest_name.upper(),
+                        path="BAU / OPERACIONAL",
+                        subtitle=description,
                     )
                 ],
                 blocks=[
                     text_display(
                         uk.nexus_notice(
                             "OPERACAO",
-                            "Acesso pessoal",
-                            "Selecione um bau para consultar ou registrar uma movimentacao. O painel publico permanece estavel.",
+                            item_summary,
+                            "Use as acoes abaixo para consultar ou registrar uma movimentacao.",
                         )
                     )
                 ],
@@ -116,17 +128,39 @@ async def render_global(context: dict[str, Any]) -> ComponentsV2Payload:
                         button(
                             custom_id=module_custom_id(
                                 MODULE_KEY,
-                                "global",
-                                "select_chest",
+                                "chest",
+                                "view_stock",
                                 version=CONTRACT_VERSION,
                             ),
-                            label="SELECIONAR BAU",
+                            label="CONSULTAR ESTOQUE",
                             style=1,
                         ),
                         button(
                             custom_id=module_custom_id(
                                 MODULE_KEY,
-                                "global",
+                                "chest",
+                                "deposit",
+                                version=CONTRACT_VERSION,
+                            ),
+                            label="DEPOSITAR",
+                            style=3,
+                        ),
+                        button(
+                            custom_id=module_custom_id(
+                                MODULE_KEY,
+                                "chest",
+                                "withdraw",
+                                version=CONTRACT_VERSION,
+                            ),
+                            label="RETIRAR",
+                            style=1,
+                        ),
+                    ),
+                    action_row(
+                        button(
+                            custom_id=module_custom_id(
+                                MODULE_KEY,
+                                "chest",
                                 "history_own",
                                 version=CONTRACT_VERSION,
                             ),
@@ -140,6 +174,11 @@ async def render_global(context: dict[str, Any]) -> ComponentsV2Payload:
             )
         )
     )
+
+
+# Compatibilidade de importacao para testes e registros antigos; novos paineis
+# usam a identidade por bau acima.
+render_global = render_chest
 
 
 async def _chest_page(context: RoutedContext, page_index: int) -> InteractionResult:
@@ -160,7 +199,7 @@ async def _chest_page(context: RoutedContext, page_index: int) -> InteractionRes
     chunk = chests[page_index * PAGE_SIZE : (page_index + 1) * PAGE_SIZE]
     select = action_row(
         string_select(
-            custom_id=module_custom_id(MODULE_KEY, "global", "choose_chest"),
+        custom_id=module_custom_id(MODULE_KEY, "chest", "choose_chest"),
             options=[
                 {"label": item["name"][:100], "value": item["id"]} for item in chunk
             ],
@@ -169,13 +208,13 @@ async def _chest_page(context: RoutedContext, page_index: int) -> InteractionRes
     )
     navigation = action_row(
         button(
-            custom_id=module_custom_id(MODULE_KEY, "global", "chests_prev"),
+        custom_id=module_custom_id(MODULE_KEY, "chest", "chests_prev"),
             label="VOLTAR",
             style=2,
             disabled=page_index == 0,
         ),
         button(
-            custom_id=module_custom_id(MODULE_KEY, "global", "chests_next"),
+        custom_id=module_custom_id(MODULE_KEY, "chest", "chests_next"),
             label="AVANCAR",
             style=2,
             disabled=page_index + 1 >= pages,
@@ -231,24 +270,24 @@ async def choose_chest(context: RoutedContext) -> InteractionResult:
             ),
             action_row(
                 button(
-                    custom_id=module_custom_id(MODULE_KEY, "global", "view_stock"),
+                    custom_id=module_custom_id(MODULE_KEY, "chest", "view_stock"),
                     label="VER ESTOQUE",
                     style=2,
                 ),
                 button(
-                    custom_id=module_custom_id(MODULE_KEY, "global", "deposit"),
+                    custom_id=module_custom_id(MODULE_KEY, "chest", "deposit"),
                     label="DEPOSITAR",
                     style=3,
                 ),
                 button(
-                    custom_id=module_custom_id(MODULE_KEY, "global", "withdraw"),
+                    custom_id=module_custom_id(MODULE_KEY, "chest", "withdraw"),
                     label="RETIRAR",
                     style=1,
                 ),
             ),
             action_row(
                 button(
-                    custom_id=module_custom_id(MODULE_KEY, "global", "select_chest"),
+                    custom_id=module_custom_id(MODULE_KEY, "chest", "select_chest"),
                     label="TROCAR BAU",
                     style=2,
                 )
@@ -258,9 +297,9 @@ async def choose_chest(context: RoutedContext) -> InteractionResult:
 
 
 async def view_stock(context: RoutedContext) -> InteractionResult:
-    chest_id = str(_sessions.get(_key(context), {}).get("chest_id") or "")
+    chest_id = _panel_chest_id(context)
     if not chest_id:
-        return await select_chest(context)
+        return InteractionResult(content="Este painel nao esta vinculado a um bau.")
     try:
         data = await context.api.chest_stock(
             context.interaction.guild.id, chest_id, actor=context.actor
@@ -281,17 +320,17 @@ async def view_stock(context: RoutedContext) -> InteractionResult:
             "\n".join(lines) or "Nenhum item publicado neste bau.",
             action_row(
                 button(
-                    custom_id=module_custom_id(MODULE_KEY, "global", "select_chest"),
+                    custom_id=module_custom_id(MODULE_KEY, "chest", "view_stock"),
                     label="VOLTAR",
                     style=2,
                 ),
                 button(
-                    custom_id=module_custom_id(MODULE_KEY, "global", "deposit"),
+                    custom_id=module_custom_id(MODULE_KEY, "chest", "deposit"),
                     label="DEPOSITAR",
                     style=3,
                 ),
                 button(
-                    custom_id=module_custom_id(MODULE_KEY, "global", "withdraw"),
+                    custom_id=module_custom_id(MODULE_KEY, "chest", "withdraw"),
                     label="RETIRAR",
                     style=1,
                 ),
@@ -303,10 +342,10 @@ async def view_stock(context: RoutedContext) -> InteractionResult:
 async def _item_page(
     context: RoutedContext, mode: str, page_index: int
 ) -> InteractionResult:
-    session = _sessions.get(_key(context), {})
-    chest_id = str(session.get("chest_id") or "")
+    session = _sessions.setdefault(_key(context), {})
+    chest_id = _panel_chest_id(context)
     if not chest_id:
-        return await select_chest(context)
+        return InteractionResult(content="Este painel nao esta vinculado a um bau.")
     try:
         data = await context.api.chest_stock(
             context.interaction.guild.id, chest_id, actor=context.actor
@@ -339,20 +378,20 @@ async def _item_page(
             f"Bau: **{data['chest']['name']}**\nSelecione o item. Pagina {page_index + 1}/{pages}.",
             action_row(
                 string_select(
-                    custom_id=module_custom_id(MODULE_KEY, "global", f"{mode}_item"),
+                    custom_id=module_custom_id(MODULE_KEY, "chest", f"{mode}_item"),
                     options=options,
                     placeholder="Selecionar item",
                 )
             ),
             action_row(
                 button(
-                    custom_id=module_custom_id(MODULE_KEY, "global", f"{mode}_prev"),
+                    custom_id=module_custom_id(MODULE_KEY, "chest", f"{mode}_prev"),
                     label="VOLTAR",
                     style=2,
                     disabled=page_index == 0,
                 ),
                 button(
-                    custom_id=module_custom_id(MODULE_KEY, "global", f"{mode}_next"),
+                    custom_id=module_custom_id(MODULE_KEY, "chest", f"{mode}_next"),
                     label="AVANCAR",
                     style=2,
                     disabled=page_index + 1 >= pages,
@@ -407,11 +446,12 @@ class MovementModal(RoutedModal):
         super().__init__(
             title="Depositar item" if mode == "deposit" else "Retirar item",
             module_key=MODULE_KEY,
-            surface="global",
+            surface="chest",
             action_key=f"{mode}_submit",
             panel={
                 **context.panel,
-                "chest_id": _sessions[_key(context)]["chest_id"],
+                "resource_id": _panel_chest_id(context),
+                "chest_id": _panel_chest_id(context),
                 "item_id": item_id,
             },
             timeout=600,
@@ -427,7 +467,7 @@ class MovementModal(RoutedModal):
             label="Observacao" if mode == "deposit" else "Motivo",
             custom_id="observation",
             required=mode == "withdraw"
-            and bool(_sessions[_key(context)].get("withdrawal_reason_required", True)),
+            and bool(_sessions.setdefault(_key(context), {}).get("withdrawal_reason_required", True)),
             max_length=500,
             style=discord.TextStyle.paragraph,
         )
@@ -465,9 +505,12 @@ async def _submit(context: RoutedContext, mode: str) -> InteractionResult:
             raise ValueError
     except Exception:
         return InteractionResult(content="Informe uma quantidade positiva valida.")
-    key = (context.interaction.guild.id, context.actor.user_id or 0, mode)
+    chest_id = _panel_chest_id(context)
+    if not chest_id:
+        return InteractionResult(content="Este painel nao esta vinculado a um bau.")
+    key = (context.interaction.guild.id, context.actor.user_id or 0, chest_id, mode)
     _pending[key] = {
-        "chest_id": str(context.panel.get("chest_id") or ""),
+        "chest_id": chest_id,
         "item_id": str(context.panel.get("item_id") or ""),
         "quantity": str(amount),
         "observation": values.get("observation") or None,
@@ -480,12 +523,12 @@ async def _submit(context: RoutedContext, mode: str) -> InteractionResult:
             f"Confirme o {label} de **{amount}**. O ledger sera permanente.",
             action_row(
                 button(
-                    custom_id=module_custom_id(MODULE_KEY, "global", f"{mode}_confirm"),
+                    custom_id=module_custom_id(MODULE_KEY, "chest", f"{mode}_confirm"),
                     label="CONFIRMAR",
                     style=3 if mode == "deposit" else 1,
                 ),
                 button(
-                    custom_id=module_custom_id(MODULE_KEY, "global", f"{mode}_cancel"),
+                    custom_id=module_custom_id(MODULE_KEY, "chest", f"{mode}_cancel"),
                     label="CANCELAR",
                     style=2,
                 ),
@@ -503,8 +546,9 @@ async def withdraw_submit(context: RoutedContext) -> InteractionResult:
 
 
 async def _confirm(context: RoutedContext, mode: str) -> InteractionResult:
+    chest_id = _panel_chest_id(context)
     pending = _pending.pop(
-        (context.interaction.guild.id, context.actor.user_id or 0, mode), None
+        (context.interaction.guild.id, context.actor.user_id or 0, chest_id, mode), None
     )
     if pending is None:
         return InteractionResult(
@@ -537,14 +581,14 @@ async def withdraw_confirm(context: RoutedContext) -> InteractionResult:
 
 async def deposit_cancel(context: RoutedContext) -> InteractionResult:
     _pending.pop(
-        (context.interaction.guild.id, context.actor.user_id or 0, "deposit"), None
+        (context.interaction.guild.id, context.actor.user_id or 0, _panel_chest_id(context), "deposit"), None
     )
     return InteractionResult(content="Deposito cancelado.")
 
 
 async def withdraw_cancel(context: RoutedContext) -> InteractionResult:
     _pending.pop(
-        (context.interaction.guild.id, context.actor.user_id or 0, "withdraw"), None
+        (context.interaction.guild.id, context.actor.user_id or 0, _panel_chest_id(context), "withdraw"), None
     )
     return InteractionResult(content="Retirada cancelada.")
 
@@ -553,7 +597,11 @@ async def history_own(context: RoutedContext) -> InteractionResult:
     try:
         rows = await context.api.chest_history(
             context.interaction.guild.id,
-            {"actor_id": str(context.actor.user_id), "limit": 20},
+            {
+                "chest_id": _panel_chest_id(context),
+                "actor_id": str(context.actor.user_id),
+                "limit": 20,
+            },
             actor=context.actor,
         )
     except Exception as exc:

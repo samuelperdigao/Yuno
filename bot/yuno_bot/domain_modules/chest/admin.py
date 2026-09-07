@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from math import ceil
 from typing import Any
 
@@ -13,6 +14,7 @@ from yuno_bot.platform.components_v2 import (
     channel_select,
     payload,
     role_select,
+    string_select,
     text_display,
 )
 from yuno_bot.platform.contracts import ActorContext
@@ -65,13 +67,13 @@ def _shell(
                 header=[
                     uk.nexus_title(
                         title,
-                        path=f"MODULES / CHEST / {route.upper()}",
+                        path=f"YUNO NEXUS / SISTEMA DE BAU / {route.upper()}",
                         subtitle=subtitle,
                     )
                 ],
                 blocks=blocks,
                 actions=[*actions, dashboard.route_navigation(MODULE_KEY, route)],
-                footer="NEXUS CORE // CHEST ADMIN",
+                footer="YUNO NEXUS // ADMINISTRACAO DE BAUS",
                 accent_color=uk.NEXUS_VIOLET,
             )
         )
@@ -973,3 +975,431 @@ async def recover(interaction: discord.Interaction, api: Any) -> None:
         await interaction.followup.send(
             "Recuperacao incompleta. Consulte o diagnostico.", ephemeral=True
         )
+
+
+# ---------------------------------------------------------------------------
+# Central administrativa por bau
+# ---------------------------------------------------------------------------
+
+_admin_sessions: dict[tuple[int, int, int, int], str] = {}
+
+
+def _admin_key(interaction: discord.Interaction) -> tuple[int, int, int, int]:
+    return (
+        int(interaction.guild_id or 0),
+        int(getattr(interaction.user, "id", 0) or 0),
+        int(interaction.channel_id or 0),
+        int(getattr(interaction.message, "id", 0) or 0),
+    )
+
+
+def _mention_roles(values: list[str] | None) -> str:
+    roles = list(values or [])
+    if not roles:
+        return "Ninguem definido"
+    return ", ".join("@Membros" if role == "everyone" else f"<@&{role}>" for role in roles)
+
+
+def _chest(draft: dict[str, Any], chest_id: str | None) -> dict[str, Any] | None:
+    if not chest_id:
+        return None
+    return next((row for row in draft.get("chests") or [] if row["id"] == chest_id), None)
+
+
+def _stock_for_chest(draft: dict[str, Any], summary: dict[str, Any], chest_id: str) -> tuple[int, str]:
+    item_names = {row["id"]: row["name"] for row in draft.get("items") or []}
+    rows = [row for row in summary.get("stock") or [] if row.get("chest_id") == chest_id]
+    total = sum(Decimal(str(row.get("quantity") or 0)) for row in rows)
+    return len(rows), f"{total:f}".rstrip("0").rstrip(".") or "0"
+
+
+def _chest_detail_payload(draft: dict[str, Any], summary: dict[str, Any], chest_id: str) -> dict[str, Any]:
+    row = _chest(draft, chest_id)
+    if row is None:
+        return _shell("SEUS BAUS", "Escolha um bau para continuar.", [], [], "overview")
+    item_count, total = _stock_for_chest(draft, summary, chest_id)
+    status = "Ativo" if row.get("active") else "Inativo"
+    panel = f"<#{row['panel_channel_id']}>" if row.get("panel_channel_id") else "Nao definido"
+    logs = f"<#{row['log_channel_id']}>" if row.get("log_channel_id") else "Nao definido"
+    panel_row = next((item for item in summary.get("panels") or [] if item.get("chest_id") == chest_id), None)
+    panel_status = "Funcionando" if panel_row and panel_row.get("state") == "published" else "Painel nao encontrado"
+    return _shell(
+        row["name"].upper(),
+        row.get("description") or "Configure este bau e publique o painel operacional.",
+        [
+            text_display(uk.nexus_state("STATUS", status, state="success" if row.get("active") else "warning")),
+            text_display(uk.nexus_configuration(("PAINEL", panel), ("LOGS", logs), ("ITENS", item_count), ("ESTOQUE", f"{total} unidades"))),
+            text_display(f"Painel {panel_status}."),
+            text_display("Escolha uma area para continuar. As alteracoes ficam pendentes ate a publicacao."),
+        ],
+        [
+            action_row(
+                button(custom_id=dashboard.central_custom_id(MODULE_KEY, "chest_items"), label="ITENS", style=1),
+                button(custom_id=dashboard.central_custom_id(MODULE_KEY, "chest_stock"), label="ESTOQUE", style=2),
+                button(custom_id=dashboard.central_custom_id(MODULE_KEY, "chest_access"), label="ACESSO", style=2),
+            ),
+            action_row(
+                button(custom_id=dashboard.central_custom_id(MODULE_KEY, "chest_settings"), label="CONFIGURACOES", style=2),
+                button(custom_id=dashboard.central_custom_id(MODULE_KEY, "edit_chest"), label="EDITAR", style=2),
+                button(custom_id=dashboard.central_custom_id(MODULE_KEY, "publish_chest"), label="PUBLICAR BAU", style=3),
+            ),
+            action_row(button(custom_id=dashboard.central_custom_id(MODULE_KEY, "recover_chest"), label="ATUALIZAR PAINEL", style=2)),
+        ],
+        "chest",
+    )
+
+
+async def render_admin(interaction: discord.Interaction, api: Any) -> None:
+    draft = await api.chest_catalog_draft(interaction.guild_id, actor=actor_from(interaction))
+    rows = list(draft.get("chests") or [])
+    options = [
+        {"label": row["name"][:100], "value": row["id"], "description": "Ativo" if row.get("active") else "Inativo"}
+        for row in rows[:PAGE_SIZE]
+    ]
+    controls = []
+    if options:
+        controls.append(action_row(string_select(
+            custom_id=dashboard.central_custom_id(MODULE_KEY, "select_chest"),
+            options=options,
+            placeholder="Selecionar bau",
+        )))
+    controls.append(action_row(button(custom_id=dashboard.central_custom_id(MODULE_KEY, "add_chest"), label="+ CRIAR BAU", style=1)))
+    await _replace(
+        interaction,
+        _shell(
+            "SEUS BAUS",
+            "Gerencie os estoques da organizacao.",
+            [text_display("Escolha um bau para configurar painel, logs, acesso, itens e publicacao."), text_display(f"{len(rows)} bau(s) cadastrado(s)." if rows else "Nenhum bau cadastrado ainda.")],
+            controls,
+            "overview",
+        ),
+    )
+
+
+inventory = render_admin
+
+
+async def select_chest(interaction: discord.Interaction, api: Any) -> None:
+    values = _selected(interaction)
+    if not values:
+        await _replace(interaction, _shell("SEUS BAUS", "Selecao invalida.", [], [], "overview"))
+        return
+    _admin_sessions[_admin_key(interaction)] = values[0]
+    draft = await api.chest_catalog_draft(interaction.guild_id, actor=actor_from(interaction))
+    summary = await api.chest_admin_summary(interaction.guild_id, actor=actor_from(interaction))
+    await _replace(interaction, _chest_detail_payload(draft, summary, values[0]))
+
+
+async def chest_detail(interaction: discord.Interaction, api: Any) -> None:
+    chest_id = _admin_sessions.get(_admin_key(interaction))
+    if not chest_id:
+        return await render_admin(interaction, api)
+    draft = await api.chest_catalog_draft(interaction.guild_id, actor=actor_from(interaction))
+    summary = await api.chest_admin_summary(interaction.guild_id, actor=actor_from(interaction))
+    await _replace(interaction, _chest_detail_payload(draft, summary, chest_id))
+
+
+async def _selected_chest_data(interaction: discord.Interaction, api: Any) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]] | None:
+    chest_id = _admin_sessions.get(_admin_key(interaction))
+    if not chest_id:
+        return None
+    draft = await api.chest_catalog_draft(interaction.guild_id, actor=actor_from(interaction))
+    row = _chest(draft, chest_id)
+    if row is None:
+        return None
+    summary = await api.chest_admin_summary(interaction.guild_id, actor=actor_from(interaction))
+    return draft, summary, row
+
+
+async def chest_stock(interaction: discord.Interaction, api: Any) -> None:
+    selected = await _selected_chest_data(interaction, api)
+    if selected is None:
+        return await render_admin(interaction, api)
+    draft, summary, row = selected
+    item_names = {item["id"]: item["name"] for item in draft.get("items") or []}
+    units = {item["id"]: item.get("unit", "unidade") for item in draft.get("items") or []}
+    lines = [
+        f"**{item_names.get(stock['item_id'], 'Item')}** — {stock['quantity']} {units.get(stock['item_id'], 'unidade')}"
+        for stock in summary.get("stock") or []
+        if stock.get("chest_id") == row["id"]
+    ]
+    await _replace(interaction, _shell(f"ESTOQUE · {row['name']}", "Saldo atual deste bau.", [text_display("\n".join(lines) or "Nenhum item com saldo materializado.")], [action_row(button(custom_id=dashboard.central_custom_id(MODULE_KEY, "chest_detail"), label="VOLTAR", style=2))], "overview"))
+
+
+async def chest_items(interaction: discord.Interaction, api: Any) -> None:
+    selected = await _selected_chest_data(interaction, api)
+    if selected is None:
+        return await render_admin(interaction, api)
+    draft, _, row = selected
+    active_links = {link["item_id"] for link in draft.get("links") or [] if link["chest_id"] == row["id"] and link.get("active")}
+    options = [
+        {"label": item["name"][:100], "value": item["id"], "description": "Adicionado" if item["id"] in active_links else "Disponivel"}
+        for item in draft.get("items") or []
+        if item.get("active")
+    ][:PAGE_SIZE]
+    actions = [action_row(button(custom_id=dashboard.central_custom_id(MODULE_KEY, "add_item"), label="ADICIONAR ITEM", style=1))]
+    if options:
+        actions.insert(0, action_row(string_select(custom_id=dashboard.central_custom_id(MODULE_KEY, "toggle_chest_item"), options=options, placeholder="Adicionar ou remover item")))
+    actions.append(action_row(button(custom_id=dashboard.central_custom_id(MODULE_KEY, "chest_detail"), label="VOLTAR", style=2)))
+    await _replace(interaction, _shell(f"ITENS · {row['name']}", "Escolha quais itens pertencem a este bau.", [text_display("\n".join(f"**{item['name']}** — {'Adicionado' if item['id'] in active_links else 'Disponivel'}" for item in draft.get("items") or [] if item.get("active")) or "Cadastre um item para continuar.")], actions, "overview"))
+
+
+async def toggle_chest_item(interaction: discord.Interaction, api: Any) -> None:
+    selected = await _selected_chest_data(interaction, api)
+    item_values = _selected(interaction)
+    if selected is None or not item_values:
+        return await chest_items(interaction, api)
+    draft, _, row = selected
+    item_id = item_values[0]
+    current = next((link for link in draft.get("links") or [] if link["chest_id"] == row["id"] and link["item_id"] == item_id), None)
+    await api.chest_link_upsert(interaction.guild_id, {"chest_id": row["id"], "item_id": item_id, "active": not bool(current and current.get("active")), "expected_revision": draft["revision"], "idempotency_key": f"chest:link:{interaction.id}"}, actor=actor_from(interaction))
+    await chest_items(interaction, api)
+
+
+async def _update_chest(interaction: discord.Interaction, api: Any, changes: dict[str, Any]) -> dict[str, Any]:
+    draft = await api.chest_catalog_draft(interaction.guild_id, actor=actor_from(interaction))
+    chest_id = _admin_sessions.get(_admin_key(interaction))
+    row = _chest(draft, chest_id)
+    if row is None:
+        raise ValueError("Bau nao selecionado.")
+    payload_data = {
+        key: row.get(key)
+        for key in ("description", "panel_channel_id", "log_channel_id", "show_balances_to_members", "allow_personal_history", "withdrawal_reason_required", "view_role_ids", "deposit_role_ids", "withdraw_role_ids", "admin_role_ids")
+    }
+    payload_data.update(changes)
+    return await api.chest_upsert(interaction.guild_id, {"chest_id": row["id"], "name": row["name"], "active": row.get("active", True), "position": row.get("position", 0), **payload_data, "expected_revision": draft["revision"], "idempotency_key": f"chest:update:{interaction.id}"}, actor=actor_from(interaction))
+
+
+async def chest_settings(interaction: discord.Interaction, api: Any) -> None:
+    selected = await _selected_chest_data(interaction, api)
+    if selected is None:
+        return await render_admin(interaction, api)
+    _, _, row = selected
+    ref = lambda value: f"<#{value}>" if value else "Nao definido"
+    await _replace(interaction, _shell(f"CONFIGURACOES · {row['name']}", "Escolha onde este bau funciona e como ele se comporta.", [text_display(uk.nexus_configuration(("PAINEL", ref(row.get("panel_channel_id"))), ("LOGS", ref(row.get("log_channel_id"))), ("SALDOS", "Visiveis" if row.get("show_balances_to_members", True) else "Restritos"), ("HISTORICO", "Ativo" if row.get("allow_personal_history", True) else "Inativo"), ("MOTIVO NA RETIRADA", "Obrigatorio" if row.get("withdrawal_reason_required", True) else "Opcional")))], [action_row(channel_select(custom_id=dashboard.central_custom_id(MODULE_KEY, "set_chest_panel_channel"), placeholder="Selecionar canal do painel", channel_types=[0])), action_row(channel_select(custom_id=dashboard.central_custom_id(MODULE_KEY, "set_chest_log_channel"), placeholder="Selecionar canal de logs", channel_types=[0])), action_row(button(custom_id=dashboard.central_custom_id(MODULE_KEY, "toggle_chest_balances"), label="ALTERNAR SALDOS", style=2), button(custom_id=dashboard.central_custom_id(MODULE_KEY, "toggle_chest_history"), label="ALTERNAR HISTORICO", style=2), button(custom_id=dashboard.central_custom_id(MODULE_KEY, "toggle_chest_reason"), label="ALTERNAR MOTIVO", style=2)), action_row(button(custom_id=dashboard.central_custom_id(MODULE_KEY, "chest_detail"), label="VOLTAR", style=2))], "overview"))
+
+
+async def set_chest_panel_channel(interaction: discord.Interaction, api: Any) -> None:
+    values = _selected(interaction)
+    await _update_chest(interaction, api, {"panel_channel_id": values[0] if values else None})
+    await chest_settings(interaction, api)
+
+
+async def set_chest_log_channel(interaction: discord.Interaction, api: Any) -> None:
+    values = _selected(interaction)
+    await _update_chest(interaction, api, {"log_channel_id": values[0] if values else None})
+    await chest_settings(interaction, api)
+
+
+async def _toggle_chest_setting(interaction: discord.Interaction, api: Any, key: str) -> None:
+    selected = await _selected_chest_data(interaction, api)
+    if selected is None:
+        return await render_admin(interaction, api)
+    await _update_chest(interaction, api, {key: not bool(selected[2].get(key, True))})
+    await chest_settings(interaction, api)
+
+
+async def toggle_chest_balances(interaction: discord.Interaction, api: Any) -> None:
+    await _toggle_chest_setting(interaction, api, "show_balances_to_members")
+
+
+async def toggle_chest_history(interaction: discord.Interaction, api: Any) -> None:
+    await _toggle_chest_setting(interaction, api, "allow_personal_history")
+
+
+async def toggle_chest_reason(interaction: discord.Interaction, api: Any) -> None:
+    await _toggle_chest_setting(interaction, api, "withdrawal_reason_required")
+
+
+async def chest_access(interaction: discord.Interaction, api: Any) -> None:
+    selected = await _selected_chest_data(interaction, api)
+    if selected is None:
+        return await render_admin(interaction, api)
+    _, _, row = selected
+    blocks = [text_display(uk.nexus_configuration(("PODE VISUALIZAR", _mention_roles(row.get("view_role_ids"))), ("PODE DEPOSITAR", _mention_roles(row.get("deposit_role_ids"))), ("PODE RETIRAR", _mention_roles(row.get("withdraw_role_ids"))), ("PODE ADMINISTRAR", _mention_roles(row.get("admin_role_ids"))))) ]
+    actions = [
+        action_row(role_select(custom_id=dashboard.central_custom_id(MODULE_KEY, "set_chest_view_roles"), placeholder="Quem pode visualizar?", min_values=0, max_values=25)),
+        action_row(role_select(custom_id=dashboard.central_custom_id(MODULE_KEY, "set_chest_deposit_roles"), placeholder="Quem pode depositar?", min_values=0, max_values=25)),
+        action_row(role_select(custom_id=dashboard.central_custom_id(MODULE_KEY, "set_chest_withdraw_roles"), placeholder="Quem pode retirar?", min_values=0, max_values=25)),
+        action_row(role_select(custom_id=dashboard.central_custom_id(MODULE_KEY, "set_chest_admin_roles"), placeholder="Quem pode administrar?", min_values=0, max_values=25)),
+        action_row(button(custom_id=dashboard.central_custom_id(MODULE_KEY, "chest_detail"), label="VOLTAR", style=2)),
+    ]
+    await _replace(interaction, _shell(f"ACESSO · {row['name']}", "Defina quem pode usar este bau.", blocks, actions, "overview"))
+
+
+async def _set_chest_roles(interaction: discord.Interaction, api: Any, key: str) -> None:
+    await _update_chest(interaction, api, {key: _selected(interaction)})
+    await chest_access(interaction, api)
+
+
+async def set_chest_view_roles(interaction: discord.Interaction, api: Any) -> None:
+    await _set_chest_roles(interaction, api, "view_role_ids")
+
+
+async def set_chest_deposit_roles(interaction: discord.Interaction, api: Any) -> None:
+    await _set_chest_roles(interaction, api, "deposit_role_ids")
+
+
+async def set_chest_withdraw_roles(interaction: discord.Interaction, api: Any) -> None:
+    await _set_chest_roles(interaction, api, "withdraw_role_ids")
+
+
+async def set_chest_admin_roles(interaction: discord.Interaction, api: Any) -> None:
+    await _set_chest_roles(interaction, api, "admin_role_ids")
+
+
+class _ChestIdentityModal(discord.ui.Modal):
+    def __init__(self, api: Any, interaction: discord.Interaction, current: dict[str, Any] | None = None) -> None:
+        current = current or {}
+        super().__init__(title="Editar bau" if current else "Criar bau", timeout=600)
+        self.api = api
+        self.current = current
+        self.origin_channel_id = interaction.channel_id
+        self.origin_message_id = getattr(interaction.message, "id", None)
+        self.name = discord.ui.TextInput(label="Nome do bau", default=current.get("name"), min_length=1, max_length=100)
+        self.description = discord.ui.TextInput(label="Descricao opcional", default=current.get("description") or "", required=False, max_length=300, style=discord.TextStyle.paragraph)
+        self.add_item(self.name)
+        self.add_item(self.description)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        draft = await self.api.chest_catalog_draft(interaction.guild_id, actor=actor_from(interaction))
+        payload_data = {
+            "name": str(self.name.value),
+            "description": str(self.description.value or ""),
+            "active": self.current.get("active", True),
+            "position": self.current.get("position", 0),
+            "expected_revision": draft["revision"],
+            "idempotency_key": f"chest:identity:{interaction.id}",
+        }
+        for key in ("chest_id", "panel_channel_id", "log_channel_id", "show_balances_to_members", "allow_personal_history", "withdrawal_reason_required", "view_role_ids", "deposit_role_ids", "withdraw_role_ids", "admin_role_ids"):
+            if key in self.current:
+                payload_data[key] = self.current[key]
+        result = await self.api.chest_upsert(interaction.guild_id, payload_data, actor=actor_from(interaction))
+        if self.origin_message_id:
+            key = (int(interaction.guild_id or 0), int(interaction.user.id), int(self.origin_channel_id or 0), int(self.origin_message_id))
+            _admin_sessions[key] = result["id"]
+            latest = await self.api.chest_catalog_draft(interaction.guild_id, actor=actor_from(interaction))
+            summary = await self.api.chest_admin_summary(interaction.guild_id, actor=actor_from(interaction))
+            await dashboard.edit_central_message(interaction.client, self.origin_channel_id, self.origin_message_id, _chest_detail_payload(latest, summary, result["id"]))
+        await interaction.followup.send("Bau salvo. Agora configure canais, acesso e itens antes de publicar.", ephemeral=True)
+
+
+async def add_chest(interaction: discord.Interaction, api: Any) -> None:
+    await interaction.response.send_modal(_ChestIdentityModal(api, interaction))
+
+
+async def edit_chest(interaction: discord.Interaction, api: Any) -> None:
+    selected = await _selected_chest_data(interaction, api)
+    if selected is None:
+        return await render_admin(interaction, api)
+    await interaction.response.send_modal(_ChestIdentityModal(api, interaction, selected[2]))
+
+
+def _grants_for_draft(draft: dict[str, Any]) -> list[dict[str, Any]]:
+    grants: list[dict[str, Any]] = []
+    mapping = {
+        "view_role_ids": ("chest.view",),
+        "deposit_role_ids": ("chest.deposit",),
+        "withdraw_role_ids": ("chest.withdraw",),
+        "admin_role_ids": ("chest.view", "chest.deposit", "chest.withdraw", "chest.history"),
+    }
+    for row in draft.get("chests") or []:
+        if not row.get("active"):
+            continue
+        for field, capabilities in mapping.items():
+            for role in row.get(field) or []:
+                subject_type = "everyone" if role == "everyone" else "role"
+                subject_id = "" if role == "everyone" else str(role)
+                for capability in capabilities:
+                    grants.append({"capability": capability, "subject_type": subject_type, "subject_id": subject_id, "scope_type": "resource", "scope_id": row["id"], "constraints": {}})
+    return grants
+
+
+async def publish_chest(interaction: discord.Interaction, api: Any) -> None:
+    await interaction.response.defer(ephemeral=True)
+    try:
+        draft = await api.chest_catalog_draft(interaction.guild_id, actor=actor_from(interaction))
+        await api.chest_publish(interaction.guild_id, {"expected_revision": draft["revision"], "expected_published_version": draft["base_published_version"], "grants": _grants_for_draft(draft), "idempotency_key": f"chest:publish:{interaction.id}"}, actor=actor_from(interaction))
+        await interaction.followup.send("Bau publicado. O painel fixo sera criado ou atualizado no canal escolhido.", ephemeral=True)
+    except Exception:
+        await interaction.followup.send("Nao foi possivel publicar. Revise painel, logs, acesso e itens deste bau.", ephemeral=True)
+
+
+async def recover_chest(interaction: discord.Interaction, api: Any) -> None:
+    chest_id = _admin_sessions.get(_admin_key(interaction))
+    if not chest_id:
+        return await render_admin(interaction, api)
+    await interaction.response.defer(ephemeral=True)
+    try:
+        actor = actor_from(interaction)
+        await api.chest_recover(interaction.guild_id, {"action": "create_missing_balances", "chest_id": chest_id, "idempotency_key": f"chest:recover:{interaction.id}:balances"}, actor=actor)
+        await api.chest_recover(interaction.guild_id, {"action": "reconcile_panel", "chest_id": chest_id, "idempotency_key": f"chest:recover:{interaction.id}:panel"}, actor=actor)
+        await interaction.followup.send("Painel deste bau enviado para recuperacao.", ephemeral=True)
+    except Exception:
+        await interaction.followup.send("Nao foi possivel recuperar este bau. Revise a configuracao publicada.", ephemeral=True)
+
+
+class _ChestItemModal(discord.ui.Modal):
+    def __init__(self, api: Any, interaction: discord.Interaction) -> None:
+        super().__init__(title="Adicionar item ao bau", timeout=600)
+        self.api = api
+        self.origin_channel_id = interaction.channel_id
+        self.origin_message_id = getattr(interaction.message, "id", None)
+        self.name = discord.ui.TextInput(label="Nome do item", min_length=1, max_length=100)
+        self.unit = discord.ui.TextInput(label="Unidade", default="unidade", min_length=1, max_length=40)
+        self.add_item(self.name)
+        self.add_item(self.unit)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        origin_key = (
+            int(interaction.guild_id or 0),
+            int(interaction.user.id),
+            int(self.origin_channel_id or 0),
+            int(self.origin_message_id or 0),
+        )
+        chest_id = _admin_sessions.get(origin_key)
+        if not chest_id:
+            await interaction.followup.send("Selecione um bau antes de adicionar itens.", ephemeral=True)
+            return
+        actor = actor_from(interaction)
+        draft = await self.api.chest_catalog_draft(interaction.guild_id, actor=actor)
+        item = await self.api.chest_item_upsert(
+            interaction.guild_id,
+            {
+                "name": str(self.name.value),
+                "unit": str(self.unit.value),
+                "active": True,
+                "position": len(draft.get("items") or []),
+                "expected_revision": draft["revision"],
+                "idempotency_key": f"chest:item:{interaction.id}",
+            },
+            actor=actor,
+        )
+        latest = await self.api.chest_catalog_draft(interaction.guild_id, actor=actor)
+        await self.api.chest_link_upsert(
+            interaction.guild_id,
+            {
+                "chest_id": chest_id,
+                "item_id": item["id"],
+                "active": True,
+                "expected_revision": latest["revision"],
+                "idempotency_key": f"chest:item-link:{interaction.id}",
+            },
+            actor=actor,
+        )
+        summary = await self.api.chest_admin_summary(interaction.guild_id, actor=actor)
+        if self.origin_message_id:
+            final_draft = await self.api.chest_catalog_draft(interaction.guild_id, actor=actor)
+            await dashboard.edit_central_message(
+                interaction.client,
+                self.origin_channel_id,
+                self.origin_message_id,
+                _chest_detail_payload(final_draft, summary, chest_id),
+            )
+        await interaction.followup.send("Item adicionado a este bau. Publique quando terminar a configuracao.", ephemeral=True)
+
+
+async def add_item(interaction: discord.Interaction, api: Any) -> None:
+    await interaction.response.send_modal(_ChestItemModal(api, interaction))

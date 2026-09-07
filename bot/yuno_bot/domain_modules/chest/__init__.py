@@ -2,6 +2,25 @@ from yuno_bot.domain_modules.chest.admin import (
     add_chest,
     add_item,
     audit_log,
+    chest_access,
+    chest_detail,
+    chest_items,
+    chest_settings,
+    chest_stock,
+    edit_chest,
+    publish_chest,
+    recover_chest,
+    select_chest,
+    set_chest_admin_roles,
+    set_chest_deposit_roles,
+    set_chest_log_channel,
+    set_chest_panel_channel,
+    set_chest_view_roles,
+    set_chest_withdraw_roles,
+    toggle_chest_balances,
+    toggle_chest_history,
+    toggle_chest_reason,
+    toggle_chest_item,
     configure,
     diagnose,
     edit_texts,
@@ -30,7 +49,6 @@ from yuno_bot.domain_modules.chest.runtime import (
 from yuno_bot.domain_modules.chest.ui import (
     chests_next,
     chests_prev,
-    choose_chest,
     deposit,
     deposit_cancel,
     deposit_confirm,
@@ -40,8 +58,7 @@ from yuno_bot.domain_modules.chest.ui import (
     deposit_submit,
     history_own,
     own_history_owner,
-    render_global,
-    select_chest,
+    render_chest,
     view_stock,
     withdraw,
     withdraw_cancel,
@@ -72,130 +89,123 @@ MODULE_UI = ModuleUIAdapter(
     admin_pages=(AdminPageDefinition("overview", render_admin),),
     admin_actions=(
         AdminActionDefinition("inventory", inventory),
+        AdminActionDefinition("select_chest", select_chest),
         AdminActionDefinition("add_chest", add_chest),
         AdminActionDefinition("add_item", add_item),
-        AdminActionDefinition("audit", audit_log),
-        AdminActionDefinition("link_items", link_items),
-        AdminActionDefinition("manage_chests", manage_chests),
-        AdminActionDefinition("manage_items", manage_items),
-        AdminActionDefinition("access", open_access),
-        AdminActionDefinition("configuration", configure),
-        AdminActionDefinition("publish", publish_catalog),
+        AdminActionDefinition("chest_detail", chest_detail),
+        AdminActionDefinition("chest_items", chest_items),
+        AdminActionDefinition("toggle_chest_item", toggle_chest_item),
+        AdminActionDefinition("chest_stock", chest_stock),
+        AdminActionDefinition("chest_access", chest_access),
+        AdminActionDefinition("set_chest_view_roles", set_chest_view_roles),
+        AdminActionDefinition("set_chest_deposit_roles", set_chest_deposit_roles),
+        AdminActionDefinition("set_chest_withdraw_roles", set_chest_withdraw_roles),
+        AdminActionDefinition("set_chest_admin_roles", set_chest_admin_roles),
+        AdminActionDefinition("chest_settings", chest_settings),
+        AdminActionDefinition("set_chest_panel_channel", set_chest_panel_channel),
+        AdminActionDefinition("set_chest_log_channel", set_chest_log_channel),
+        AdminActionDefinition("toggle_chest_balances", toggle_chest_balances),
+        AdminActionDefinition("toggle_chest_history", toggle_chest_history),
+        AdminActionDefinition("toggle_chest_reason", toggle_chest_reason),
+        AdminActionDefinition("edit_chest", edit_chest),
+        AdminActionDefinition("publish_chest", publish_chest),
+        AdminActionDefinition("recover_chest", recover_chest),
         AdminActionDefinition("diagnose", diagnose),
-        AdminActionDefinition("recover", recover),
-        AdminActionDefinition("set_operator_roles", set_operator_roles),
-        AdminActionDefinition("set_panel_channel", set_panel_channel),
-        AdminActionDefinition("set_log_channel", set_log_channel),
-        AdminActionDefinition("toggle_balances", toggle_balances),
-        AdminActionDefinition("toggle_history", toggle_history),
-        AdminActionDefinition("toggle_reason", toggle_reason),
-        AdminActionDefinition("edit_texts", edit_texts),
+        AdminActionDefinition("audit", audit_log),
     ),
     panels=(
         PanelDefinition(
-            "global", render_global, version=1, recovery_policy="automatic"
+            "chest", render_chest, version=1, recovery_policy="automatic"
         ),
     ),
     actions=(
         ActionDefinition(
-            "select_chest", "global", "chest.view", select_chest, panel_key="global"
+            "view_stock", "chest", "chest.view", view_stock, panel_key="chest"
         ),
         ActionDefinition(
-            "chests_prev", "global", "chest.view", chests_prev, panel_key="global"
+            "deposit", "chest", "chest.deposit", deposit, panel_key="chest"
         ),
         ActionDefinition(
-            "chests_next", "global", "chest.view", chests_next, panel_key="global"
+            "deposit_prev", "chest", "chest.deposit", deposit_prev, panel_key="chest"
         ),
         ActionDefinition(
-            "choose_chest", "global", "chest.view", choose_chest, panel_key="global"
+            "deposit_next", "chest", "chest.deposit", deposit_next, panel_key="chest"
         ),
         ActionDefinition(
-            "view_stock", "global", "chest.view", view_stock, panel_key="global"
-        ),
-        ActionDefinition(
-            "deposit", "global", "chest.deposit", deposit, panel_key="global"
-        ),
-        ActionDefinition(
-            "deposit_prev", "global", "chest.deposit", deposit_prev, panel_key="global"
-        ),
-        ActionDefinition(
-            "deposit_next", "global", "chest.deposit", deposit_next, panel_key="global"
-        ),
-        ActionDefinition(
-            "deposit_item", "global", "chest.deposit", deposit_item, panel_key="global"
+            "deposit_item", "chest", "chest.deposit", deposit_item, panel_key="chest"
         ),
         ActionDefinition(
             "deposit_submit",
-            "global",
+            "chest",
             "chest.deposit",
             deposit_submit,
-            panel_key="global",
+            panel_key="chest",
         ),
         ActionDefinition(
             "deposit_confirm",
-            "global",
+            "chest",
             "chest.deposit",
             deposit_confirm,
-            panel_key="global",
+            panel_key="chest",
         ),
         ActionDefinition(
             "deposit_cancel",
-            "global",
+            "chest",
             "chest.deposit",
             deposit_cancel,
-            panel_key="global",
+            panel_key="chest",
         ),
         ActionDefinition(
-            "withdraw", "global", "chest.withdraw", withdraw, panel_key="global"
+            "withdraw", "chest", "chest.withdraw", withdraw, panel_key="chest"
         ),
         ActionDefinition(
             "withdraw_prev",
-            "global",
+            "chest",
             "chest.withdraw",
             withdraw_prev,
-            panel_key="global",
+            panel_key="chest",
         ),
         ActionDefinition(
             "withdraw_next",
-            "global",
+            "chest",
             "chest.withdraw",
             withdraw_next,
-            panel_key="global",
+            panel_key="chest",
         ),
         ActionDefinition(
             "withdraw_item",
-            "global",
+            "chest",
             "chest.withdraw",
             withdraw_item,
-            panel_key="global",
+            panel_key="chest",
         ),
         ActionDefinition(
             "withdraw_submit",
-            "global",
+            "chest",
             "chest.withdraw",
             withdraw_submit,
-            panel_key="global",
+            panel_key="chest",
         ),
         ActionDefinition(
             "withdraw_confirm",
-            "global",
+            "chest",
             "chest.withdraw",
             withdraw_confirm,
-            panel_key="global",
+            panel_key="chest",
         ),
         ActionDefinition(
             "withdraw_cancel",
-            "global",
+            "chest",
             "chest.withdraw",
             withdraw_cancel,
-            panel_key="global",
+            panel_key="chest",
         ),
         ActionDefinition(
             "history_own",
-            "global",
+            "chest",
             "chest.history_own",
             history_own,
-            panel_key="global",
+            panel_key="chest",
             resource_owner_resolver=own_history_owner,
         ),
     ),

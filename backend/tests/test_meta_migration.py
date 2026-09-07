@@ -37,7 +37,7 @@ def test_meta_migration_on_empty_sqlite(tmp_path: Path) -> None:
         }
         assert (
             connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-            == "d3e4f5a6b7c8"
+            == "e4f5a6b7c8d9"
         )
         assert "parceria_domain_families" in tables
         assert "parceria_domain_partnerships" in tables

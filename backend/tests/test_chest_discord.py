@@ -29,16 +29,21 @@ def test_chest_public_panel_is_nexus_v2_and_persistent():
                 "config": {
                     "panel_title": "Sistema de Bau",
                     "panel_description": "Estoque da organizacao.",
-                }
+                },
+                "chest": {
+                    "id": "00000000-0000-0000-0000-000000000001",
+                    "name": "Baú Geral",
+                    "description": "Estoque da organizacao.",
+                },
             }
         )
     ).data
-    assert "YUNO NEXUS // RUNTIME / CHEST" in str(rendered)
-    assert "yuno:chest:v1:global:select_chest" in str(rendered)
-    assert "yuno:chest:v1:global:history_own" in str(rendered)
+    assert "YUNO NEXUS // BAU / OPERACIONAL" in str(rendered)
+    assert "yuno:chest:v1:chest:view_stock" in str(rendered)
+    assert "yuno:chest:v1:chest:history_own" in str(rendered)
     assert component_count(rendered["components"]) <= 40
     panel = MODULE_UI.panels[0]
-    assert panel.key == "global"
+    assert panel.key == "chest"
     assert panel.recovery_policy == "automatic"
 
 
@@ -59,7 +64,7 @@ def test_chest_catalog_with_more_than_25_entries_is_paginated():
     context = RoutedContext(
         interaction=SimpleNamespace(guild=SimpleNamespace(id=100)),
         actor=actor(),
-        panel={"module_key": "chest", "panel_key": "global"},
+        panel={"module_key": "chest", "panel_key": "chest", "resource_id": "00000000-0000-0000-0000-000000000001"},
         api=API(),
         receipt_id="receipt",
     )
@@ -87,11 +92,11 @@ def test_chest_modal_custom_ids_use_the_modern_router():
     context = RoutedContext(
         interaction=SimpleNamespace(guild=SimpleNamespace(id=100)),
         actor=actor(),
-        panel={"module_key": "chest", "panel_key": "global"},
+        panel={"module_key": "chest", "panel_key": "chest", "resource_id": "00000000-0000-0000-0000-000000000001"},
         api=object(),
         receipt_id="receipt",
     )
-    ui._sessions[(100, 900)] = {"chest_id": "00000000-0000-0000-0000-000000000001"}
+    ui._sessions[(100, 900, "00000000-0000-0000-0000-000000000001")] = {}
 
     async def build_modal():
         return ui.MovementModal(
@@ -105,13 +110,13 @@ def test_chest_modal_custom_ids_use_the_modern_router():
     assert parsed == {
         "version": 1,
         "module": "chest",
-        "surface": "global",
+        "surface": "chest",
         "action": "withdraw_submit",
     }
     assert modal.timeout == 600
     assert modal.observation.required is True
 
-    ui._sessions[(100, 900)]["withdrawal_reason_required"] = False
+    ui._sessions[(100, 900, "00000000-0000-0000-0000-000000000001")]["withdrawal_reason_required"] = False
     optional = asyncio.run(build_modal())
     assert optional.observation.required is False
 
@@ -122,10 +127,10 @@ def test_chest_is_exposed_by_nexus_with_grouped_admin_actions():
     actions = {item.key for item in MODULE_UI.admin_actions}
     assert {
         "inventory",
-        "access",
-        "configuration",
+        "chest_access",
+        "chest_settings",
         "diagnose",
-        "recover",
-        "publish",
+        "recover_chest",
+        "publish_chest",
     } <= actions
     assert not any("slash" in item.key for item in MODULE_UI.actions)

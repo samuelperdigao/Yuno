@@ -172,16 +172,16 @@ CENTRAL_ROUTES: dict[tuple[str, str], CentralRoute] = {
         "registration", "diagnostic", parent=("registration", "configuration")
     ),
     ("chest", "overview"): CentralRoute(
-        "chest", "overview", parent=("core", "modules"), next_route=("chest", "inventory")
+        "chest", "overview", parent=("core", "modules")
     ),
     ("chest", "inventory"): CentralRoute(
-        "chest", "inventory", parent=("chest", "overview"), next_route=("chest", "access")
+        "chest", "inventory", parent=("chest", "overview")
     ),
     ("chest", "access"): CentralRoute(
-        "chest", "access", parent=("chest", "inventory"), next_route=("chest", "configuration")
+        "chest", "access", parent=("chest", "overview")
     ),
     ("chest", "configuration"): CentralRoute(
-        "chest", "configuration", parent=("chest", "access"), next_route=("chest", "diagnostic")
+        "chest", "configuration", parent=("chest", "overview")
     ),
     ("chest", "diagnostic"): CentralRoute(
         "chest", "diagnostic", parent=("chest", "configuration")
@@ -1100,8 +1100,8 @@ async def _dispatch_visual_route(
         target_action = {
             "overview": None,
             "inventory": "inventory",
-            "access": "access",
-            "configuration": "configuration",
+            "access": "chest_access",
+            "configuration": "chest_settings",
             "diagnostic": "diagnose",
         }.get(route, "__invalid__")
         if target_action == "__invalid__":

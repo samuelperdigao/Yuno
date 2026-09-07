@@ -10,7 +10,7 @@ from app.platform.schemas import ActorContextIn, PermissionGrantIn
 
 
 class ChestConfiguration(BaseModel):
-    panel_channel_id: str = Field(min_length=1, max_length=32)
+    panel_channel_id: str = Field(default="", max_length=32)
     log_channel_id: str | None = Field(default=None, max_length=32)
     show_balances_to_members: bool = True
     allow_personal_history: bool = True
@@ -48,8 +48,23 @@ class SettingsDraftCommand(MutationContext):
 class ChestDraftUpsert(MutationContext):
     chest_id: str | None = Field(default=None, max_length=36)
     name: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=300)
+    panel_channel_id: str | None = Field(default=None, max_length=32)
+    log_channel_id: str | None = Field(default=None, max_length=32)
+    show_balances_to_members: bool = True
+    allow_personal_history: bool = True
+    withdrawal_reason_required: bool = True
+    view_role_ids: list[str] = Field(default_factory=list, max_length=25)
+    deposit_role_ids: list[str] = Field(default_factory=list, max_length=25)
+    withdraw_role_ids: list[str] = Field(default_factory=list, max_length=25)
+    admin_role_ids: list[str] = Field(default_factory=list, max_length=25)
     active: bool = True
     position: int = Field(default=0, ge=0, le=100000)
+
+    @field_validator("description")
+    @classmethod
+    def compact_description(cls, value: str) -> str:
+        return " ".join(value.strip().split())[:300]
 
 
 class ItemDraftUpsert(MutationContext):
@@ -131,6 +146,7 @@ class StockCommand(BaseModel):
 
 class RecoveryCommand(BaseModel):
     action: Literal["create_missing_balances", "reconcile_panel"]
+    chest_id: str | None = Field(default=None, max_length=36)
     idempotency_key: str = Field(min_length=1, max_length=160)
     actor: ActorContextIn
 

@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func, select, tuple_
+from sqlalchemy import delete, func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain_modules.chest.domain import (
@@ -48,7 +48,7 @@ from app.platform.models import (
 )
 from app.platform.outbox import enqueue_delivery
 from app.platform.permissions import authorize
-from app.platform.schemas import ActorContextIn
+from app.platform.schemas import ActorContextIn, PermissionGrantIn
 
 MODULE_KEY = "chest"
 
@@ -61,6 +61,32 @@ def _http(status: int, detail: str, **extra: Any) -> HTTPException:
 
 def _actor_id(actor: ActorContextIn) -> str:
     return actor.user_id or "system"
+
+
+def _grants_from_chests(rows: list[ChestDraftChest]) -> list[PermissionGrantIn]:
+    mapping = {
+        "view_role_ids": ("chest.view",),
+        "deposit_role_ids": ("chest.deposit",),
+        "withdraw_role_ids": ("chest.withdraw",),
+        "admin_role_ids": ("chest.view", "chest.deposit", "chest.withdraw", "chest.history"),
+    }
+    result: list[PermissionGrantIn] = []
+    for row in rows:
+        if not row.active:
+            continue
+        for field, capabilities in mapping.items():
+            for role_id in list(getattr(row, field, None) or []):
+                for capability in capabilities:
+                    result.append(
+                        PermissionGrantIn(
+                            capability=capability,
+                            subject_type="everyone" if role_id == "everyone" else "role",
+                            subject_id="" if role_id == "everyone" else str(role_id),
+                            scope_type="resource",
+                            scope_id=row.chest_id,
+                        )
+                    )
+    return result
 
 
 async def _require(
@@ -126,6 +152,19 @@ async def publish_catalog(
     draft = await get_or_create_draft(
         session, guild_id=guild_id, module_key=MODULE_KEY, for_update=True
     )
+    if not grants:
+        grants = _grants_from_chests(
+            list(
+                (
+                    await session.execute(
+                        select(ChestDraftChest).where(
+                            ChestDraftChest.guild_id == guild_id,
+                            ChestDraftChest.draft_id == draft.id,
+                        )
+                    )
+                ).scalars()
+            )
+        )
     resource_ids = {
         value
         for value in (
@@ -248,10 +287,23 @@ async def save_settings(
 
 
 def _chest_out(row: ChestDraftChest | ChestVersionChest) -> dict[str, Any]:
+    def roles(name: str) -> list[str]:
+        return list(getattr(row, name, None) or [])
+
     return {
         "id": row.chest_id,
         "name": row.name,
         "name_normalized": row.name_normalized,
+        "description": getattr(row, "description", "") or "",
+        "panel_channel_id": getattr(row, "panel_channel_id", None),
+        "log_channel_id": getattr(row, "log_channel_id", None),
+        "show_balances_to_members": getattr(row, "show_balances_to_members", True),
+        "allow_personal_history": getattr(row, "allow_personal_history", True),
+        "withdrawal_reason_required": getattr(row, "withdrawal_reason_required", True),
+        "view_role_ids": roles("view_role_ids"),
+        "deposit_role_ids": roles("deposit_role_ids"),
+        "withdraw_role_ids": roles("withdraw_role_ids"),
+        "admin_role_ids": roles("admin_role_ids"),
         "active": row.active,
         "position": row.position,
     }
@@ -265,6 +317,22 @@ def _item_out(row: ChestDraftItem | ChestVersionItem) -> dict[str, Any]:
         "unit": row.unit,
         "active": row.active,
         "position": row.position,
+    }
+
+
+def _chest_settings(row: ChestDraftChest | ChestVersionChest, defaults: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "panel_channel_id": getattr(row, "panel_channel_id", None) or defaults.get("panel_channel_id"),
+        "log_channel_id": getattr(row, "log_channel_id", None) or defaults.get("log_channel_id"),
+        "show_balances_to_members": getattr(row, "show_balances_to_members", None)
+        if getattr(row, "show_balances_to_members", None) is not None
+        else defaults.get("show_balances_to_members", True),
+        "allow_personal_history": getattr(row, "allow_personal_history", None)
+        if getattr(row, "allow_personal_history", None) is not None
+        else defaults.get("allow_personal_history", True),
+        "withdrawal_reason_required": getattr(row, "withdrawal_reason_required", None)
+        if getattr(row, "withdrawal_reason_required", None) is not None
+        else defaults.get("withdrawal_reason_required", True),
     }
 
 
@@ -359,6 +427,16 @@ async def upsert_draft_chest(
     expected_revision: int,
     idempotency_key: str,
     actor: ActorContextIn,
+    description: str = "",
+    panel_channel_id: str | None = None,
+    log_channel_id: str | None = None,
+    show_balances_to_members: bool = True,
+    allow_personal_history: bool = True,
+    withdrawal_reason_required: bool = True,
+    view_role_ids: list[str] | None = None,
+    deposit_role_ids: list[str] | None = None,
+    withdraw_role_ids: list[str] | None = None,
+    admin_role_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     await _require(
         session, guild_id=guild_id, capability="chest.configure", actor=actor
@@ -406,6 +484,16 @@ async def upsert_draft_chest(
     before = _chest_out(row) if row.name else {}
     row.name = compact_text(name, field="nome do bau", max_length=100)
     row.name_normalized = normalize_name(row.name)
+    row.description = " ".join(description.strip().split())[:300]
+    row.panel_channel_id = panel_channel_id or (draft.data or {}).get("panel_channel_id") or None
+    row.log_channel_id = log_channel_id or (draft.data or {}).get("log_channel_id") or None
+    row.show_balances_to_members = show_balances_to_members
+    row.allow_personal_history = allow_personal_history
+    row.withdrawal_reason_required = withdrawal_reason_required
+    row.view_role_ids = list(view_role_ids or [])
+    row.deposit_role_ids = list(deposit_role_ids or [])
+    row.withdraw_role_ids = list(withdraw_role_ids or [])
+    row.admin_role_ids = list(admin_role_ids or [])
     row.active = active
     row.position = position
     _advance(draft, _actor_id(actor))
@@ -677,6 +765,19 @@ async def validate_catalog_draft(
     }
     if not valid_links:
         errors.append("Associe ao menos um item ativo a um bau ativo.")
+    defaults = dict(draft.data or {})
+    for row in chests:
+        if not (row.panel_channel_id or defaults.get("panel_channel_id")):
+            errors.append(f"Selecione o canal do painel do bau '{row.name}'.")
+        if not (row.log_channel_id or defaults.get("log_channel_id")):
+            errors.append(f"Selecione o canal de logs do bau '{row.name}'.")
+        if not any(
+            link.chest_id == row.chest_id
+            and link.item_id in active_items
+            and link.active
+            for link in links
+        ):
+            errors.append(f"Adicione ao menos um item ao bau '{row.name}'.")
 
     instance = await ensure_module_instance(
         session, guild_id=guild_id, module_key=MODULE_KEY
@@ -759,6 +860,21 @@ async def materialize_catalog_version(
     instance = await ensure_module_instance(
         session, guild_id=guild_id, module_key=MODULE_KEY, for_update=True
     )
+    # O contrato antigo publicava um singleton global. Ao cortar para paineis
+    # por bau, ele deixa de ser uma instancia operacional valida.
+    await session.execute(
+        update(PanelInstance)
+        .where(
+            PanelInstance.guild_id == guild_id,
+            PanelInstance.module_key == MODULE_KEY,
+            PanelInstance.panel_key == "global",
+            PanelInstance.state == PanelState.published,
+        )
+        .values(
+            state=PanelState.paused,
+            last_error="Painel global substituido por paineis individuais de cada bau.",
+        )
+    )
     old_active: set[tuple[str, str]] = set()
     if instance.published_config_version_id:
         old_active = set(
@@ -804,6 +920,16 @@ async def materialize_catalog_version(
                 chest_id=row.chest_id,
                 name=row.name,
                 name_normalized=row.name_normalized,
+                description=row.description,
+                panel_channel_id=row.panel_channel_id or (draft.data or {}).get("panel_channel_id"),
+                log_channel_id=row.log_channel_id or (draft.data or {}).get("log_channel_id"),
+                show_balances_to_members=row.show_balances_to_members,
+                allow_personal_history=row.allow_personal_history,
+                withdrawal_reason_required=row.withdrawal_reason_required,
+                view_role_ids=list(row.view_role_ids or []),
+                deposit_role_ids=list(row.deposit_role_ids or []),
+                withdraw_role_ids=list(row.withdraw_role_ids or []),
+                admin_role_ids=list(row.admin_role_ids or []),
                 active=row.active,
                 position=row.position,
             )
@@ -853,23 +979,29 @@ async def materialize_catalog_version(
         session.add(ChestBalance(guild_id=guild_id, chest_id=chest_id, item_id=item_id))
     await session.flush()
     config = dict(draft.data or {})
-    await enqueue_delivery(
-        session,
-        guild_id=guild_id,
-        module_key=MODULE_KEY,
-        renderer_key="chest.panel",
-        destination_type="channel",
-        destination_id=str(config["panel_channel_id"]),
-        resource_type="module_config_version",
-        resource_id=str(version.id),
-        payload={"config_version": version.version},
-        priority=40,
-        available_at=datetime.now(timezone.utc),
-        idempotency_key=f"chest:panel:{guild_id}:version:{version.version}",
-        correlation_id=f"chest-publish:{guild_id}:{version.version}",
-        max_attempts=5,
-        commit=False,
-    )
+    for row in chests:
+        if not row.active:
+            continue
+        destination_id = row.panel_channel_id or config.get("panel_channel_id")
+        if not destination_id:
+            continue
+        await enqueue_delivery(
+            session,
+            guild_id=guild_id,
+            module_key=MODULE_KEY,
+            renderer_key="chest.panel",
+            destination_type="channel",
+            destination_id=str(destination_id),
+            resource_type="chest",
+            resource_id=row.chest_id,
+            payload={"config_version": version.version, "chest_id": row.chest_id},
+            priority=40,
+            available_at=datetime.now(timezone.utc),
+            idempotency_key=f"chest:panel:{guild_id}:version:{version.version}:chest:{row.chest_id}",
+            correlation_id=f"chest-publish:{guild_id}:{version.version}:{row.chest_id}",
+            max_attempts=5,
+            commit=False,
+        )
 
 
 async def restore_catalog_version(
@@ -933,6 +1065,16 @@ async def restore_catalog_version(
                 chest_id=row.chest_id,
                 name=row.name,
                 name_normalized=row.name_normalized,
+                description=getattr(row, "description", "") or "",
+                panel_channel_id=getattr(row, "panel_channel_id", None),
+                log_channel_id=getattr(row, "log_channel_id", None),
+                show_balances_to_members=getattr(row, "show_balances_to_members", True),
+                allow_personal_history=getattr(row, "allow_personal_history", True),
+                withdrawal_reason_required=getattr(row, "withdrawal_reason_required", True),
+                view_role_ids=list(getattr(row, "view_role_ids", None) or []),
+                deposit_role_ids=list(getattr(row, "deposit_role_ids", None) or []),
+                withdraw_role_ids=list(getattr(row, "withdraw_role_ids", None) or []),
+                admin_role_ids=list(getattr(row, "admin_role_ids", None) or []),
                 active=row.active,
                 position=row.position,
             )
@@ -1006,10 +1148,17 @@ async def published_catalog(session: AsyncSession, *, guild_id: str) -> dict[str
             )
         ).scalars()
     )
+    chest_output = [_chest_out(row) for row in chests]
+    item_counts: dict[str, int] = {}
+    for link in links:
+        if link.active:
+            item_counts[link.chest_id] = item_counts.get(link.chest_id, 0) + 1
+    for chest in chest_output:
+        chest["item_count"] = item_counts.get(chest["id"], 0)
     return {
         "version": version.version if version else 0,
         "configuration": dict(version.data or {}) if version else {},
-        "chests": [_chest_out(row) for row in chests],
+        "chests": chest_output,
         "items": [_item_out(row) for row in items],
         "links": [
             {"chest_id": row.chest_id, "item_id": row.item_id, "active": row.active}
@@ -1025,6 +1174,9 @@ async def authorized_catalog(
     allowed_chests: list[dict[str, Any]] = []
     for chest in catalog["chests"]:
         if not chest["active"]:
+            continue
+        if actor.actor_type == "system":
+            allowed_chests.append(chest)
             continue
         decision = await authorize(
             session,
@@ -1199,11 +1351,8 @@ async def record_movement(
         ModuleConfigVersion, instance.published_config_version_id
     )
     config = dict(version.data or {}) if version else {}
-    if (
-        kind == MovementType.WITHDRAWAL
-        and config.get("withdrawal_reason_required", True)
-        and not observation
-    ):
+    settings = _chest_settings(chest_row, config)
+    if kind == MovementType.WITHDRAWAL and settings["withdrawal_reason_required"] and not observation:
         raise _http(422, "O motivo da retirada e obrigatorio.")
     before = Decimal(balance.quantity)
     try:
@@ -1259,13 +1408,14 @@ async def record_movement(
         module_key=MODULE_KEY,
         renderer_key="chest.log",
         destination_type="channel",
-        destination_id=str(config["log_channel_id"]),
+        destination_id=str(settings["log_channel_id"] or ""),
         resource_type="chest_movement",
         resource_id=movement.id,
         payload={
             "movement_id": movement.id,
             "movement_type": kind.value,
             "quantity": str(amount),
+            "balance_before": str(before),
             "balance_after": str(after),
             "actor_id": movement.actor_id,
             "chest_name": chest_row.name,
@@ -1380,16 +1530,9 @@ async def stock(
     version = await session.get(
         ModuleConfigVersion, instance.published_config_version_id
     )
-    show = (
-        bool((version.data or {}).get("show_balances_to_members", True))
-        if version
-        else True
-    )
-    reason_required = (
-        bool((version.data or {}).get("withdrawal_reason_required", True))
-        if version
-        else True
-    )
+    settings = _chest_settings(chest_row, dict(version.data or {}) if version else {})
+    show = bool(settings["show_balances_to_members"])
+    reason_required = bool(settings["withdrawal_reason_required"])
     if not show:
         withdraw = await authorize(
             session,
@@ -1444,9 +1587,18 @@ async def history(
             if instance.published_config_version_id
             else None
         )
-        if version is None or not (version.data or {}).get(
-            "allow_personal_history", True
-        ):
+        allow_history = bool((version.data or {}).get("allow_personal_history", True)) if version else True
+        if version is not None and chest_id:
+            chest_config = await session.scalar(
+                select(ChestVersionChest.allow_personal_history).where(
+                    ChestVersionChest.guild_id == guild_id,
+                    ChestVersionChest.config_version_id == version.id,
+                    ChestVersionChest.chest_id == chest_id,
+                )
+            )
+            if chest_config is not None:
+                allow_history = bool(chest_config)
+        if version is None or not allow_history:
             raise _http(
                 403, "Historico pessoal desabilitado na configuracao publicada."
             )
@@ -1476,6 +1628,7 @@ async def create_missing_balances(
     guild_id: str,
     actor: ActorContextIn,
     idempotency_key: str,
+    chest_id: str | None = None,
 ) -> dict[str, Any]:
     await _require(session, guild_id=guild_id, capability="chest.recover", actor=actor)
     action = "chest.recovery.create_missing_balances"
@@ -1489,16 +1642,16 @@ async def create_missing_balances(
     )
     if instance.published_config_version_id is None:
         raise _http(409, "Modulo sem catalogo publicado.")
+    active_query = select(ChestVersionLink.chest_id, ChestVersionLink.item_id).where(
+        ChestVersionLink.guild_id == guild_id,
+        ChestVersionLink.config_version_id == instance.published_config_version_id,
+        ChestVersionLink.active.is_(True),
+    )
+    if chest_id:
+        active_query = active_query.where(ChestVersionLink.chest_id == chest_id)
     active = set(
         (
-            await session.execute(
-                select(ChestVersionLink.chest_id, ChestVersionLink.item_id).where(
-                    ChestVersionLink.guild_id == guild_id,
-                    ChestVersionLink.config_version_id
-                    == instance.published_config_version_id,
-                    ChestVersionLink.active.is_(True),
-                )
-            )
+            await session.execute(active_query)
         ).all()
     )
     existing = set(
@@ -1531,7 +1684,7 @@ async def create_missing_balances(
         guild_id=guild_id,
         idempotency_key=idempotency_key,
         action=action,
-        resource_id=guild_id,
+        resource_id=chest_id or guild_id,
         result=result,
     )
     await session.commit()
@@ -1544,6 +1697,7 @@ async def queue_panel_recovery(
     guild_id: str,
     actor: ActorContextIn,
     idempotency_key: str,
+    chest_id: str | None = None,
 ) -> dict[str, Any]:
     await _require(session, guild_id=guild_id, capability="chest.recover", actor=actor)
     action = "chest.recovery.reconcile_panel"
@@ -1562,7 +1716,21 @@ async def queue_panel_recovery(
     )
     if version is None:
         raise _http(409, "Modulo sem configuracao publicada.")
-    destination_id = str((version.data or {}).get("panel_channel_id") or "")
+    if not chest_id:
+        raise _http(422, "Informe qual bau deve ser recuperado.")
+    chest_row = await session.scalar(
+        select(ChestVersionChest).where(
+            ChestVersionChest.guild_id == guild_id,
+            ChestVersionChest.config_version_id == version.id,
+            ChestVersionChest.chest_id == chest_id,
+            ChestVersionChest.active.is_(True),
+        )
+    )
+    if chest_row is None:
+        raise _http(404, "Bau publicado nao encontrado.")
+    destination_id = str(
+        chest_row.panel_channel_id or (version.data or {}).get("panel_channel_id") or ""
+    )
     if not destination_id:
         raise _http(422, "Canal do painel ausente na configuracao publicada.")
     delivery = await enqueue_delivery(
@@ -1572,9 +1740,9 @@ async def queue_panel_recovery(
         renderer_key="chest.panel",
         destination_type="channel",
         destination_id=destination_id,
-        resource_type="module_config_version",
-        resource_id=str(version.id),
-        payload={"config_version": version.version, "reason": "recovery"},
+        resource_type="chest",
+        resource_id=chest_id,
+        payload={"config_version": version.version, "chest_id": chest_id, "reason": "recovery"},
         priority=20,
         available_at=datetime.now(timezone.utc),
         idempotency_key="chest:panel:recovery:"
@@ -1590,7 +1758,7 @@ async def queue_panel_recovery(
         module_key=MODULE_KEY,
         action=action,
         resource_type="panel",
-        resource_id="global",
+        resource_id=chest_id,
         actor_type=actor.actor_type,
         actor_id=actor.user_id,
         after=result,
@@ -1601,7 +1769,7 @@ async def queue_panel_recovery(
         guild_id=guild_id,
         idempotency_key=idempotency_key,
         action=action,
-        resource_id="global",
+        resource_id=chest_id,
         result=result,
     )
     await session.commit()
@@ -1629,35 +1797,40 @@ async def record_resource_deleted(
     query = select(PanelInstance).where(
         PanelInstance.guild_id == guild_id,
         PanelInstance.module_key == MODULE_KEY,
-        PanelInstance.panel_key == "global",
+        PanelInstance.panel_key == "chest",
     )
     if resource_type == "message":
         query = query.where(PanelInstance.message_id == resource_id)
     else:
         query = query.where(PanelInstance.channel_id == resource_id)
-    panel = (await session.execute(query.with_for_update())).scalar_one_or_none()
-    result = {"affected": panel is not None, "recovery_queued": False}
-    if panel is not None:
+    panels = list((await session.execute(query.with_for_update())).scalars())
+    result = {"affected": bool(panels), "affected_count": len(panels), "recovery_queued": False}
+    instance = await ensure_module_instance(session, guild_id=guild_id, module_key=MODULE_KEY) if panels else None
+    version = (
+        await session.get(ModuleConfigVersion, instance.published_config_version_id)
+        if instance and instance.published_config_version_id
+        else None
+    )
+    for panel in panels:
         panel.state = PanelState.missing
         panel.render_revision += 1
         panel.last_error = f"Recurso Discord removido: {resource_type}:{resource_id}"
-        instance = await ensure_module_instance(
-            session, guild_id=guild_id, module_key=MODULE_KEY
-        )
-        version = (
-            await session.get(ModuleConfigVersion, instance.published_config_version_id)
-            if instance.published_config_version_id
+        chest_row = (
+            await session.scalar(
+                select(ChestVersionChest).where(
+                    ChestVersionChest.guild_id == guild_id,
+                    ChestVersionChest.config_version_id == version.id,
+                    ChestVersionChest.chest_id == panel.resource_id,
+                )
+            )
+            if version
             else None
         )
-        destination_id = (
-            str((version.data or {}).get("panel_channel_id") or "") if version else ""
-        )
-        if (
-            version
-            and destination_id
-            and not (
-                resource_type in {"channel", "thread"} and destination_id == resource_id
-            )
+        destination_id = str(
+            chest_row.panel_channel_id or (version.data or {}).get("panel_channel_id") or ""
+        ) if chest_row and version else ""
+        if version and destination_id and not (
+            resource_type in {"channel", "thread"} and destination_id == resource_id
         ):
             await enqueue_delivery(
                 session,
@@ -1666,13 +1839,13 @@ async def record_resource_deleted(
                 renderer_key="chest.panel",
                 destination_type="channel",
                 destination_id=destination_id,
-                resource_type="panel",
-                resource_id=panel.id,
-                payload={"reason": "discord_resource_deleted"},
+                resource_type="chest",
+                resource_id=panel.resource_id,
+                payload={"reason": "discord_resource_deleted", "chest_id": panel.resource_id},
                 priority=10,
                 available_at=datetime.now(timezone.utc),
                 idempotency_key="chest:deleted:"
-                + hashlib.sha256(idempotency_key.encode()).hexdigest(),
+                + hashlib.sha256(f"{idempotency_key}:{panel.resource_id}".encode()).hexdigest(),
                 correlation_id=actor.correlation_id,
                 max_attempts=5,
                 commit=False,
@@ -1725,10 +1898,24 @@ async def diagnostics(session: AsyncSession, *, guild_id: str) -> list[dict[str,
             "checked_at": now,
         }
     )
+    published_chests: list[ChestVersionChest] = []
     if version:
         config = dict(version.data or {})
-        channels_valid = bool(
-            config.get("panel_channel_id") and config.get("log_channel_id")
+        published_chests = list(
+            (
+                await session.execute(
+                    select(ChestVersionChest).where(
+                        ChestVersionChest.guild_id == guild_id,
+                        ChestVersionChest.config_version_id == version.id,
+                        ChestVersionChest.active.is_(True),
+                    )
+                )
+            ).scalars()
+        )
+        channels_valid = bool(published_chests) and all(
+            _chest_settings(row, config)["panel_channel_id"]
+            and _chest_settings(row, config)["log_channel_id"]
+            for row in published_chests
         )
         checks.append(
             {
@@ -1775,20 +1962,25 @@ async def diagnostics(session: AsyncSession, *, guild_id: str) -> list[dict[str,
                 "checked_at": now,
             }
         )
-    panel = (
-        await session.execute(
-            select(PanelInstance).where(
-                PanelInstance.guild_id == guild_id,
-                PanelInstance.module_key == MODULE_KEY,
-                PanelInstance.panel_key == "global",
+    panels = list(
+        (
+            await session.execute(
+                select(PanelInstance).where(
+                    PanelInstance.guild_id == guild_id,
+                    PanelInstance.module_key == MODULE_KEY,
+                    PanelInstance.panel_key == "chest",
+                )
             )
-        )
-    ).scalar_one_or_none()
-    panel_ok = (
-        panel is not None
+        ).scalars()
+    )
+    panel_by_chest = {panel.resource_id: panel for panel in panels}
+    panel_ok = bool(version) and bool(published_chests) and all(
+        (panel := panel_by_chest.get(row.chest_id)) is not None
         and panel.state.value == "published"
         and bool(panel.channel_id and panel.message_id)
+        for row in published_chests
     )
+    panel_errors = [panel.last_error for panel in panels if panel.last_error]
     checks.append(
         {
             "status": "OK" if panel_ok else "WARNING",
@@ -1796,7 +1988,7 @@ async def diagnostics(session: AsyncSession, *, guild_id: str) -> list[dict[str,
             "summary": "Painel operacional publicado."
             if panel_ok
             else "Painel operacional ausente ou inconsistente.",
-            "detail": panel.last_error if panel and panel.last_error else "",
+            "detail": "; ".join(panel_errors[:3]),
             "action": "Execute a recuperacao do painel." if not panel_ok else "",
             "checked_at": now,
         }
@@ -1841,6 +2033,17 @@ async def admin_summary(
         ).scalars()
     )
     checks = await diagnostics(session, guild_id=guild_id)
+    panels = list(
+        (
+            await session.execute(
+                select(PanelInstance).where(
+                    PanelInstance.guild_id == guild_id,
+                    PanelInstance.module_key == MODULE_KEY,
+                    PanelInstance.panel_key == "chest",
+                )
+            )
+        ).scalars()
+    )
     return {
         "lifecycle": instance.lifecycle.value,
         "published": instance.published_config_version_id is not None,
@@ -1858,6 +2061,16 @@ async def admin_summary(
                 "sequence": row.sequence,
             }
             for row in balances
+        ],
+        "panels": [
+            {
+                "chest_id": panel.resource_id,
+                "state": panel.state.value,
+                "channel_id": panel.channel_id,
+                "message_id": panel.message_id,
+                "last_error": panel.last_error,
+            }
+            for panel in panels
         ],
         "health": "OK" if all(row["status"] == "OK" for row in checks) else "ATTENTION",
     }

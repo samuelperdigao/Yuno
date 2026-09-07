@@ -316,7 +316,7 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
 else
   actual_head=`$(.venv/bin/python -m alembic -c backend/alembic.ini current | tail -n 1 | awk '{print `$1}')
 fi
-test "`$actual_head" = "d3e4f5a6b7c8"
+test "`$actual_head" = "e4f5a6b7c8d9"
 echo "ALEMBIC_HEAD=`$actual_head"
 
 echo "DEPLOYED_SHA=`$(git rev-parse HEAD)"

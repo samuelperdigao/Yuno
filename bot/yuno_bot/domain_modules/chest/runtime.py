@@ -38,7 +38,11 @@ async def _channel(guild: discord.Guild, channel_id: str):
 
 
 async def reconcile_panel(
-    bot: discord.Client, api: Any, guild: discord.Guild, correlation_id: str
+    bot: discord.Client,
+    api: Any,
+    guild: discord.Guild,
+    correlation_id: str,
+    chest_id: str,
 ) -> dict:
     try:
         version = await api.effective_configuration(guild.id, MODULE_KEY)
@@ -47,15 +51,33 @@ async def reconcile_panel(
             "Configuracao publicada do Sistema de Bau indisponivel."
         ) from exc
     actor = system_actor(bot, guild.id, correlation_id)
+    try:
+        catalog = await api.chest_catalog(guild.id, actor=actor)
+    except Exception as exc:
+        raise RetryableJobError(
+            "Catalogo publicado do Sistema de Bau indisponivel."
+        ) from exc
+    chest = next(
+        (row for row in catalog.get("chests") or [] if str(row.get("id")) == str(chest_id)),
+        None,
+    )
+    if chest is None or not chest.get("active"):
+        raise RetryableJobError("Bau publicado nao encontrado para reconciliacao.")
+    channel_id = chest.get("panel_channel_id") or version["data"].get("panel_channel_id")
+    if not channel_id:
+        raise RetryableJobError("Canal do painel do Bau nao configurado.")
     return await PanelPublisher(bot, api).reconcile(
         guild=guild,
         module_key=MODULE_KEY,
-        panel_key="global",
-        channel_id=int(version["data"]["panel_channel_id"]),
+        panel_key="chest",
+        channel_id=int(channel_id),
         actor=actor,
+        resource_type="chest",
+        resource_id=str(chest_id),
         render_context={
             "config": version["data"],
             "config_version": version["version"],
+            "chest": chest,
         },
     )
 
@@ -67,7 +89,11 @@ async def deliver_panel(bot: discord.Client, item: dict[str, Any]) -> str | None
             "Guild indisponivel para publicar o painel do Sistema de Bau."
         )
     panel = await reconcile_panel(
-        bot, bot.platform_api, guild, str(item.get("correlation_id") or item["id"])
+        bot,
+        bot.platform_api,
+        guild,
+        str(item.get("correlation_id") or item["id"]),
+        str(item.get("resource_id") or (item.get("payload") or {}).get("chest_id") or ""),
     )
     return panel.get("message_id")
 
@@ -82,9 +108,11 @@ async def deliver_log(bot: discord.Client, item: dict[str, Any]) -> str | None:
         f"\nMotivo/observacao: {data['observation']}" if data.get("observation") else ""
     )
     message = await channel.send(
-        "**Sistema de Bau · Movimentacao confirmada**\n"
+        "**YUNO NEXUS · MOVIMENTACAO**\n"
         f"{data.get('movement_type')} · {data.get('quantity')} {data.get('unit')}\n"
-        f"{data.get('chest_name')} / {data.get('item_name')} · saldo {data.get('balance_after')}\n"
+        f"Bau: {data.get('chest_name')}\n"
+        f"Item: {data.get('item_name')}\n"
+        f"Saldo: {data.get('balance_before')} → {data.get('balance_after')}\n"
         f"Ator: <@{data.get('actor_id')}> · ID `{data.get('movement_id')}`{observation}",
         allowed_mentions=discord.AllowedMentions.none(),
     )
@@ -100,17 +128,34 @@ async def run_job(
             "Guild indisponivel para reconciliar o painel do Sistema de Bau."
         )
     await reconcile_panel(
-        bot, api, guild, str(item.get("correlation_id") or item["id"])
+        bot,
+        api,
+        guild,
+        str(item.get("correlation_id") or item["id"]),
+        str(item.get("resource_id") or (item.get("payload") or {}).get("chest_id") or ""),
     )
     return {"reconciled": True}
 
 
 async def startup(bot: discord.Client, api: Any, guild: discord.Guild) -> None:
     try:
-        await reconcile_panel(bot, api, guild, f"chest-startup:{guild.id}")
+        actor = system_actor(bot, guild.id, f"chest-startup:{guild.id}")
+        catalog = await api.chest_catalog(guild.id, actor=actor)
     except Exception:
         # Ausencia de configuracao publicada e esperada durante onboarding.
         return
+    for chest in catalog.get("chests") or []:
+        try:
+            await reconcile_panel(
+                bot,
+                api,
+                guild,
+                f"chest-startup:{guild.id}:{chest['id']}",
+                str(chest["id"]),
+            )
+        except Exception:
+            # Um canal ausente nao deve impedir a reconciliacao dos demais baus.
+            continue
 
 
 async def handle_resource_delete(
@@ -136,5 +181,5 @@ async def handle_resource_delete(
     )
 
 
-async def recover_panel(bot: discord.Client, api: Any, guild: discord.Guild) -> None:
-    await reconcile_panel(bot, api, guild, f"chest-recovery:{guild.id}")
+async def recover_panel(bot: discord.Client, api: Any, guild: discord.Guild, chest_id: str) -> None:
+    await reconcile_panel(bot, api, guild, f"chest-recovery:{guild.id}:{chest_id}", chest_id)
