@@ -41,6 +41,24 @@ def _row_text(row: dict) -> str:
     return row["components"][0]["content"]
 
 
+def _custom_ids(payload: dict) -> list[str]:
+    ids: list[str] = []
+
+    def visit(value: object) -> None:
+        if isinstance(value, dict):
+            custom_id = value.get("custom_id")
+            if isinstance(custom_id, str):
+                ids.append(custom_id)
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(payload)
+    return ids
+
+
 def test_home_is_a_summary_and_does_not_render_the_module_catalog() -> None:
     data = dashboard.build_payload({}, control_states=ACTIVE_STATES)
     content = "\n".join(
@@ -55,6 +73,17 @@ def test_home_is_a_summary_and_does_not_render_the_module_catalog() -> None:
     assert "PENDÊNCIAS" in content
     assert "parceria:open" not in str(data)
     assert dashboard.route_custom_id("core", "modules") in str(data)
+
+
+def test_home_keeps_custom_ids_unique_when_multiple_modules_need_review() -> None:
+    states = {
+        key: {"lifecycle": "inactive"}
+        for key in dashboard.dashboard_specs()
+    }
+
+    ids = _custom_ids(dashboard.build_payload({}, control_states=states))
+
+    assert len(ids) == len(set(ids))
 
 
 def test_central_shell_puts_the_official_banner_first() -> None:

@@ -553,7 +553,10 @@ def build_payload(
                 section(
                     text_display(uk.nexus_notice("REQUER ATENÇÃO", spec.nome, status.hint)),
                     accessory=button(
-                        custom_id=route_custom_id("core", "modules"),
+                        # Cada mÃ³dulo pendente precisa de um custom_id prÃ³prio.
+                        # O Discord rejeita a mensagem inteira quando dois
+                        # componentes do mesmo payload compartilham o ID.
+                        custom_id=central_custom_id("core", f"review_{key}"),
                         label="REVISAR",
                         style=BUTTON_PRIMARY if license_active else BUTTON_SECONDARY,
                         disabled=not license_active,
@@ -985,6 +988,9 @@ async def dispatch_components_v2(interaction: discord.Interaction) -> bool:
         component_type = 0
 
     if module_key == "core":
+        if action_key.startswith("review_"):
+            await _dispatch_modules_group(interaction, 0)
+            return True
         group_match = GROUP_ACTION_RE.fullmatch(action_key)
         if group_match is not None:
             await _dispatch_modules_group(interaction, int(group_match.group(1)))

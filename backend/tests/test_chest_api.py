@@ -1,6 +1,7 @@
 import asyncio
 
 import app.models  # noqa: F401
+import app.api.platform.chest as chest_api
 from app.api.platform import router as platform_router
 from app.core.config import get_settings
 from app.db import Base, get_session
@@ -12,7 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 
-def test_chest_api_actor_revision_idempotency_and_capabilities():
+def test_chest_api_actor_revision_idempotency_and_capabilities(monkeypatch):
     async def prepare():
         engine = create_async_engine(
             "sqlite+aiosqlite:///:memory:",
@@ -138,5 +139,46 @@ def test_chest_api_actor_revision_idempotency_and_capabilities():
             )
             assert stale.status_code == 409
             assert stale.json()["detail"]["current_revision"] == 2
+
+            recovery_calls = []
+
+            async def fake_create_missing_balances(*args, **kwargs):
+                recovery_calls.append(("balances", kwargs["chest_id"]))
+                return {"created": 0}
+
+            async def fake_queue_panel_recovery(*args, **kwargs):
+                recovery_calls.append(("panel", kwargs["chest_id"]))
+                return {"queued": True}
+
+            monkeypatch.setattr(
+                chest_api.services,
+                "create_missing_balances",
+                fake_create_missing_balances,
+            )
+            monkeypatch.setattr(
+                chest_api.services,
+                "queue_panel_recovery",
+                fake_queue_panel_recovery,
+            )
+            for action, key in (
+                ("create_missing_balances", "recover-balances"),
+                ("reconcile_panel", "recover-panel"),
+            ):
+                response = client.post(
+                    "/internal/platform/guilds/100/modules/chest/recovery",
+                    headers=headers,
+                    json={
+                        "action": action,
+                        "chest_id": "chest-specific",
+                        "idempotency_key": key,
+                        "actor": actor,
+                    },
+                )
+                assert response.status_code == 200
+
+            assert recovery_calls == [
+                ("balances", "chest-specific"),
+                ("panel", "chest-specific"),
+            ]
     finally:
         asyncio.run(engine.dispose())

@@ -360,12 +360,14 @@ async def recover(
             guild_id=guild_id,
             actor=data.actor,
             idempotency_key=data.idempotency_key,
+            chest_id=data.chest_id,
         )
     return await services.queue_panel_recovery(
         session,
         guild_id=guild_id,
         actor=data.actor,
         idempotency_key=data.idempotency_key,
+        chest_id=data.chest_id,
     )
 
 
