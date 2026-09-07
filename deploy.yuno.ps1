@@ -165,7 +165,7 @@ with sqlite3.connect(sys.argv[1]) as backup, sqlite3.connect(sys.argv[2]) as mig
     if before != after:
         raise SystemExit(f"Contagens protegidas divergiram: {before} != {after}")
     head = migrated.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-    if head != "d3e4f5a6b7c8":
+    if head != "e4f5a6b7c8d9":
         raise SystemExit(f"Head inesperado na copia migrada: {head}")
     legacy = migrated.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='farm_weekly_goals'"
@@ -247,7 +247,7 @@ PY
   v2_event_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_events")
   DATABASE_URL="`$rehearsal_url" .venv/bin/python -m alembic -c backend/alembic.ini upgrade head
   rehearsal_head=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c 'select version_num from alembic_version')
-  test "`$rehearsal_head" = "d3e4f5a6b7c8"
+  test "`$rehearsal_head" = "e4f5a6b7c8d9"
   test "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select to_regclass('public.chest_movements') is not null")" = "t"
   test "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from pg_trigger where tgname='trg_chest_movements_immutable' and not tgisinternal")" = "1"
   test "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select to_regclass('public.farm_tickets') is null")" = "t"
