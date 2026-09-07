@@ -207,6 +207,13 @@ def test_platform_api_revalidates_actor_and_tenant() -> None:
                 },
             )
             assert panel.status_code == 200
+            resolved_panel = client.get(
+                "/internal/platform/guilds/guild-a/modules/api_test/panels/public",
+                headers=headers,
+                params={"resource_type": "cycle", "resource_id": "1"},
+            )
+            assert resolved_panel.status_code == 200
+            assert resolved_panel.json()["id"] == panel.json()["id"]
             cross_guild = client.patch(
                 f"/internal/platform/guilds/guild-b/panels/{panel.json()['id']}",
                 headers=headers,

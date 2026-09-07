@@ -13,7 +13,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import discord
-import pytest
 
 os.environ.setdefault("DISCORD_BOT_TOKEN", "test-token")
 

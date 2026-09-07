@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 from uuid import uuid4
 
 import discord
@@ -53,6 +54,7 @@ class InteractionRouter:
     def __init__(self, api, registry: UIRegistry | None = None) -> None:
         self.api = api
         self.registry = registry or ui_registry
+        self._ephemeral_panels: dict[int, dict[str, Any]] = {}
 
     async def dispatch_components_v2(self, interaction: discord.Interaction) -> bool:
         """Route a raw Components V2 interaction by its stable custom ID."""
@@ -116,8 +118,18 @@ class InteractionRouter:
                     interaction.guild.id, interaction.channel_id, interaction.message.id
                 )
             except Exception:
-                await self._deny(interaction, "Não consegui validar a identidade deste painel.")
-                return
+                panel = self._ephemeral_panels.get(interaction.message.id)
+                if panel is None:
+                    try:
+                        panel = await self.api.panel_by_identity(
+                            interaction.guild.id, module_key, surface
+                        )
+                    except Exception:
+                        await self._deny(
+                            interaction,
+                            "Não consegui validar a identidade deste painel.",
+                        )
+                        return
         if panel.get("module_key") != module_key or panel.get("panel_key") != surface:
             await self._deny(interaction, "Este painel não pertence ao recurso solicitado.")
             return
@@ -175,6 +187,14 @@ class InteractionRouter:
         try:
             result = await action.handler(context)
             await self._render(interaction, result)
+            if result.components_v2 is not None and result.ephemeral:
+                try:
+                    response_message = await interaction.original_response()
+                    self._ephemeral_panels[response_message.id] = dict(panel)
+                    if len(self._ephemeral_panels) > 1024:
+                        self._ephemeral_panels.pop(next(iter(self._ephemeral_panels)))
+                except Exception:
+                    pass
             await self.api.finish_interaction(
                 interaction.guild.id,
                 receipt["receipt_id"],

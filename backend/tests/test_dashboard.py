@@ -283,7 +283,7 @@ def test_legacy_catalog_has_no_runtime_implementation() -> None:
         assert spec.control_plane is None
         assert spec.retired is True
     assert list(dashboard.dashboard_specs()) == [
-        "registration", "tags", "farm_tickets", "meta", "parceria"
+        "registration", "tags", "farm_tickets", "meta", "chest", "parceria"
     ]
 
 
@@ -303,6 +303,7 @@ def test_module_navigation_switches_between_released_modules() -> None:
         "tags",
         "farm_tickets",
         "meta",
+        "chest",
         "parceria",
     }
 

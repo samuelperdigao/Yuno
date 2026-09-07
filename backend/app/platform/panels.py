@@ -4,13 +4,12 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.platform.audit import write_audit
 from app.platform.models import PanelInstance, PanelState
 from app.platform.registry import module_registry
-
 
 TRANSITIONS: dict[PanelState, set[PanelState]] = {
     PanelState.draft: {PanelState.ready, PanelState.archived, PanelState.error},
@@ -108,6 +107,28 @@ async def get_panel_by_message(
                 PanelInstance.guild_id == guild_id,
                 PanelInstance.channel_id == channel_id,
                 PanelInstance.message_id == message_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def get_panel_by_identity(
+    session: AsyncSession,
+    *,
+    guild_id: str,
+    module_key: str,
+    panel_key: str,
+    resource_type: str = "",
+    resource_id: str = "",
+) -> PanelInstance | None:
+    return (
+        await session.execute(
+            select(PanelInstance).where(
+                PanelInstance.guild_id == guild_id,
+                PanelInstance.module_key == module_key,
+                PanelInstance.panel_key == panel_key,
+                PanelInstance.resource_type == resource_type,
+                PanelInstance.resource_id == resource_id,
             )
         )
     ).scalar_one_or_none()

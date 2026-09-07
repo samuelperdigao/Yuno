@@ -85,6 +85,18 @@ async def authorize(
             )
         )
     ).scalars().all()
+    # O painel singleton ainda nao conhece o bau escolhido. Um grant candidato
+    # libera apenas o seletor; o servico revalida o resource_id concreto.
+    if capability.resource_scoped and not resource_id:
+        allowed = any(_subject_matches(grant, actor) for grant in grants)
+        return AuthorizationOut(
+            allowed=allowed,
+            reason=(
+                "Grant publicado encontrado; recurso sera revalidado."
+                if allowed
+                else capability.denial_reason
+            ),
+        )
     allowed = any(
         _subject_matches(grant, actor) and _scope_matches(grant, actor, resource_id)
         for grant in grants

@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.platform import (
     audits,
     automation,
+    chest,
     configuration,
     deliveries,
     diagnostics,
@@ -27,6 +28,7 @@ for child in (
     permissions.router,
     panels.router,
     automation.router,
+    chest.router,
     deliveries.router,
     interactions.router,
     migrations.router,

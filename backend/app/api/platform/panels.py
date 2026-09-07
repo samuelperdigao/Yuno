@@ -1,12 +1,21 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.platform.dependencies import ActorHeader, CorrelationHeader, require_active_license, require_platform_admin
+from app.api.platform.dependencies import (
+    ActorHeader,
+    CorrelationHeader,
+    require_active_license,
+    require_platform_admin,
+)
 from app.core.security import require_bot_token
 from app.db import get_session
-from app.platform.panels import ensure_panel, get_panel, get_panel_by_message, update_panel
+from app.platform.panels import (
+    ensure_panel,
+    get_panel_by_identity,
+    get_panel_by_message,
+    update_panel,
+)
 from app.platform.schemas import PanelEnsureIn, PanelOut, PanelUpdateIn
-
 
 router = APIRouter(dependencies=[Depends(require_bot_token)])
 
@@ -70,6 +79,34 @@ async def panel_from_message(
     await require_active_license(session, guild_id)
     panel = await get_panel_by_message(
         session, guild_id=guild_id, channel_id=channel_id, message_id=message_id
+    )
+    if panel is None:
+        raise HTTPException(status_code=404, detail="Painel nao encontrado nesta guild.")
+    return panel_out(panel)
+
+
+@router.get(
+    "/guilds/{guild_id}/modules/{module_key}/panels/{panel_key}",
+    response_model=PanelOut,
+)
+async def panel_from_identity(
+    guild_id: str,
+    module_key: str,
+    panel_key: str,
+    resource_type: str = Query(default="", max_length=80),
+    resource_id: str = Query(default="", max_length=80),
+    session: AsyncSession = Depends(get_session),
+) -> PanelOut:
+    """Resolve a durable panel after ephemeral UI state or a bot restart is lost."""
+
+    await require_active_license(session, guild_id)
+    panel = await get_panel_by_identity(
+        session,
+        guild_id=guild_id,
+        module_key=module_key,
+        panel_key=panel_key,
+        resource_type=resource_type,
+        resource_id=resource_id,
     )
     if panel is None:
         raise HTTPException(status_code=404, detail="Painel nao encontrado nesta guild.")

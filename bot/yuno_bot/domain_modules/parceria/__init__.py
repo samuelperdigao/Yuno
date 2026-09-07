@@ -1,5 +1,5 @@
 from yuno_bot.domain_modules.parceria.admin import (
-    build_admin_payload, confirm_publish, diagnose, open_system, recover_panel,
+    confirm_publish, diagnose, open_system, recover_panel,
     render_admin, review_publish, set_ativas_channel, set_category,
     set_log_channel, set_manager_roles, set_registrar_channel,
 )

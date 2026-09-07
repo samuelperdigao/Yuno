@@ -12,6 +12,7 @@ $ErrorActionPreference = "Stop"
 $Remote = "ubuntu@163.176.143.142"
 $UserProfileDir = [Environment]::GetFolderPath("UserProfile")
 $SshKeyCandidates = @(
+    (Join-Path $PSScriptRoot "..\..\Morro do Mineiro Bot\oracle.key"),
     (Join-Path $PSScriptRoot "..\Morro do Mineiro Bot\oracle.key"),
     (Join-Path $UserProfileDir ".ssh\yuno_oracle_ed25519"),
     (Join-Path $PSScriptRoot "..\Bot Discord\oracle.key")
@@ -164,7 +165,7 @@ with sqlite3.connect(sys.argv[1]) as backup, sqlite3.connect(sys.argv[2]) as mig
     if before != after:
         raise SystemExit(f"Contagens protegidas divergiram: {before} != {after}")
     head = migrated.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-    if head != "b1c2d3e4f5a6":
+    if head != "d3e4f5a6b7c8":
         raise SystemExit(f"Head inesperado na copia migrada: {head}")
     legacy = migrated.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='farm_weekly_goals'"
@@ -246,7 +247,9 @@ PY
   v2_event_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_events")
   DATABASE_URL="`$rehearsal_url" .venv/bin/python -m alembic -c backend/alembic.ini upgrade head
   rehearsal_head=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c 'select version_num from alembic_version')
-  test "`$rehearsal_head" = "b1c2d3e4f5a6"
+  test "`$rehearsal_head" = "d3e4f5a6b7c8"
+  test "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select to_regclass('public.chest_movements') is not null")" = "t"
+  test "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from pg_trigger where tgname='trg_chest_movements_immutable' and not tgisinternal")" = "1"
   test "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select to_regclass('public.farm_tickets') is null")" = "t"
   test "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select to_regclass('public.farm_cycles') is null")" = "t"
   archive_count=`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_legacy_archive where source_namespace='yuno.legacy.farm_tickets.cutover'")
@@ -256,6 +259,8 @@ PY
   test "`$v2_ticket_count" = "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_tickets")"
   test "`$v2_event_count" = "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_events")"
   test "`$(sudo -u postgres psql -At -d "`$rehearsal_db" -c "select count(*) from farm_ticket_v2_legacy_archive where length(checksum_sha256) <> 64")" = "0"
+  YUNO_TEST_POSTGRES_URL="`$rehearsal_url" .venv/bin/python -m pytest -q backend/tests/test_platform_postgres.py backend/tests/test_chest_postgres.py
+  echo "POSTGRES_TEST_GATES=ok"
   echo "POSTGRES_RESTORE_REHEARSAL_OK=`$rehearsal_db"
   echo "POSTGRES_MIGRATION_REHEARSAL_HEAD=`$rehearsal_head"
   cleanup_rehearsal
@@ -311,7 +316,7 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
 else
   actual_head=`$(.venv/bin/python -m alembic -c backend/alembic.ini current | tail -n 1 | awk '{print `$1}')
 fi
-test "`$actual_head" = "b1c2d3e4f5a6"
+test "`$actual_head" = "d3e4f5a6b7c8"
 echo "ALEMBIC_HEAD=`$actual_head"
 
 echo "DEPLOYED_SHA=`$(git rev-parse HEAD)"

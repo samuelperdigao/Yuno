@@ -9,7 +9,7 @@ from app.api.platform.dependencies import ActorHeader, CorrelationHeader, requir
 from app.core.security import require_bot_token
 from app.db import get_session
 from app.domain_modules.tags import services
-from app.domain_modules.tags.domain import MemberDiscordSnapshot, TagSyncRunMode
+from app.domain_modules.tags.domain import MemberDiscordSnapshot
 from app.domain_modules.tags.schemas import (
     TagBindingDeleteIn,
     TagBindingUpsertIn,

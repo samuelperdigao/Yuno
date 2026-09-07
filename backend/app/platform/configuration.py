@@ -77,6 +77,7 @@ async def save_draft(
     schema_version: int,
     data: dict,
     correlation_id: str,
+    commit: bool = True,
 ) -> ModuleConfigDraft:
     definition = module_registry.get(module_key)
     if definition is None or definition.configuration is None:
@@ -114,7 +115,8 @@ async def save_draft(
         after={"revision": draft.revision, "content_hash": _hash(data)},
         correlation_id=correlation_id,
     )
-    await session.commit()
+    if commit:
+        await session.commit()
     return draft
 
 
@@ -154,6 +156,7 @@ async def publish(
     grants: list[PermissionGrantIn],
     correlation_id: str,
     source_version: int | None = None,
+    commit: bool = True,
 ) -> ModuleConfigVersion:
     _validate_grants(module_key, grants)
     instance = await ensure_module_instance(
@@ -241,7 +244,8 @@ async def publish(
         config_version=version.version,
         correlation_id=correlation_id,
     )
-    await session.commit()
+    if commit:
+        await session.commit()
     return version
 
 

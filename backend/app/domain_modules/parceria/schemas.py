@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.domain_modules.parceria.domain import ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, normalize_family
+from app.domain_modules.parceria.domain import ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES
 from app.platform.schemas import ActorContextIn
 
 

@@ -223,4 +223,5 @@ from app.domain_modules.registration import (
 )
 from app.domain_modules.tags import models as tags_domain_models  # noqa: F401
 from app.domain_modules.parceria import models as parceria_domain_models  # noqa: F401
+from app.domain_modules.chest import models as chest_domain_models  # noqa: F401
 from app.platform import models as platform_models  # noqa: F401

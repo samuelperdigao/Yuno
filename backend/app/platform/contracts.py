@@ -10,7 +10,7 @@ except ImportError:  # Python 3.10 do servidor de teste
     class StrEnum(str, Enum):
         pass
 import re
-from typing import Any, Awaitable, Callable, Protocol
+from typing import Any, Callable, Protocol
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 

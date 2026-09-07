@@ -37,10 +37,12 @@ def test_meta_migration_on_empty_sqlite(tmp_path: Path) -> None:
         }
         assert (
             connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-            == "b1c2d3e4f5a6"
+            == "d3e4f5a6b7c8"
         )
         assert "parceria_domain_families" in tables
         assert "parceria_domain_partnerships" in tables
+        assert "chest_movements" in tables
+        assert "chest_balances" in tables
         assert "parceria_registration_attempts" in tables
         assert len([name for name in tables if name.startswith("meta_")]) == 11
         assert "farm_weekly_goals" not in tables

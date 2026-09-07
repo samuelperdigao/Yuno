@@ -564,6 +564,21 @@ class PlatformAPIClient:
             correlation_id=actor.correlation_id,
         )
 
+    async def panel_by_identity(
+        self,
+        guild_id: int,
+        module_key: str,
+        panel_key: str,
+        *,
+        resource_type: str = "",
+        resource_id: str = "",
+    ) -> dict:
+        return await self._request(
+            "GET",
+            f"/guilds/{guild_id}/modules/{module_key}/panels/{panel_key}",
+            params={"resource_type": resource_type, "resource_id": resource_id},
+        )
+
     async def parceria_reconcile_publications(self, guild_id: int, *, actor: Any) -> dict:
         return await self._request(
             "POST",
@@ -738,3 +753,43 @@ class PlatformAPIClient:
 
     async def rollback_migration(self, guild_id: int, run_id: str, *, actor: Any) -> dict:
         return await self._request("POST", f"/guilds/{guild_id}/migrations/{run_id}/rollback", json={"actor": actor.as_payload()}, actor_id=actor.user_id, correlation_id=actor.correlation_id)
+
+    async def chest_catalog_draft(self, guild_id: int, *, actor: Any) -> dict:
+        return await self._request("POST", f"/guilds/{guild_id}/modules/chest/catalog/draft", json={"actor": actor.as_payload()}, actor_id=actor.user_id, correlation_id=actor.correlation_id)
+
+    async def chest_save_settings(self, guild_id: int, payload: dict, *, actor: Any) -> dict:
+        return await self._request("PUT", f"/guilds/{guild_id}/modules/chest/configuration/draft", json={**payload, "actor": actor.as_payload()}, actor_id=actor.user_id, correlation_id=actor.correlation_id)
+
+    async def chest_upsert(self, guild_id: int, payload: dict, *, actor: Any) -> dict:
+        return await self._request("PUT", f"/guilds/{guild_id}/modules/chest/catalog/draft/chests", json={**payload, "actor": actor.as_payload()}, actor_id=actor.user_id, correlation_id=actor.correlation_id)
+
+    async def chest_item_upsert(self, guild_id: int, payload: dict, *, actor: Any) -> dict:
+        return await self._request("PUT", f"/guilds/{guild_id}/modules/chest/catalog/draft/items", json={**payload, "actor": actor.as_payload()}, actor_id=actor.user_id, correlation_id=actor.correlation_id)
+
+    async def chest_link_upsert(self, guild_id: int, payload: dict, *, actor: Any) -> dict:
+        return await self._request("PUT", f"/guilds/{guild_id}/modules/chest/catalog/draft/links", json={**payload, "actor": actor.as_payload()}, actor_id=actor.user_id, correlation_id=actor.correlation_id)
+
+    async def chest_publish(self, guild_id: int, payload: dict, *, actor: Any) -> dict:
+        return await self._request("POST", f"/guilds/{guild_id}/modules/chest/catalog/publish", json={**payload, "actor": actor.as_payload()}, actor_id=actor.user_id, correlation_id=actor.correlation_id)
+
+    async def chest_catalog(self, guild_id: int, *, actor: Any) -> dict:
+        return await self._request("POST", f"/guilds/{guild_id}/modules/chest/catalog/published", json={"actor": actor.as_payload()}, actor_id=actor.user_id, correlation_id=actor.correlation_id)
+
+    async def chest_admin_summary(self, guild_id: int, *, actor: Any) -> dict:
+        return await self._request("POST", f"/guilds/{guild_id}/modules/chest/admin-summary", json={"actor": actor.as_payload()}, actor_id=actor.user_id, correlation_id=actor.correlation_id)
+
+    async def chest_stock(self, guild_id: int, chest_id: str, *, actor: Any) -> dict:
+        return await self._request("POST", f"/guilds/{guild_id}/modules/chest/stock", json={"chest_id": chest_id, "actor": actor.as_payload()}, actor_id=actor.user_id, correlation_id=actor.correlation_id)
+
+    async def chest_move(self, guild_id: int, payload: dict, *, actor: Any) -> dict:
+        return await self._request("POST", f"/guilds/{guild_id}/modules/chest/movements", json={**payload, "actor": actor.as_payload()}, actor_id=actor.user_id, correlation_id=actor.correlation_id)
+
+    async def chest_history(self, guild_id: int, payload: dict, *, actor: Any) -> list[dict]:
+        owner_id = str(actor.user_id) if payload.get("actor_id") == str(actor.user_id) else None
+        return await self._request("POST", f"/guilds/{guild_id}/modules/chest/history", json={**payload, "actor": actor.as_payload(resource_owner_id=owner_id)}, actor_id=actor.user_id, correlation_id=actor.correlation_id)
+
+    async def chest_recover(self, guild_id: int, payload: dict, *, actor: Any) -> dict:
+        return await self._request("POST", f"/guilds/{guild_id}/modules/chest/recovery", json={**payload, "actor": actor.as_payload()}, actor_id=actor.user_id, correlation_id=actor.correlation_id)
+
+    async def chest_resource_deleted(self, guild_id: int, payload: dict, *, actor: Any) -> dict:
+        return await self._request("POST", f"/guilds/{guild_id}/modules/chest/resources/deleted", json={**payload, "actor": actor.as_payload()}, actor_id=actor.user_id, correlation_id=actor.correlation_id)
