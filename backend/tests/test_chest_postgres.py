@@ -252,17 +252,18 @@ def test_chest_postgres_concurrent_withdrawal_and_append_only_trigger():
                     .scalars()
                     .first()
                 )
+                movement_id = movement.id
                 with pytest.raises(DBAPIError):
                     await session.execute(
                         update(ChestMovement)
-                        .where(ChestMovement.id == movement.id)
+                        .where(ChestMovement.id == movement_id)
                         .values(observation="alterado")
                     )
                     await session.commit()
                 await session.rollback()
                 with pytest.raises(DBAPIError):
                     await session.execute(
-                        delete(ChestMovement).where(ChestMovement.id == movement.id)
+                        delete(ChestMovement).where(ChestMovement.id == movement_id)
                     )
                     await session.commit()
         finally:
