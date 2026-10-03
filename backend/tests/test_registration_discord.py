@@ -743,7 +743,7 @@ def test_registration_admin_configuration_uses_the_nexus_shell_and_mobile_safe_c
     assert container["type"] == 17
     assert len(container["components"]) <= 40
     rendered = str(container)
-    assert "YUNO NEXUS // MODULES / REGISTRATION / CONFIG" in rendered
+    assert "## CONFIGURAÇÃO" in rendered
     assert "set_id_format" in rendered
     assert "set_resubmit_policy" in rendered
     assert "route_overview" in rendered
@@ -835,13 +835,13 @@ def test_unpublished_admin_summary_hides_internal_state(monkeypatch) -> None:
     assert captured["components"][0]["type"] == 12
     children = captured["components"][1]["components"]
     content = "\n".join(item["content"] for item in children if item["type"] == 10)
-    navigation = next(item for item in children if item["type"] == 1 and len(item["components"]) == 2 and item["components"][0]["custom_id"].endswith("route_modules"))
+    navigation = next(item for item in children if item["type"] == 1 and item["components"][0]["custom_id"].endswith("route_modules"))
     action = next(item for item in children if item["type"] == 1 and item["components"][0]["custom_id"].endswith("open_system"))
     button_data = action["components"][0]
     assert navigation["components"][0]["custom_id"] == "yuno:central:v1:core:route_modules"
     assert "Aguardando publicação" in content
     assert "lifecycle" not in content.lower()
-    assert "YUNO NEXUS // MODULES / REGISTRATION" in content
+    assert "## REGISTRO" in content
     assert button_data["label"] == "CONFIGURAR"
     assert button_data["style"] == 1
     assert "emoji" not in button_data
@@ -864,7 +864,7 @@ def test_published_admin_summary_has_clean_visual_hierarchy() -> None:
     children = data["components"][1]["components"]
     content = "\n".join(item["content"] for item in children if item["type"] == 10)
 
-    assert content.startswith("# YUNO NEXUS // MODULES / REGISTRATION")
+    assert content.startswith("## REGISTRO")
     assert "// CONFIGURAÇÃO" in content
     assert "**ESTADO**\nOperacional" in content
     assert "<#10>" in content

@@ -190,7 +190,7 @@ def _main_payload(goals: dict[str, Any], settings: dict[str, Any]) -> dict[str, 
         )))
     return dashboard.central_shell(payload(
         uk.panel(
-            header=[uk.nexus_title("SISTEMA DE METAS", path="MODULES / METAS", subtitle="Metas recorrentes e publicação.")],
+            header=[uk.nexus_admin_title("SISTEMA DE METAS", path="MODULES / METAS", subtitle="Metas recorrentes e publicação.")],
             blocks=blocks,
             actions=[
                 action_row(
@@ -220,7 +220,7 @@ def _main_payload(goals: dict[str, Any], settings: dict[str, Any]) -> dict[str, 
                 dashboard.module_navigation("meta"),
                 dashboard.route_navigation("meta", "overview"),
             ],
-            footer="NEXUS CORE // SESSION ACTIVE",
+            footer="Administração do servidor",
             accent_color=ADMIN_COLOR,
         )
     ))
@@ -375,7 +375,7 @@ def _editor_payload(
     progress = _editor_progress(step)
     content = [
         text_display(
-            uk.nexus_title(
+            uk.nexus_admin_title(
                 title.upper(),
                 path="MODULES / METAS / CONFIG",
                 subtitle="Acompanhe cada etapa antes de salvar a Meta.",
@@ -1090,7 +1090,7 @@ async def settings(interaction: discord.Interaction, api: Any) -> None:
             interaction,
             dashboard.central_shell(payload(
                 uk.panel(
-                    header=[uk.nexus_title(
+                    header=[uk.nexus_admin_title(
                         "CONFIGURAÇÃO", path="MODULES / METAS / CONFIG", subtitle="Canal dos avisos de cada ciclo."
                     )],
                     blocks=[text_display(uk.nexus_configuration(
@@ -1106,7 +1106,7 @@ async def settings(interaction: discord.Interaction, api: Any) -> None:
                         ),
                         dashboard.route_navigation("meta", "configuration"),
                     ],
-                    footer="NEXUS CORE // SESSION ACTIVE",
+                    footer="Administração do servidor",
                     accent_color=ADMIN_COLOR,
                 )
             )),
@@ -1139,10 +1139,10 @@ async def save_settings(interaction: discord.Interaction, api: Any) -> None:
             interaction,
             dashboard.central_shell(payload(
                 uk.panel(
-                    header=[uk.nexus_title("CONFIGURAÇÃO ATUALIZADA", path="MODULES / METAS / CONFIG")],
+                    header=[uk.nexus_admin_title("CONFIGURAÇÃO ATUALIZADA", path="MODULES / METAS / CONFIG")],
                     blocks=[text_display(uk.nexus_notice("CONFIGURAÇÃO", "Canal atualizado", f"Os avisos serão publicados em {channel.mention}."))],
                     actions=[dashboard.route_navigation("meta", "configuration")],
-                    footer="SYS://YUNO/NEXUS • OPERATION COMPLETE",
+                    footer="Alteração concluída",
                     accent_color=ADMIN_COLOR,
                 )
             )),
@@ -1169,7 +1169,7 @@ async def select_goal(interaction: discord.Interaction, api: Any) -> None:
         config = goal.get("future_configuration") or goal.get("current_configuration") or {}
         state = _public_state(goal)
         detail = text_display(
-                uk.nexus_title(goal["name"], path="MODULES / META", subtitle="Detalhes da Meta")
+                uk.nexus_admin_title(goal["name"], path="MODULES / META", subtitle="Detalhes da Meta")
                 + "\n\n"
                 + uk.nexus_state("STATUS", _public_status(goal), state=state)
                 + "\n\n"
@@ -1192,7 +1192,7 @@ async def select_goal(interaction: discord.Interaction, api: Any) -> None:
                 uk.panel(
                     header=detail,
                     actions=[*actions, dashboard.route_navigation("meta", "overview")],
-                    footer="NEXUS CORE // SESSION ACTIVE",
+                    footer="Administração do servidor",
                     accent_color=ADMIN_COLOR,
                 )
             )),

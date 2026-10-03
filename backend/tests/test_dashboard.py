@@ -67,7 +67,7 @@ def test_home_is_a_summary_and_does_not_render_the_module_catalog() -> None:
     )
 
     assert data["allowed_mentions"] == {"parse": [], "replied_user": False}
-    assert "YUNO NEXUS // CORE" in content
+    assert "## CENTRAL DE COMANDO" in content
     assert "MÓDULOS" in content
     assert "ATIVOS" in content
     assert "PENDÊNCIAS" in content
@@ -102,7 +102,7 @@ def test_module_diagnostic_uses_refresh_and_deterministic_return() -> None:
     )
     rendered = str(data)
 
-    assert "YUNO NEXUS // MODULES / REGISTRATION" in rendered
+    assert "## DIAGNÓSTICO" in rendered
     assert dashboard.route_custom_id("registration", "diagnostic") in rendered
     assert dashboard.route_custom_id("registration", "configuration") in rendered
     assert "ATUALIZAR" in rendered
@@ -235,21 +235,15 @@ def test_modules_screen_scales_with_groups_without_truncating_options(monkeypatc
 
     first = dashboard.build_modules_payload({}, page=0)
     second = dashboard.build_modules_payload({}, page=1)
-    first_select = next(
-        item
-        for item in _central_container(first)["components"]
-        if item["type"] == 1 and item["components"][0]["type"] == 3
-    )["components"][0]
-    second_select = next(
-        item
-        for item in _central_container(second)["components"]
-        if item["type"] == 1 and item["components"][0]["type"] == 3
-    )["components"][0]
-
-    assert len(first_select["options"]) == 25
-    assert len(second_select["options"]) == 1
-    assert first_select["options"][0]["value"] == "module_0"
-    assert second_select["options"][0]["value"] == "module_25"
+    seen = []
+    for page in range(4):
+        data = dashboard.build_modules_payload({}, page=page)
+        rows = _rows(data)
+        seen.extend(rows)
+        assert component_count(data['components']) <= 40
+        assert all(row['accessory']['label'] == 'Abrir' for row in rows.values())
+        assert len(_custom_ids(data)) == len(set(_custom_ids(data)))
+    assert seen == list(specs)
     assert dashboard.central_custom_id("core", "group_1") in str(first)
     assert dashboard.central_custom_id("core", "group_0") in str(second)
 
@@ -273,7 +267,7 @@ def test_navigation_row_keeps_disabled_buttons_with_unique_custom_ids() -> None:
     assert len(custom_ids) == len(set(custom_ids))
 
 
-def test_modules_screen_shows_selected_summary_and_only_its_open_action() -> None:
+def test_modules_screen_shows_each_catalog_entry_with_its_open_action() -> None:
     data = dashboard.build_modules_payload(
         {}, selected_module="meta", control_states=ACTIVE_STATES
     )
@@ -281,7 +275,8 @@ def test_modules_screen_shows_selected_summary_and_only_its_open_action() -> Non
 
     assert "Meta" in serialized
     assert dashboard.central_custom_id("meta", "open") in serialized
-    assert "registration:open" not in serialized
+    assert "registration:open" in serialized
+    assert list(_rows(data)) == list(dashboard.dashboard_specs())
 
 
 def test_string_select_rejects_more_than_discord_allows() -> None:
@@ -379,7 +374,7 @@ def test_tags_configuration_uses_nexus_actions_with_stable_custom_ids() -> None:
         "back",
     }
     assert data["components"][0]["type"] == 12
-    assert "YUNO NEXUS // MODULES / TAGS / CONFIG" in str(data)
+    assert "## CONFIGURAÇÃO" in str(data)
     assert buttons["confirm_publish"]["label"] == "PUBLICAR"
     assert buttons["cleanup"]["label"] == "LIMPAR TAGS"
     assert "preview" not in buttons
@@ -399,7 +394,7 @@ def test_tags_overview_is_rendered_inside_the_official_nexus_shell() -> None:
 
     rendered = str(data)
     assert data["components"][0]["type"] == 12
-    assert "YUNO NEXUS // MODULES / TAGS" in rendered
+    assert "MODULES / TAGS" not in rendered
     assert "SISTEMA DE TAGS" in rendered
     assert "SEM CONFIGURAÇÃO" not in rendered
     assert "🏷️" not in rendered
@@ -419,7 +414,7 @@ def test_tags_diagnostics_only_reports_determinable_runtime_data() -> None:
     )
 
     rendered = str(data)
-    assert "YUNO NEXUS // MODULES / TAGS / DIAGNOSTICS" in rendered
+    assert "DIAGNOSTICS" not in rendered
     assert "VÍNCULOS PUBLICADOS" in rendered
     assert "INTENTS PENDENTES" in rendered
     assert "PENDÊNCIAS" in rendered
@@ -572,7 +567,7 @@ async def test_startup_refresh_updates_only_the_registered_central(monkeypatch) 
     assert refreshed is True
     assert edited[0][1:3] == (10, 20)
     assert dashboard.route_custom_id("core", "modules") in str(edited[0][3])
-    assert "YUNO NEXUS // CORE" in str(edited[0][3])
+    assert "## CENTRAL DE COMANDO" in str(edited[0][3])
 
 
 @pytest.mark.asyncio
@@ -839,3 +834,46 @@ async def test_invalid_visual_route_is_rejected_without_business_dispatch(monkey
 
     assert await dashboard.dispatch_components_v2(interaction) is True
     assert invalid == [interaction]
+
+
+@pytest.mark.asyncio
+async def test_chest_detail_returns_to_catalog_modules_and_home(monkeypatch) -> None:
+    from yuno_bot.domain_modules.chest import admin
+
+    data = admin._chest_detail_payload(
+        {'chests': [{'id': 'one', 'name': 'TESTE', 'active': True}]}, {}, 'one'
+    )
+    ids = _custom_ids(data)
+    called = []
+
+    async def config(current):
+        return {}
+
+    async def page(current, module):
+        called.append(module)
+
+    async def modules(current, config):
+        called.append('modules')
+
+    async def home(current, config):
+        called.append('home')
+
+    monkeypatch.setattr(dashboard, '_central_config', config)
+    monkeypatch.setattr(dashboard, '_dispatch_page', page)
+    monkeypatch.setattr(dashboard, '_render_modules', modules)
+    monkeypatch.setattr(dashboard, '_render_home', home)
+    for module, route in [('chest', 'overview'), ('core', 'modules'), ('core', 'home')]:
+        custom_id = dashboard.route_custom_id(module, route)
+        assert custom_id in ids
+        interaction = _FakeInteraction(custom_id, component_type=2)
+        assert await dashboard.dispatch_components_v2(interaction)
+    assert called == ['chest', 'modules', 'home']
+    assert component_count(data['components']) <= 40
+    assert 'YUNO NEXUS / SISTEMA' not in str(data)
+    assert 'SESSION ACTIVE' not in str(data)
+
+
+def test_unknown_module_route_still_has_recovery_navigation() -> None:
+    ids = _custom_ids(dashboard.route_navigation('tags', 'unknown'))
+    assert dashboard.route_custom_id('core', 'modules') in ids
+    assert dashboard.route_custom_id('core', 'home') in ids

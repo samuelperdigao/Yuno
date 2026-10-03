@@ -221,7 +221,7 @@ def build_admin_payload(instance: dict, config: dict[str, Any]) -> dict[str, Any
     return dashboard.central_shell(payload(
         uk.panel(
             header=[
-                uk.nexus_title(
+                uk.nexus_admin_title(
                     "TICKETS DE FARM",
                     path="MODULES / FARM TICKETS",
                     subtitle="Lançamentos comprovados e recolhimentos vinculados aos ciclos de Metas.",
@@ -251,7 +251,7 @@ def build_admin_payload(instance: dict, config: dict[str, Any]) -> dict[str, Any
                 ),
                 dashboard.route_navigation(MODULE_KEY, "overview"),
             ],
-            footer="NEXUS CORE // SESSION ACTIVE",
+            footer="Administração do servidor",
             accent_color=COLOR,
         )
     ))
@@ -316,7 +316,7 @@ def build_system_payload(config: dict[str, Any], *, unsaved: bool) -> dict[str, 
         )))
     return dashboard.central_shell(payload(
         uk.panel(
-            header=[uk.nexus_title(
+            header=[uk.nexus_admin_title(
                 "CONFIGURAÇÃO",
                 path="MODULES / FARM TICKETS / CONFIG",
                 subtitle="Escolha os recursos do servidor. Nada é criado antes da publicação.",
@@ -337,7 +337,7 @@ def build_system_payload(config: dict[str, Any], *, unsaved: bool) -> dict[str, 
                 ),
                 dashboard.route_navigation(MODULE_KEY, "configuration"),
             ],
-            footer="NEXUS CORE // SESSION ACTIVE",
+            footer="Administração do servidor",
             accent_color=COLOR,
         )
     ))
@@ -528,7 +528,7 @@ async def review_publish(interaction: discord.Interaction, api: Any) -> None:
             interaction,
             dashboard.central_shell(payload(
                 uk.panel(
-                    header=[uk.nexus_title(
+                    header=[uk.nexus_admin_title(
                         "REVISAR PUBLICAÇÃO",
                         path="MODULES / FARM TICKETS / PUBLISH",
                         subtitle="Confirme os recursos e permissões que serão ativados.",
@@ -558,7 +558,7 @@ async def review_publish(interaction: discord.Interaction, api: Any) -> None:
                             style=2,
                         ),
                     ), dashboard.route_navigation(MODULE_KEY, "configuration")],
-                    footer="A confirmação cria uma versão imutável e provisiona categoria, canais e painel.\nNEXUS CORE // SESSION ACTIVE",
+                    footer="A confirmação cria uma versão imutável e provisiona categoria, canais e painel.\nAdministração do servidor",
                     accent_color=COLOR,
                 )
             )),

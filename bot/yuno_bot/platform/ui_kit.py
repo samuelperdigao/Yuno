@@ -203,6 +203,14 @@ def nexus_title(title: Any, *, path: str = "CORE", subtitle: Any = None) -> str:
     return clip(body)
 
 
+def nexus_admin_title(title: Any, *, path: str = "CORE", subtitle: Any = None) -> str:
+    # A marca já está no banner. Caminhos internos são metadados, não títulos.
+    body = f"## {str(title or '').strip()}"
+    if subtitle:
+        body += f"\n{str(subtitle).strip()}"
+    return clip(body)
+
+
 def nexus_metric(label: Any, value: Any) -> str:
     return clip(f"**{str(label or '').strip().upper()}**\n{str(value if value not in (None, '') else DASH)}")
 
@@ -225,11 +233,7 @@ def nexus_configuration(*pairs: tuple[Any, Any] | Sequence[Any]) -> str:
 
 
 def nexus_state(label: Any, value: Any, *, state: State | str | None = None) -> str:
-    suffix = ""
-    resolved = _state(state)
-    if resolved is not None:
-        suffix = f" · {resolved.value.upper()}"
-    return clip(f"**{str(label or '').strip().upper()}**\n{str(value or DASH).strip()}{suffix}")
+    return clip(f"**{str(label or '').strip().upper()}**\n{str(value or DASH).strip()}")
 
 
 def nexus_notice(title: Any, subject: Any, detail: Any) -> str:

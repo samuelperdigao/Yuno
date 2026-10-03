@@ -742,7 +742,7 @@ def build_admin_payload(instance: dict, draft: dict) -> dict[str, Any]:
     approver_label = "cargo configurado" if approver_count == 1 else "cargos configurados"
     return dashboard.central_shell(payload(
         uk.panel(
-            header=[uk.nexus_title("REGISTRO", path="MODULES / REGISTRATION", subtitle="Registro, análise e aprovação de membros")],
+            header=[uk.nexus_admin_title("REGISTRO", path="MODULES / REGISTRATION", subtitle="Registro, análise e aprovação de membros")],
             blocks=[
                 text_display(uk.nexus_state("ESTADO", status, state=state) + "\n" + status_detail),
                 text_display("// CONFIGURAÇÃO\n\n" + uk.nexus_metrics(
@@ -759,7 +759,7 @@ def build_admin_payload(instance: dict, draft: dict) -> dict[str, Any]:
                 ),
                 dashboard.route_navigation("registration", "overview"),
             ],
-            footer="NEXUS CORE // SESSION ACTIVE",
+            footer="Administração do servidor",
             state=state,
             accent_color=ADMIN_COLOR,
         )
@@ -790,7 +790,7 @@ async def _render_section(
     _, draft = await _admin_state(api, interaction.guild_id)
     config = {**REGISTRATION_VISUAL_DEFAULTS, **draft["data"]}
     components: list[dict[str, Any]] = [
-        text_display(uk.nexus_title("CONFIGURAÇÃO", path="MODULES / REGISTRATION / CONFIG", subtitle="Altere uma área por vez. As escolhas ficam em rascunho até a publicação.")),
+        text_display(uk.nexus_admin_title("CONFIGURAÇÃO", path="MODULES / REGISTRATION / CONFIG", subtitle="Altere uma área por vez. As escolhas ficam em rascunho até a publicação.")),
         text_display("// ÁREA DE CONFIGURAÇÃO"),
         action_row(_section_select()),
         separator(),
@@ -928,7 +928,7 @@ async def _render_section(
                 header=[],
                 blocks=components,
                 actions=[dashboard.route_navigation("registration", "configuration")],
-                footer="SYS://YUNO/NEXUS • CONFIGURATION DRAFT",
+                footer="Configuração em rascunho",
                 accent_color=ADMIN_COLOR,
             )
         )),
@@ -1267,7 +1267,7 @@ async def _render_publish_incident(
         interaction,
         dashboard.central_shell(payload(
             uk.panel(
-                header=[uk.nexus_title("INCIDENTE", path="MODULES / REGISTRATION / PUBLISH", subtitle="A publicação não pode continuar")],
+                header=[uk.nexus_admin_title("INCIDENTE", path="MODULES / REGISTRATION / PUBLISH", subtitle="A publicação não pode continuar")],
                 blocks=[
                     text_display("// INCIDENTE\n\nNão foi possível publicar a configuração. Corrija a configuração indicada antes de tentar novamente."),
                     text_display("**MOTIVO**\n" + reasons),
@@ -1276,7 +1276,7 @@ async def _render_publish_incident(
                     action_row(button(custom_id=dashboard.route_custom_id("registration", "configuration"), label="CORRIGIR CONFIGURAÇÃO", style=1)),
                     dashboard.route_navigation("registration", "configuration"),
                 ],
-                footer="SYS://YUNO/NEXUS • ACTION REQUIRED",
+                footer="Ação necessária",
                 state=uk.State.BLOCKED,
                 accent_color=uk.DANGER,
             )
@@ -1294,7 +1294,7 @@ async def review_publish(interaction: discord.Interaction, api: Any) -> None:
     config = draft["data"]
     data = dashboard.central_shell(payload(
         uk.panel(
-            header=[uk.nexus_title("REVISAR PUBLICAÇÃO", path="MODULES / REGISTRATION / PUBLISH", subtitle="Confirme os recursos que serão ativados")],
+            header=[uk.nexus_admin_title("REVISAR PUBLICAÇÃO", path="MODULES / REGISTRATION / PUBLISH", subtitle="Confirme os recursos que serão ativados")],
             blocks=[
                 text_display("// CONFIGURAÇÃO\n\n" + uk.nexus_metrics(
                     ("PAINEL", f"<#{config['panel_channel_id']}>"),
@@ -1311,7 +1311,7 @@ async def review_publish(interaction: discord.Interaction, api: Any) -> None:
                 ),
                 dashboard.route_navigation("registration", "configuration"),
             ],
-            footer="SYS://YUNO/NEXUS • READY TO PUBLISH",
+            footer="Pronto para publicar",
             accent_color=ADMIN_COLOR,
         )
     ))
@@ -1402,7 +1402,7 @@ async def confirm_publish(interaction: discord.Interaction, api: Any) -> None:
             )
         await render_admin(interaction, api)
         await interaction.followup.send(
-            f"SYS://OPERATION_COMPLETE\nRegistro publicado na versão {version['version']}.", ephemeral=True
+            f"Publicação concluída\nRegistro publicado na versão {version['version']}.", ephemeral=True
         )
     except Exception as exc:
         await _send_interaction_error(interaction, error_text(exc))

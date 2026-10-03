@@ -81,8 +81,8 @@ from yuno_bot.platform.contracts import (
 MODULE_UI = ModuleUIAdapter(
     module_key="chest",
     contract_version=1,
-    name="Sistema de Bau",
-    description="Catalogo versionado, estoque e ledger imutavel.",
+    name="Sistema de Baú",
+    description="Controle de estoques, itens e histórico de movimentações.",
     icon="📦",
     order=35,
     minimum_plan="basico",

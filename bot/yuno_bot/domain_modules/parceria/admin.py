@@ -95,7 +95,7 @@ def build_admin_payload(instance: dict, draft: dict) -> dict[str, Any]:
     return dashboard.central_shell(payload(
         uk.panel(
             header=[
-                uk.nexus_title(
+                uk.nexus_admin_title(
                     "PARCERIAS",
                     path="MODULES / PARCERIAS",
                     subtitle="Cadastro, publicação e auditoria de parcerias.",
@@ -116,7 +116,7 @@ def build_admin_payload(instance: dict, draft: dict) -> dict[str, Any]:
                 ),
                 dashboard.route_navigation(MODULE_KEY, "overview"),
             ],
-            footer="NEXUS CORE // SESSION ACTIVE",
+            footer="Administração do servidor",
             accent_color=uk.NEXUS_VIOLET,
         )
     ))
@@ -162,10 +162,10 @@ async def open_system(interaction: discord.Interaction, api: Any) -> None:
         interaction,
         dashboard.central_shell(payload(
             uk.panel(
-                header=[uk.nexus_title("CONFIGURAÇÃO", path="MODULES / PARCERIAS / CONFIG", subtitle="Seletores alteram somente o rascunho deste servidor.")],
+                header=[uk.nexus_admin_title("CONFIGURAÇÃO", path="MODULES / PARCERIAS / CONFIG", subtitle="Seletores alteram somente o rascunho deste servidor.")],
                 blocks=blocks,
                 actions=actions,
-                footer="NEXUS CORE // SESSION ACTIVE",
+                footer="Administração do servidor",
                 accent_color=uk.NEXUS_VIOLET,
             )
         )),
@@ -218,7 +218,7 @@ async def review_publish(interaction: discord.Interaction, api: Any) -> None:
         interaction,
         dashboard.central_shell(payload(
             uk.panel(
-                header=[uk.nexus_title("REVISAR PUBLICAÇÃO", path="MODULES / PARCERIAS / PUBLISH", subtitle="Confirme os recursos que serão ativados.")],
+                header=[uk.nexus_admin_title("REVISAR PUBLICAÇÃO", path="MODULES / PARCERIAS / PUBLISH", subtitle="Confirme os recursos que serão ativados.")],
                 blocks=blocks,
                 actions=[
                     action_row(
@@ -227,7 +227,7 @@ async def review_publish(interaction: discord.Interaction, api: Any) -> None:
                     ),
                     dashboard.route_navigation(MODULE_KEY, "configuration"),
                 ],
-                footer="NEXUS CORE // SESSION ACTIVE",
+                footer="Administração do servidor",
                 accent_color=uk.NEXUS_VIOLET,
             )
         )),
@@ -246,18 +246,18 @@ async def confirm_publish(interaction: discord.Interaction, api: Any) -> None:
 async def diagnose(interaction: discord.Interaction, api: Any) -> None:
     checks = await api.diagnostics(interaction.guild_id, MODULE_KEY)
     lines = [f"**{str(item.get('status') or 'UNKNOWN').upper()}**\n{str(item.get('summary') or 'Sem resumo').strip()}" for item in checks]
-    blocks = [text_display("// CHECKS\n\n" + "\n\n".join(lines))] if lines else [text_display(uk.nexus_notice("DIAGNÓSTICO", "Nenhuma pendência retornada", "A Platform API não informou verificações adicionais."))]
+    blocks = [text_display("// CHECKS\n\n" + "\n\n".join(lines))] if lines else [text_display(uk.nexus_notice("DIAGNÓSTICO", "Nenhuma pendência retornada", "A serviço de gestão não informou verificações adicionais."))]
     await _replace(
         interaction,
         dashboard.central_shell(payload(
             uk.panel(
-                header=[uk.nexus_title("DIAGNÓSTICO", path="MODULES / PARCERIAS / DIAGNOSTICS", subtitle="Verificação do subsistema.")],
+                header=[uk.nexus_admin_title("DIAGNÓSTICO", path="MODULES / PARCERIAS / DIAGNOSTICS", subtitle="Verificação do subsistema.")],
                 blocks=blocks,
                 actions=[
                     action_row(button(custom_id=dashboard.route_custom_id(MODULE_KEY, "configuration"), label="CONFIGURAÇÃO", style=2)),
                     dashboard.route_navigation(MODULE_KEY, "diagnostic"),
                 ],
-                footer="SYS://YUNO/NEXUS • DIAGNOSTIC COMPLETE",
+                footer="Verificação concluída",
                 accent_color=uk.NEXUS_VIOLET,
             )
         )),

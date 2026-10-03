@@ -82,7 +82,7 @@ def test_meta_administrative_home_uses_the_shared_nexus_shell_and_empty_state() 
     )
 
     assert data["components"][0]["type"] == 12
-    assert "YUNO NEXUS // MODULES / METAS" in rendered
+    assert "## SISTEMA DE METAS" in rendered
     assert "// SEM CONFIGURAÇÃO" in rendered
     assert dashboard.route_custom_id("meta", "diagnostic") in str(data)
 

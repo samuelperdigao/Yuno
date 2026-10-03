@@ -116,6 +116,7 @@ CENTRAL_BANNER_URL = f"attachment://{CENTRAL_BANNER_FILENAME}"
 CENTRAL_BANNER_PATH = Path(__file__).with_name("assets") / CENTRAL_BANNER_FILENAME
 
 MAX_MODULE_OPTIONS = 25
+MODULES_PER_PAGE = 8
 
 BUTTON_PRIMARY = 1
 BUTTON_SECONDARY = 2
@@ -174,6 +175,9 @@ CENTRAL_ROUTES: dict[tuple[str, str], CentralRoute] = {
     ("chest", "overview"): CentralRoute(
         "chest", "overview", parent=("core", "modules")
     ),
+    ("chest", "chest"): CentralRoute(
+        "chest", "chest", parent=("chest", "overview")
+    ),
     ("chest", "inventory"): CentralRoute(
         "chest", "inventory", parent=("chest", "overview")
     ),
@@ -201,7 +205,7 @@ def module_navigation(current_module: str | None = None) -> dict[str, Any]:
         {
             "label": "Central",
             "value": CENTRAL_HOME_VALUE,
-            "description": "Voltar para a Home",
+            "description": "Voltar ao início",
             "default": False,
         }
     ]
@@ -346,11 +350,15 @@ def navigation_row(
                 style=BUTTON_SECONDARY,
             )
         )
-    return action_row(*buttons) if buttons else text_display(uk.subtext("NEXUS CORE // SESSION ACTIVE"))
+    for target, label in ((('core', 'modules'), 'Módulos'), (('core', 'home'), 'Início')):
+        custom_id = route_custom_id(*target)
+        if not any(item['custom_id'] == custom_id for item in buttons):
+            buttons.append(button(custom_id=custom_id, label=label, style=BUTTON_SECONDARY))
+    return action_row(*buttons)
 
 
 def route_navigation(module_key: str, route: str) -> dict[str, Any]:
-    """Renderiza o rodapé a partir da declaração da tela."""
+    """Renderiza o rodapé e mantém uma saída mesmo para telas sem declaração."""
 
     definition = CENTRAL_ROUTES.get((module_key, route))
     if definition is None:
@@ -467,7 +475,7 @@ def _module_row(
         footnotes.append(f"Requer o plano {plano.capitalize()}")
     if footnotes:
         lines.append(uk.subtext(" · ".join(footnotes)))
-    label = status.action if status is not None else "Abrir configuração"
+    label = "Abrir"
     highlight = bool(status is not None and status.primary and license_active)
     return section(
         text_display(uk.clip("\n".join(lines))),
@@ -501,7 +509,7 @@ def _status_summary(
     )
     error_value = "Nenhum erro crítico" if errors == 0 else errors
     return uk.nexus_metrics(
-        ("CORE", "ONLINE"),
+        ("SISTEMA", "Disponível"),
         ("MÓDULOS", total),
         ("ATIVOS", active),
         ("PENDÊNCIAS", pending),
@@ -520,7 +528,7 @@ def build_payload(
 
     del config, page
     specs = dashboard_specs()
-    header = [uk.nexus_title("CENTRAL DE COMANDO", path="CORE", subtitle="Interface administrativa do servidor")]
+    header = [uk.nexus_admin_title("CENTRAL DE COMANDO", path="CORE", subtitle="Interface administrativa do servidor")]
     if license_active:
         accent = uk.NEXUS_VIOLET
     else:
@@ -544,7 +552,7 @@ def build_payload(
         if control_states
         else {}
     )
-    summary = _status_summary(statuses, total_available=len(specs)) if control_states is not None else uk.nexus_metrics(("CORE", "ONLINE"), ("MÓDULOS", len(specs)))
+    summary = _status_summary(statuses, total_available=len(specs)) if control_states is not None else uk.nexus_metrics(("SISTEMA", "Disponível"), ("MÓDULOS", len(specs)))
     blocks = [text_display("// STATUS GLOBAL\n\n" + summary)]
     for key, status in statuses.items():
         if status.state in (uk.State.PENDING, uk.State.RUNNING):
@@ -581,7 +589,7 @@ def build_payload(
             button(custom_id=route_custom_id("core", "system"), label="SISTEMA", style=BUTTON_SECONDARY),
         )
     ]
-    footer = "SYS://YUNO/NEXUS • OPERATIONAL"
+    footer = "Administração do servidor"
 
     return central_shell(payload(
         uk.panel(
@@ -602,31 +610,24 @@ def build_modules_payload(
     control_states: dict[str, dict[str, Any]] | None = None,
     license_active: bool = True,
 ) -> dict[str, Any]:
-    """Tela escalável de módulos, com no máximo 25 opções por select."""
+    """Catálogo vertical paginado, com folga para o limite de 40 componentes."""
 
     del config
     specs = dashboard_specs()
-    if selected_module is None and page == 0 and specs:
-        selected_module = next(iter(specs))
-    select_row, page, total_pages = module_select(page=page, selected_module=selected_module)
+    total_pages = max(1, (len(specs) + MODULES_PER_PAGE - 1) // MODULES_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    visible = list(specs.values())[page * MODULES_PER_PAGE:(page + 1) * MODULES_PER_PAGE]
     statuses = (
         {key: module_status(control_states.get(key)) for key in specs}
         if control_states
         else {}
     )
-    blocks: list[Any] = [select_row]
-    if selected_module in specs:
-        spec = specs[selected_module]
-        status = statuses.get(selected_module)
-        summary = [uk.heading(spec.nome, level=2)]
-        if spec.descricao:
-            summary.append(str(spec.descricao))
-        if status:
-            summary.append(uk.nexus_state("STATUS", status.label, state=status.state))
-            summary.append(uk.subtext(status.hint))
-        blocks.append(section(text_display(uk.clip("\n".join(summary))), accessory=button(custom_id=central_custom_id(selected_module, CENTRAL_OPEN_ACTION), label="Abrir", style=BUTTON_PRIMARY if license_active else BUTTON_SECONDARY, disabled=not license_active)))
-    else:
-        blocks.append(text_display(uk.notice("Selecione um módulo para ver o resumo e abrir sua administração.")))
+    blocks: list[Any] = [
+        _module_row(spec, statuses.get(spec.key), license_active=license_active)
+        for spec in visible
+    ]
+    if not blocks:
+        blocks.append(text_display("Nenhum módulo disponível neste servidor."))
     actions: list[dict[str, Any]] = [route_navigation("core", "modules")]
     if total_pages > 1:
         previous = max(0, page - 1)
@@ -637,10 +638,10 @@ def build_modules_payload(
         ))
     return central_shell(payload(
         uk.panel(
-            header=[uk.nexus_title("MÓDULOS", path="CORE / MODULES", subtitle="Subsistemas conectados ao Nexus")],
+            header=[uk.nexus_admin_title("MÓDULOS", path="CORE / MODULES", subtitle="Subsistemas conectados ao Nexus")],
             blocks=blocks,
             actions=actions,
-            footer=f"SYS://YUNO/NEXUS • GRUPO {page + 1}/{total_pages}" if total_pages > 1 else "SYS://YUNO/NEXUS • SESSION ACTIVE",
+            footer=f"Página {page + 1}/{total_pages}" if total_pages > 1 else "Administração do servidor",
             accent_color=uk.NEXUS_VIOLET if license_active else uk.DANGER,
         )
     ))
@@ -651,29 +652,37 @@ def build_system_payload(config: dict) -> dict[str, Any]:
 
     dashboard_ref = (config.get("settings") or {}).get("dashboard") or {}
     channel = dashboard_ref.get("panel_channel_id")
-    message = "READY" if channel and dashboard_ref.get("panel_message_id") else "NOT CONFIGURED"
+    message = "Configurada" if channel and dashboard_ref.get("panel_message_id") else "Não configurada"
     registry = len(dashboard_specs())
     return central_shell(payload(
         uk.panel(
-            header=[uk.nexus_title("SISTEMA", path="CORE / SYSTEM", subtitle="Estado do núcleo e serviços")],
+            header=[uk.nexus_admin_title("SISTEMA", path="CORE / SYSTEM", subtitle="Estado do núcleo e serviços")],
             blocks=[
                 text_display(uk.nexus_metrics(
-                    ("MODULE_REGISTRY", f"{registry:02d}/{registry:02d}"),
-                    ("CENTRAL_MESSAGE", message),
-                    ("CENTRAL_CHANNEL", "CONFIGURED" if channel else "NOT CONFIGURED"),
+                    ("MÓDULOS DISPONÍVEIS", f"{registry:02d}/{registry:02d}"),
+                    ("MENSAGEM DA CENTRAL", message),
+                    ("CANAL DA CENTRAL", "Configurado" if channel else "Não configurado"),
                 )),
                 text_display(uk.nexus_notice(
                     "ESTADO",
-                    "SYS://YUNO/NEXUS",
+                    "Central de gestão",
                     "Configuração persistida da Central e registro de módulos.",
                 )),
                 text_display(f"Canal da Central: <#{channel}>" if channel else "Canal da Central: ainda não definido"),
             ],
             actions=[route_navigation("core", "system")],
-            footer="SYS://YUNO/NEXUS • SESSION ACTIVE",
+            footer="Administração do servidor",
             accent_color=uk.NEXUS_VIOLET,
         )
     ))
+
+
+def diagnostic_status(value: Any) -> str:
+    return {
+        'ok': 'Em ordem', 'success': 'Em ordem', 'healthy': 'Em ordem',
+        'warning': 'Atenção', 'warn': 'Atenção', 'error': 'Erro',
+        'failed': 'Falha', 'blocked': 'Bloqueado', 'pending': 'Pendente',
+    }.get(str(value or '').lower(), 'Não informado')
 
 
 def build_module_diagnostic_payload(
@@ -682,16 +691,16 @@ def build_module_diagnostic_payload(
     rows = list(checks or [])
     if rows:
         content = "\n\n".join(
-            f"**{str(item.get('status') or 'UNKNOWN').upper()}** · "
+            f"**{diagnostic_status(item.get('status'))}** · "
             f"{str(item.get('summary') or 'Sem resumo').strip()}"
             + (f"\n{str(item.get('detail')).strip()}" if item.get("detail") else "")
             for item in rows
         )
     else:
-        content = "Nenhum diagnóstico retornado pela Platform API."
+        content = "Nenhum diagnóstico retornado pelo serviço de gestão."
     return central_shell(payload(
         uk.panel(
-            header=[uk.nexus_title("DIAGNÓSTICO", path=f"MODULES / {module_key}", subtitle="Verificação do subsistema")],
+            header=[uk.nexus_admin_title("DIAGNÓSTICO", path=f"MODULES / {module_key}", subtitle="Verificação do subsistema")],
             blocks=[text_display(content)],
             actions=[
                 action_row(button(
@@ -701,7 +710,7 @@ def build_module_diagnostic_payload(
                 )),
                 route_navigation(module_key, "diagnostic"),
             ],
-            footer="SYS://YUNO/NEXUS • DIAGNOSTIC COMPLETE",
+            footer="Verificação concluída",
             accent_color=uk.NEXUS_VIOLET,
         )
     ))
@@ -714,7 +723,7 @@ def build_invalid_route_payload(message: str = "Esta rota da Central não é mai
         uk.panel(
             header=[uk.breadcrumb("YUNO", "Estado"), uk.heading("Rota inválida")],
             blocks=[text_display(uk.notice(message, kind="warning"))],
-            actions=[action_row(button(custom_id=route_custom_id("core", "home"), label="Voltar à Home", style=BUTTON_SECONDARY))],
+            actions=[action_row(button(custom_id=route_custom_id("core", "home"), label="Voltar ao início", style=BUTTON_SECONDARY))],
             accent_color=uk.WARNING,
         )
     ))
@@ -1153,7 +1162,7 @@ async def _dispatch_visual_route(
             checks = [{
                 "status": "ERROR",
                 "summary": "Diagnóstico indisponível.",
-                "detail": "A Platform API não respondeu à verificação.",
+                "detail": "O serviço de gestão não respondeu à verificação.",
             }]
         await _edit_v2(
             interaction.client,
@@ -1233,7 +1242,7 @@ async def _render_invalid_route(interaction: discord.Interaction) -> None:
     channel_id = interaction.channel_id
     message_id = getattr(interaction.message, "id", None)
     if channel_id is None or message_id is None:
-        await _deny(interaction, "Rota inválida. Volte para a Home da Central.")
+        await _deny(interaction, "Rota inválida. Volte para a página inicial da Central.")
         return
     await _edit_v2(
         interaction.client,
@@ -1261,7 +1270,7 @@ async def _dispatch_modules_group(interaction: discord.Interaction, page: int) -
         return
     total_pages = max(
         1,
-        (len(dashboard_specs()) + MAX_MODULE_OPTIONS - 1) // MAX_MODULE_OPTIONS,
+        (len(dashboard_specs()) + MODULES_PER_PAGE - 1) // MODULES_PER_PAGE,
     )
     if page >= total_pages:
         await _render_invalid_route(interaction)

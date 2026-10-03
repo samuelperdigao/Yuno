@@ -14,7 +14,7 @@ from yuno_bot.platform.components_v2 import action_row, button, edit_message, pa
 from yuno_bot.platform.contracts import ActorContext, RetryableJobError
 
 
-NEXUS_FOOTER = "NEXUS CORE // SESSION ACTIVE"
+NEXUS_FOOTER = "Administração do servidor"
 
 # Ciclo de vida do módulo traduzido para os estados do kit: mesma cor e mesmo
 # emoji que Registro, Metas e Tickets usam para dizer a mesma coisa.
@@ -186,7 +186,7 @@ def _overview_payload(
         )
     return dashboard.central_shell(payload(
         uk.panel(
-            header=[uk.nexus_title(
+            header=[uk.nexus_admin_title(
                 "SISTEMA DE TAGS",
                 path="MODULES / TAGS",
                 subtitle="Tags por cargo com prioridade baseada na hierarquia ao vivo.",
@@ -254,7 +254,7 @@ def _detail_payload(
     ])
     return dashboard.central_shell(payload(
         uk.panel(
-            header=[uk.nexus_title(
+            header=[uk.nexus_admin_title(
                 "CONFIGURAÇÃO",
                 path="MODULES / TAGS / CONFIG",
                 subtitle="Os vínculos ficam em rascunho até a publicação.",
@@ -352,7 +352,7 @@ async def _render_advanced(interaction: discord.Interaction, api: Any) -> None:
         interaction,
         dashboard.central_shell(payload(
             uk.panel(
-                header=[uk.nexus_title(
+                header=[uk.nexus_admin_title(
                     "OPERAÇÕES",
                     path="MODULES / TAGS / COMMANDS",
                     subtitle="Sincronização, ciclo de vida e diagnóstico do módulo.",
@@ -795,7 +795,7 @@ async def cleanup(interaction: discord.Interaction, api: Any) -> None:
         interaction,
         dashboard.central_shell(payload(
             uk.panel(
-                header=[uk.nexus_title(
+                header=[uk.nexus_admin_title(
                     "CONFIRMAR LIMPEZA",
                     path="MODULES / TAGS / CLEANUP",
                     subtitle="Esta operação é aplicada a todos os membros registrados.",
@@ -868,7 +868,7 @@ def _diagnostics_payload(data: dict) -> dict:
         )))
     return dashboard.central_shell(payload(
         uk.panel(
-            header=[uk.nexus_title(
+            header=[uk.nexus_admin_title(
                 "DIAGNÓSTICO",
                 path="MODULES / TAGS / DIAGNOSTICS",
                 subtitle="Dados atuais do runtime de Tags.",
@@ -884,7 +884,7 @@ def _diagnostics_payload(data: dict) -> dict:
                     button(custom_id=dashboard.central_custom_id("tags", "back"), label="‹ VOLTAR", style=2),
                 ),
             ],
-            footer="SYS://MODULE_CHECK_COMPLETE\n" + NEXUS_FOOTER,
+            footer="Verificação concluída\n" + NEXUS_FOOTER,
             accent_color=uk.NEXUS_VIOLET,
         )
     ))

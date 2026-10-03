@@ -28,13 +28,9 @@ def test_parceria_entra_na_central_pelo_comando_yuno_configurar() -> None:
     data = dashboard.build_modules_payload({})
 
     assert "parceria" in specs
-    options = next(
-        item["components"][0]["options"]
-        for item in next(item for item in data["components"] if item["type"] == 17)["components"]
-        if item["type"] == 1 and item["components"][0]["type"] == 3
-    )
-    parceria = next(item for item in options if item["value"] == "parceria")
-    assert parceria["default"] is False
+    parceria = _rows(data)["parceria"]
+    assert parceria["accessory"]["label"] == "Abrir"
+    assert parceria["accessory"]["custom_id"] == dashboard.central_custom_id("parceria", "open")
 
 
 def test_parceria_declares_admin_page_operational_panel_jobs_and_deliveries() -> None:
@@ -88,7 +84,7 @@ def test_parceria_admin_payload_uses_components_v2_header_components() -> None:
     container = next(item for item in data["components"] if item["type"] == 17)
     header = container["components"]
     assert header[0]["type"] == 10
-    assert "YUNO NEXUS // MODULES / PARCERIAS" in header[0]["content"]
+    assert header[0]["content"].startswith("## PARCERIAS")
     assert "PARCERIAS" in header[0]["content"]
     assert dashboard.route_custom_id("parceria", "configuration") in str(data)
 

@@ -123,7 +123,7 @@ def test_chest_modal_custom_ids_use_the_modern_router():
 
 def test_chest_is_exposed_by_nexus_with_grouped_admin_actions():
     specs = dashboard.dashboard_specs()
-    assert specs["chest"].nome == "Sistema de Bau"
+    assert specs["chest"].nome == "Sistema de Baú"
     actions = {item.key for item in MODULE_UI.admin_actions}
     assert {
         "inventory",

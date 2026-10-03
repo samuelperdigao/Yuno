@@ -433,7 +433,7 @@ def test_administrative_overview_uses_the_nexus_shell_without_decorative_emojis(
     rendered = "\n".join(
         item["content"] for item in _children(data) if item.get("type") == 10
     )
-    assert "YUNO NEXUS // MODULES / FARM TICKETS" in rendered
+    assert "## TICKETS DE FARM" in rendered
     assert "// CONFIGURAÇÃO" in rendered
     assert not any(emoji in rendered for emoji in ("🎫", "⚙️", "📌", "🧭"))
     assert ui.component_count(data) <= 40
